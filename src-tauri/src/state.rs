@@ -4,7 +4,6 @@ use std::sync::RwLock;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppState {
     NeedsSetup,
-    Initializing,
     Ready,
     Recording,
     Processing,
@@ -14,7 +13,6 @@ impl AppState {
     pub fn as_str(&self) -> &'static str {
         match self {
             AppState::NeedsSetup => "needs-setup",
-            AppState::Initializing => "initializing",
             AppState::Ready => "ready",
             AppState::Recording => "recording",
             AppState::Processing => "processing",
@@ -23,10 +21,6 @@ impl AppState {
 
     pub fn can_record(&self) -> bool {
         matches!(self, AppState::Ready)
-    }
-
-    pub fn is_busy(&self) -> bool {
-        matches!(self, AppState::Recording | AppState::Processing)
     }
 }
 

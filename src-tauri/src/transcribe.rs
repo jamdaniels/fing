@@ -1,46 +1,12 @@
 // Whisper transcription wrapper
 
 use crate::engine::{TranscribeError, TranscriptionEngine};
-use serde::Serialize;
 use std::path::Path;
 use std::sync::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
-pub enum InferenceBackend {
-    Metal,
-    Vulkan,
-    Cpu,
-}
-
-impl InferenceBackend {
-    pub fn detect() -> Self {
-        #[cfg(target_os = "macos")]
-        {
-            InferenceBackend::Metal
-        }
-        #[cfg(target_os = "windows")]
-        {
-            InferenceBackend::Vulkan
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        {
-            InferenceBackend::Cpu
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            InferenceBackend::Metal => "Metal",
-            InferenceBackend::Vulkan => "Vulkan",
-            InferenceBackend::Cpu => "CPU",
-        }
-    }
-}
-
 pub struct Transcriber {
     ctx: Mutex<WhisperContext>,
-    backend: InferenceBackend,
 }
 
 impl Transcriber {
@@ -56,12 +22,7 @@ impl Transcriber {
 
         Ok(Self {
             ctx: Mutex::new(ctx),
-            backend: InferenceBackend::detect(),
         })
-    }
-
-    pub fn backend(&self) -> InferenceBackend {
-        self.backend
     }
 }
 
@@ -99,10 +60,6 @@ impl TranscriptionEngine for Transcriber {
         }
 
         Ok(text.trim().to_string())
-    }
-
-    fn backend_name(&self) -> &str {
-        self.backend.as_str()
     }
 }
 

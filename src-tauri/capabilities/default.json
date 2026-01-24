@@ -3,9 +3,5 @@
   "identifier": "default",
   "description": "Default capabilities for the Fing app",
   "windows": ["main", "indicator"],
-  "permissions": [
-    "core:default",
-    "shell:allow-open",
-    "dialog:default"
-  ]
+  "permissions": ["core:default", "shell:allow-open", "dialog:default"]
 }

@@ -8,7 +8,6 @@ use crate::platform;
 #[derive(Debug, Clone, Serialize)]
 pub enum PasteResult {
     Success,
-    ClipboardOnlySecureInput,
     ClipboardOnlyElevated,
     ClipboardOnlySent,
 }
@@ -16,19 +15,6 @@ pub enum PasteResult {
 impl PasteResult {
     pub fn should_notify(&self) -> bool {
         !matches!(self, PasteResult::Success)
-    }
-
-    pub fn notification_message(&self) -> &'static str {
-        match self {
-            PasteResult::Success => "",
-            PasteResult::ClipboardOnlySecureInput => {
-                "Text copied to clipboard (secure input field detected)"
-            }
-            PasteResult::ClipboardOnlyElevated => {
-                "Text copied to clipboard (elevated app detected)"
-            }
-            PasteResult::ClipboardOnlySent => "Text copied to clipboard (paste may have failed)",
-        }
     }
 }
 

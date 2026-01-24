@@ -1,21 +1,24 @@
+import { Check, CheckCircle, ChevronRight, Mic, Shield, Upload } from "lucide";
+import { createIcon } from "../lib/icons";
 import {
-  startModelDownload,
-  getDownloadProgress,
-  selectModelFile,
-  requestPermissions,
-  getAudioDevices,
-  testMicrophone,
   completeSetup,
-  setAudioDevice,
+  getAudioDevices,
+  getDownloadProgress,
+  getMicTestLevel,
+  requestAccessibilityPermission,
+  requestMicrophonePermission,
+  requestPermissions,
+  selectModelFile,
+  startMicTest,
+  startModelDownload,
+  stopMicTest,
 } from "../lib/ipc";
 import type {
-  DownloadProgress,
-  PermissionStatus,
   AudioDevice,
+  DownloadProgress,
   MicrophoneTest,
+  PermissionStatus,
 } from "../lib/types";
-import { createIcon } from "../lib/icons";
-import { Check, ChevronRight, Upload, Mic, Shield, CheckCircle } from "lucide";
 
 type OnboardingStep = 1 | 2 | 3 | 4 | 5;
 
@@ -48,15 +51,74 @@ let micTestInterval: number | null = null;
 // Use shared createIcon from lib/icons.ts
 
 function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
+  if (bytes === 0) {
+    return "0 B";
+  }
   const k = 1024;
   const sizes = ["B", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+  return `${(bytes / k ** i).toFixed(1)} ${sizes[i]}`;
+}
+
+function renderDownloadButton(
+  isDownloading: boolean,
+  isComplete: boolean,
+  isFailed: boolean,
+  statusText: string,
+  progress: DownloadProgress | null
+): string {
+  if (isDownloading || isComplete) {
+    return `
+      <div class="download-progress-container">
+        <div class="progress-bar">
+          <div class="progress-bar-fill" style="width: ${progress?.percentage ?? 0}%"></div>
+        </div>
+        <div class="download-status ${isFailed ? "error" : ""}">${statusText}</div>
+        ${isDownloading ? `<button class="btn btn-secondary" id="cancel-download-btn">Cancel</button>` : ""}
+      </div>
+    `;
+  }
+  if (isFailed) {
+    return `
+      <div class="download-progress-container">
+        <div class="download-status error">${statusText}</div>
+        <button class="btn btn-primary" id="retry-download-btn">Retry Download</button>
+      </div>
+    `;
+  }
+  return `
+    <button class="btn btn-primary btn-lg" id="start-download-btn">
+      Download Model
+    </button>
+  `;
+}
+
+function renderMicPermissionStatus(status: string | undefined): string {
+  if (status === "granted") {
+    return `<div class="permission-status granted">Granted</div>`;
+  }
+  if (status === "prompt") {
+    return `<button class="btn btn-outline btn-sm" id="grant-microphone-btn">Allow</button>`;
+  }
+  return `<button class="btn btn-outline btn-sm" id="grant-microphone-btn">Grant</button>`;
+}
+
+function renderAccessibilityPermissionStatus(
+  status: string | undefined
+): string {
+  if (status === "granted") {
+    return `<div class="permission-status granted">Granted</div>`;
+  }
+  if (status === "not-applicable") {
+    return `<div class="permission-status">N/A</div>`;
+  }
+  return `<button class="btn btn-outline btn-sm" id="grant-accessibility-btn">Grant</button>`;
 }
 
 function render(): void {
-  if (!container) return;
+  if (!container) {
+    return;
+  }
 
   switch (state.step) {
     case 1:
@@ -74,11 +136,15 @@ function render(): void {
     case 5:
       renderCompletion();
       break;
+    default:
+      break;
   }
 }
 
 function renderWelcome(): void {
-  if (!container) return;
+  if (!container) {
+    return;
+  }
 
   container.innerHTML = `
     <div class="onboarding">
@@ -111,15 +177,22 @@ function renderWelcome(): void {
     </div>
   `;
 
-  document.getElementById("skip-btn")?.addEventListener("click", handleSkipSetup);
-  document.getElementById("get-started-btn")?.addEventListener("click", () => goToStep(2));
+  document
+    .getElementById("skip-btn")
+    ?.addEventListener("click", handleSkipSetup);
+  document
+    .getElementById("get-started-btn")
+    ?.addEventListener("click", () => goToStep(2));
 }
 
 function renderDownloadModel(): void {
-  if (!container) return;
+  if (!container) {
+    return;
+  }
 
   const progress = state.downloadProgress;
-  const isDownloading = progress?.status === "downloading" || progress?.status === "verifying";
+  const isDownloading =
+    progress?.status === "downloading" || progress?.status === "verifying";
   const isComplete = progress?.status === "complete";
   const isFailed = progress?.status === "failed";
 
@@ -152,33 +225,23 @@ function renderDownloadModel(): void {
         <h1 class="onboarding-title">Download Speech Model</h1>
         <p class="onboarding-desc">Fing needs a speech recognition model (~75 MB, one-time download)</p>
 
-        ${isDownloading || isComplete ? `
-          <div class="download-progress-container">
-            <div class="progress-bar">
-              <div class="progress-bar-fill" style="width: ${progress?.percentage ?? 0}%"></div>
-            </div>
-            <div class="download-status ${isFailed ? "error" : ""}">${statusText}</div>
-            ${isDownloading ? `<button class="btn btn-secondary" id="cancel-download-btn">Cancel</button>` : ""}
-          </div>
-        ` : isFailed ? `
-          <div class="download-progress-container">
-            <div class="download-status error">${statusText}</div>
-            <button class="btn btn-primary" id="retry-download-btn">Retry Download</button>
-          </div>
-        ` : `
-          <button class="btn btn-primary btn-lg" id="start-download-btn">
-            Download Model
-          </button>
-        `}
+        ${renderDownloadButton(isDownloading, isComplete, isFailed, statusText, progress)}
 
-        ${isComplete ? `
+        ${
+          isComplete
+            ? `
           <button class="btn btn-primary btn-lg" id="continue-btn" style="margin-top: 16px;">
             Continue
             ${createIcon(ChevronRight)}
           </button>
-        ` : ""}
+        `
+            : ""
+        }
 
-        ${!isDownloading && !isComplete ? `
+        ${
+          isDownloading || isComplete
+            ? ""
+            : `
           <div class="onboarding-divider">
             <span>OR</span>
           </div>
@@ -186,21 +249,36 @@ function renderDownloadModel(): void {
             ${createIcon(Upload)}
             Already have the model file? Choose File...
           </button>
-        ` : ""}
+        `
+        }
       </div>
     </div>
   `;
 
-  document.getElementById("skip-btn")?.addEventListener("click", handleSkipSetup);
-  document.getElementById("start-download-btn")?.addEventListener("click", handleStartDownload);
-  document.getElementById("retry-download-btn")?.addEventListener("click", handleStartDownload);
-  document.getElementById("cancel-download-btn")?.addEventListener("click", handleCancelDownload);
-  document.getElementById("select-file-btn")?.addEventListener("click", handleSelectFile);
-  document.getElementById("continue-btn")?.addEventListener("click", () => goToStep(3));
+  document
+    .getElementById("skip-btn")
+    ?.addEventListener("click", handleSkipSetup);
+  document
+    .getElementById("start-download-btn")
+    ?.addEventListener("click", handleStartDownload);
+  document
+    .getElementById("retry-download-btn")
+    ?.addEventListener("click", handleStartDownload);
+  document
+    .getElementById("cancel-download-btn")
+    ?.addEventListener("click", handleCancelDownload);
+  document
+    .getElementById("select-file-btn")
+    ?.addEventListener("click", handleSelectFile);
+  document
+    .getElementById("continue-btn")
+    ?.addEventListener("click", () => goToStep(3));
 }
 
 function renderPermissions(): void {
-  if (!container) return;
+  if (!container) {
+    return;
+  }
 
   const perms = state.permissions;
   const isMac = navigator.userAgent.includes("Mac");
@@ -228,9 +306,7 @@ function renderPermissions(): void {
                 <div class="permission-desc">Required to capture your voice</div>
               </div>
             </div>
-            <div class="permission-status ${perms?.microphone === "granted" ? "granted" : perms?.microphone === "denied" ? "denied" : ""}">
-              ${perms?.microphone === "granted" ? "Granted" : perms?.microphone === "denied" ? "Denied" : "Unknown"}
-            </div>
+            ${renderMicPermissionStatus(perms?.microphone)}
           </div>
 
           <div class="permission-row">
@@ -241,13 +317,7 @@ function renderPermissions(): void {
                 <div class="permission-desc">Required for global hotkey and text pasting</div>
               </div>
             </div>
-            ${perms?.accessibility === "granted" ? `
-              <div class="permission-status granted">Granted</div>
-            ` : perms?.accessibility === "not-applicable" ? `
-              <div class="permission-status">N/A</div>
-            ` : `
-              <button class="btn btn-outline btn-sm" id="grant-accessibility-btn">Grant</button>
-            `}
+            ${renderAccessibilityPermissionStatus(perms?.accessibility)}
           </div>
         </div>
 
@@ -259,13 +329,24 @@ function renderPermissions(): void {
     </div>
   `;
 
-  document.getElementById("skip-btn")?.addEventListener("click", handleSkipSetup);
-  document.getElementById("grant-accessibility-btn")?.addEventListener("click", handleRequestPermissions);
-  document.getElementById("continue-btn")?.addEventListener("click", () => goToStep(4));
+  document
+    .getElementById("skip-btn")
+    ?.addEventListener("click", handleSkipSetup);
+  document
+    .getElementById("grant-microphone-btn")
+    ?.addEventListener("click", handleGrantMicrophone);
+  document
+    .getElementById("grant-accessibility-btn")
+    ?.addEventListener("click", handleGrantAccessibility);
+  document
+    .getElementById("continue-btn")
+    ?.addEventListener("click", () => goToStep(4));
 }
 
 function renderTestMicrophone(): void {
-  if (!container) return;
+  if (!container) {
+    return;
+  }
 
   const micTest = state.micTest;
   const level = micTest?.peakLevel ?? 0;
@@ -284,11 +365,15 @@ function renderTestMicrophone(): void {
           <div class="mic-select-row">
             <label for="mic-select">Microphone:</label>
             <select id="mic-select" class="btn btn-outline">
-              ${state.audioDevices.map(d => `
+              ${state.audioDevices
+                .map(
+                  (d) => `
                 <option value="${d.id}" ${d.id === state.selectedDeviceId || (state.selectedDeviceId === null && d.isDefault) ? "selected" : ""}>
                   ${d.name}${d.isDefault ? " (Default)" : ""}
                 </option>
-              `).join("")}
+              `
+                )
+                .join("")}
             </select>
           </div>
 
@@ -300,9 +385,10 @@ function renderTestMicrophone(): void {
           </div>
 
           <div class="mic-test-prompt ${state.audioDetected ? "success" : ""}">
-            ${state.audioDetected
-              ? `${createIcon(CheckCircle)} Audio detected! Your microphone is working.`
-              : `${createIcon(Mic)} Say something to test...`
+            ${
+              state.audioDetected
+                ? `${createIcon(CheckCircle)} Audio detected! Your microphone is working.`
+                : `${createIcon(Mic)} Say something to test...`
             }
           </div>
         </div>
@@ -315,13 +401,21 @@ function renderTestMicrophone(): void {
     </div>
   `;
 
-  document.getElementById("skip-btn")?.addEventListener("click", handleSkipSetup);
-  document.getElementById("mic-select")?.addEventListener("change", handleMicChange);
-  document.getElementById("finish-btn")?.addEventListener("click", () => goToStep(5));
+  document
+    .getElementById("skip-btn")
+    ?.addEventListener("click", handleSkipSetup);
+  document
+    .getElementById("mic-select")
+    ?.addEventListener("change", handleMicChange);
+  document
+    .getElementById("finish-btn")
+    ?.addEventListener("click", () => goToStep(5));
 }
 
 function renderCompletion(): void {
-  if (!container) return;
+  if (!container) {
+    return;
+  }
 
   container.innerHTML = `
     <div class="onboarding">
@@ -349,11 +443,13 @@ function renderCompletion(): void {
     </div>
   `;
 
-  document.getElementById("start-btn")?.addEventListener("click", handleComplete);
+  document
+    .getElementById("start-btn")
+    ?.addEventListener("click", handleComplete);
 }
 
-function goToStep(step: OnboardingStep): void {
-  stopPolling();
+async function goToStep(step: OnboardingStep): Promise<void> {
+  await stopPolling();
   state.step = step;
 
   if (step === 3) {
@@ -361,20 +457,21 @@ function goToStep(step: OnboardingStep): void {
   }
 
   if (step === 4) {
-    loadAudioDevices();
-    startMicTest();
+    await loadAudioDevices();
+    await initMicTest();
+    startMicTestPolling();
   }
 
   render();
 }
 
 async function handleSkipSetup(): Promise<void> {
-  stopPolling();
+  await stopPolling();
   await completeSetup();
   window.dispatchEvent(new CustomEvent("setup-complete"));
 }
 
-async function handleStartDownload(): Promise<void> {
+function handleStartDownload(): void {
   state.downloadError = null;
   state.downloadProgress = {
     bytesDownloaded: 0,
@@ -417,9 +514,29 @@ async function handleRequestPermissions(): Promise<void> {
   render();
 }
 
+async function handleGrantAccessibility(): Promise<void> {
+  // This opens System Preferences
+  await requestAccessibilityPermission();
+  // Wait a moment then refresh status
+  setTimeout(async () => {
+    state.permissions = await requestPermissions();
+    render();
+  }, 1000);
+}
+
+async function handleGrantMicrophone(): Promise<void> {
+  // This opens System Preferences to Microphone
+  await requestMicrophonePermission();
+  // Wait a moment then refresh status
+  setTimeout(async () => {
+    state.permissions = await requestPermissions();
+    render();
+  }, 1000);
+}
+
 async function loadAudioDevices(): Promise<void> {
   state.audioDevices = await getAudioDevices();
-  const defaultDevice = state.audioDevices.find(d => d.isDefault);
+  const defaultDevice = state.audioDevices.find((d) => d.isDefault);
   if (defaultDevice && !state.selectedDeviceId) {
     state.selectedDeviceId = defaultDevice.id;
   }
@@ -429,9 +546,16 @@ async function loadAudioDevices(): Promise<void> {
 async function handleMicChange(e: Event): Promise<void> {
   const select = e.target as HTMLSelectElement;
   state.selectedDeviceId = select.value;
-  await setAudioDevice(state.selectedDeviceId);
   state.audioDetected = false;
-  render();
+
+  // Restart mic test with new device
+  try {
+    await stopMicTest();
+    await startMicTest(state.selectedDeviceId);
+    console.log("[onboarding] Switched to device:", state.selectedDeviceId);
+  } catch (err) {
+    console.error("Failed to switch mic:", err);
+  }
 }
 
 function startDownloadPolling(): void {
@@ -442,7 +566,10 @@ function startDownloadPolling(): void {
     state.downloadProgress = progress;
 
     if (progress.status === "complete" || progress.status === "failed") {
-      console.log("[onboarding] Download finished with status:", progress.status);
+      console.log(
+        "[onboarding] Download finished with status:",
+        progress.status
+      );
       stopPolling();
     }
 
@@ -450,20 +577,55 @@ function startDownloadPolling(): void {
   }, 500);
 }
 
-function startMicTest(): void {
+async function initMicTest(): Promise<void> {
+  try {
+    await startMicTest(state.selectedDeviceId);
+    console.log("[onboarding] Mic test started");
+  } catch (e) {
+    console.error("Failed to start mic test:", e);
+  }
+}
+
+function startMicTestPolling(): void {
   micTestInterval = window.setInterval(async () => {
-    const test = await testMicrophone();
-    state.micTest = test;
+    try {
+      const test = await getMicTestLevel();
+      state.micTest = test;
 
-    if (test.isReceivingAudio && test.peakLevel > 0.1) {
-      state.audioDetected = true;
+      if (test.isReceivingAudio && test.peakLevel > 0.1) {
+        state.audioDetected = true;
+      }
+
+      // Update only the audio level elements, not the whole page
+      updateAudioLevel();
+    } catch (e) {
+      console.error("Mic test error:", e);
     }
-
-    render();
   }, 100);
 }
 
-function stopPolling(): void {
+function updateAudioLevel(): void {
+  const level = state.micTest?.peakLevel ?? 0;
+  const levelPercent = Math.min(level * 100, 100);
+
+  const levelFill = document.querySelector(".audio-level-fill") as HTMLElement;
+  if (levelFill) {
+    levelFill.style.width = `${levelPercent}%`;
+    if (levelPercent > 10) {
+      levelFill.classList.add("active");
+    } else {
+      levelFill.classList.remove("active");
+    }
+  }
+
+  const prompt = document.querySelector(".mic-test-prompt") as HTMLElement;
+  if (prompt && state.audioDetected) {
+    prompt.classList.add("success");
+    prompt.innerHTML = `${createIcon(CheckCircle)} Audio detected! Your microphone is working.`;
+  }
+}
+
+async function stopPolling(): Promise<void> {
   if (downloadPollInterval) {
     clearInterval(downloadPollInterval);
     downloadPollInterval = null;
@@ -471,11 +633,17 @@ function stopPolling(): void {
   if (micTestInterval) {
     clearInterval(micTestInterval);
     micTestInterval = null;
+    // Stop the backend mic test
+    try {
+      await stopMicTest();
+    } catch (e) {
+      console.error("Error stopping mic test:", e);
+    }
   }
 }
 
 async function handleComplete(): Promise<void> {
-  stopPolling();
+  await stopPolling();
   await completeSetup();
   window.dispatchEvent(new CustomEvent("setup-complete"));
 }

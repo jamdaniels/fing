@@ -4,7 +4,7 @@ export function createIcon(iconData: IconNode): string {
   const [tag, attrs, children] = iconData as [
     string,
     Record<string, string>,
-    [string, Record<string, string>][]?
+    [string, Record<string, string>][]?,
   ];
   const attrStr = Object.entries(attrs)
     .map(([k, v]) => `${k}="${v}"`)

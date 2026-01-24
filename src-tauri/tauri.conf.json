@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "withGlobalTauri": true,
     "trayIcon": {
       "iconPath": "icons/tray.png",
@@ -53,12 +54,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [
-      "sounds/*"
-    ],
+    "resources": ["sounds/*"],
     "macOS": {
-      "entitlements": null,
-      "minimumSystemVersion": "10.15"
+      "entitlements": "entitlements.plist",
+      "minimumSystemVersion": "10.15",
+      "infoPlist": "Info.plist"
     }
   },
   "plugins": {}

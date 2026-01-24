@@ -31,7 +31,6 @@ pub enum AudioError {
     NoDevicesFound,
     DeviceNotFound,
     DeviceInitFailed(String),
-    PermissionDenied,
     StreamError(String),
 }
 
@@ -41,7 +40,6 @@ impl std::fmt::Display for AudioError {
             AudioError::NoDevicesFound => write!(f, "No audio input devices found"),
             AudioError::DeviceNotFound => write!(f, "Specified audio device not found"),
             AudioError::DeviceInitFailed(msg) => write!(f, "Failed to initialize device: {}", msg),
-            AudioError::PermissionDenied => write!(f, "Microphone permission denied"),
             AudioError::StreamError(msg) => write!(f, "Audio stream error: {}", msg),
         }
     }
@@ -262,10 +260,6 @@ impl AudioCapture {
     pub fn close_capture(&mut self) {
         self.stream = None;
         self.is_recording = false;
-    }
-
-    pub fn native_sample_rate(&self) -> u32 {
-        self.native_sample_rate
     }
 
     pub fn resample_to_16k(&self, buffer: Vec<f32>) -> Vec<f32> {

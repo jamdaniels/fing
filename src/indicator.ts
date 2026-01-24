@@ -7,7 +7,9 @@ const recording = document.getElementById("recording");
 const processing = document.getElementById("processing");
 
 function setState(state: IndicatorState): void {
-  if (!indicator || !recording || !processing) return;
+  if (!(indicator && recording && processing)) {
+    return;
+  }
 
   switch (state) {
     case "recording":
@@ -22,6 +24,8 @@ function setState(state: IndicatorState): void {
       break;
     case "hidden":
       indicator.classList.add("shrinking");
+      break;
+    default:
       break;
   }
 }

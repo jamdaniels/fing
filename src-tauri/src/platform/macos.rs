@@ -130,6 +130,45 @@ pub fn request_accessibility_permission() -> bool {
     check_accessibility_permission()
 }
 
+/// Open System Preferences to the Microphone privacy pane
+pub fn request_microphone_permission() {
+    let _ = std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        .spawn();
+}
+
+/// Check if microphone permission is granted by trying to capture audio
+pub fn check_microphone_permission() -> String {
+    use crate::audio::AudioCapture;
+
+    // Try to actually capture audio - this triggers the permission prompt
+    let mut capture = AudioCapture::new();
+    match capture.test_microphone() {
+        Ok(test) => {
+            // If we got audio data, permission is granted
+            // If buffer is empty or no audio received, permission might be denied
+            if test.is_receiving_audio || test.peak_level > 0.0 {
+                "granted".to_string()
+            } else {
+                // Got no audio - could be permission denied or just silence
+                // Check if we have any devices at all
+                let devices = AudioCapture::list_devices();
+                if devices.is_empty() {
+                    "denied".to_string()
+                } else {
+                    // Have devices but no audio - likely need to grant permission
+                    // Return "prompt" to indicate user should try granting
+                    "prompt".to_string()
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Microphone check failed: {}", e);
+            "denied".to_string()
+        }
+    }
+}
+
 pub fn paste_text() -> Result<(), String> {
     if !check_accessibility_permission() {
         return Err("Accessibility permission required".to_string());

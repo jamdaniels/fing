@@ -1,16 +1,29 @@
-import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
+  Copy,
+  History,
+  Home,
+  type IconNode,
+  Info,
+  Power,
+  Search,
+  Settings,
+  Trash2,
+} from "lucide";
+import { cleanupOnboarding, renderOnboarding } from "./components/onboarding";
+import { createIcon } from "./lib/icons";
+import {
+  deleteAllTranscripts,
+  deleteTranscript,
   getAppInfo,
   getAppState,
-  getStats,
-  getRecentTranscripts,
-  searchTranscripts,
-  deleteTranscript,
-  deleteAllTranscripts,
-  getSettings,
-  updateSettings,
   getAudioDevices,
+  getRecentTranscripts,
+  getSettings,
+  getStats,
+  searchTranscripts,
+  updateSettings,
 } from "./lib/ipc";
 import type {
   AppInfo,
@@ -21,9 +34,6 @@ import type {
   Stats,
   Transcript,
 } from "./lib/types";
-import { createIcon } from "./lib/icons";
-import { Home, History, Settings, Info, Power, Search, Trash2, Copy, type IconNode } from "lucide";
-import { renderOnboarding, cleanupOnboarding } from "./components/onboarding";
 
 let currentView: SidebarItem = "home";
 let appInfo: AppInfo | null = null;
@@ -36,7 +46,9 @@ let audioDevices: AudioDevice[] = [];
 
 function renderSidebar(): void {
   const sidebar = document.getElementById("sidebar");
-  if (!sidebar) return;
+  if (!sidebar) {
+    return;
+  }
 
   const items: { id: SidebarItem; label: string; icon: IconNode }[] = [
     { id: "home", label: "Home", icon: Home },
@@ -64,7 +76,7 @@ function renderSidebar(): void {
     </div>
   `;
 
-  sidebar.querySelectorAll(".sidebar-item").forEach((el) => {
+  for (const el of sidebar.querySelectorAll(".sidebar-item")) {
     el.addEventListener("click", () => {
       const view = el.getAttribute("data-view") as SidebarItem | null;
       const action = el.getAttribute("data-action");
@@ -76,12 +88,14 @@ function renderSidebar(): void {
         invoke("quit_app");
       }
     });
-  });
+  }
 }
 
 function renderContent(): void {
   const content = document.getElementById("content");
-  if (!content) return;
+  if (!content) {
+    return;
+  }
 
   switch (currentView) {
     case "home":
@@ -95,6 +109,8 @@ function renderContent(): void {
       break;
     case "about":
       renderAbout(content);
+      break;
+    default:
       break;
   }
 }
@@ -129,7 +145,7 @@ function renderHome(el: HTMLElement): void {
 
 function parseCreatedAt(createdAt: string): Date {
   // SQLite datetime format: "YYYY-MM-DD HH:MM:SS"
-  return new Date(createdAt.replace(" ", "T") + "Z");
+  return new Date(`${createdAt.replace(" ", "T")}Z`);
 }
 
 function formatTime(createdAt: string): string {
@@ -141,16 +157,24 @@ function getDateGroup(createdAt: string): string {
   const now = new Date();
   const date = parseCreatedAt(createdAt);
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const yesterday = new Date(today.getTime() - 86400000);
-  const weekAgo = new Date(today.getTime() - 7 * 86400000);
+  const yesterday = new Date(today.getTime() - 86_400_000);
+  const weekAgo = new Date(today.getTime() - 7 * 86_400_000);
 
-  if (date >= today) return "Today";
-  if (date >= yesterday) return "Yesterday";
-  if (date >= weekAgo) return "This Week";
+  if (date >= today) {
+    return "Today";
+  }
+  if (date >= yesterday) {
+    return "Yesterday";
+  }
+  if (date >= weekAgo) {
+    return "This Week";
+  }
   return "Older";
 }
 
-function groupTranscriptsByDate(items: Transcript[]): Map<string, Transcript[]> {
+function groupTranscriptsByDate(
+  items: Transcript[]
+): Map<string, Transcript[]> {
   const groups = new Map<string, Transcript[]>();
   const order = ["Today", "Yesterday", "This Week", "Older"];
 
@@ -164,15 +188,19 @@ function groupTranscriptsByDate(items: Transcript[]): Map<string, Transcript[]> 
   }
 
   for (const [key, value] of groups) {
-    if (value.length === 0) groups.delete(key);
+    if (value.length === 0) {
+      groups.delete(key);
+    }
   }
 
   return groups;
 }
 
 function truncateText(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength) + "...";
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength)}...`;
 }
 
 async function loadTranscripts(): Promise<void> {
@@ -199,7 +227,12 @@ async function handleDeleteTranscript(id: number): Promise<void> {
 }
 
 async function handleClearAll(): Promise<void> {
-  if (!confirm("Are you sure you want to delete all transcripts? This cannot be undone.")) {
+  if (
+    // biome-ignore lint/suspicious/noAlert: confirm is acceptable for destructive actions
+    !confirm(
+      "Are you sure you want to delete all transcripts? This cannot be undone."
+    )
+  ) {
     return;
   }
   try {
@@ -213,10 +246,13 @@ async function handleClearAll(): Promise<void> {
 }
 
 function copyToClipboard(text: string): void {
-  navigator.clipboard.writeText(text).catch(() => {});
+  navigator.clipboard.writeText(text).catch(() => {
+    // Silently ignore clipboard errors
+  });
 }
 
 function renderHistory(el: HTMLElement): void {
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI rendering with necessary loops
   loadTranscripts().then(() => {
     const grouped = groupTranscriptsByDate(transcripts);
     const hasTranscripts = transcripts.length > 0;
@@ -274,26 +310,33 @@ function renderHistory(el: HTMLElement): void {
       }, 300);
     });
 
-    el.querySelector(".clear-all-btn")?.addEventListener("click", handleClearAll);
+    el.querySelector(".clear-all-btn")?.addEventListener(
+      "click",
+      handleClearAll
+    );
 
-    el.querySelectorAll(".delete-btn").forEach((btn) => {
+    for (const btn of el.querySelectorAll(".delete-btn")) {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
         const listItem = (e.target as HTMLElement).closest(".list-item");
         const id = listItem?.getAttribute("data-id");
-        if (id) handleDeleteTranscript(Number(id));
+        if (id) {
+          handleDeleteTranscript(Number(id));
+        }
       });
-    });
+    }
 
-    el.querySelectorAll(".copy-btn").forEach((btn) => {
+    for (const btn of el.querySelectorAll(".copy-btn")) {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
         const listItem = (e.target as HTMLElement).closest(".list-item");
         const id = listItem?.getAttribute("data-id");
         const transcript = transcripts.find((t) => t.id === Number(id));
-        if (transcript) copyToClipboard(transcript.text);
+        if (transcript) {
+          copyToClipboard(transcript.text);
+        }
       });
-    });
+    }
   });
 }
 
@@ -307,8 +350,13 @@ async function loadSettings(): Promise<void> {
   }
 }
 
-async function handleSettingChange(key: keyof SettingsType, value: unknown): Promise<void> {
-  if (!settings) return;
+async function handleSettingChange(
+  key: keyof SettingsType,
+  value: unknown
+): Promise<void> {
+  if (!settings) {
+    return;
+  }
   try {
     const updated = { ...settings, [key]: value };
     await updateSettings(updated);
@@ -347,7 +395,7 @@ function renderSettings(el: HTMLElement): void {
             <div class="settings-row-desc">Select audio input device</div>
           </div>
           <select class="btn btn-outline mic-select">
-            <option value="" ${!settings?.selectedMicrophoneId ? "selected" : ""}>System Default</option>
+            <option value="" ${settings?.selectedMicrophoneId ? "" : "selected"}>System Default</option>
             ${micOptions}
           </select>
         </div>
@@ -381,16 +429,18 @@ function renderSettings(el: HTMLElement): void {
       </div>
     `;
 
-    el.querySelectorAll(".toggle").forEach((toggle) => {
+    for (const toggle of el.querySelectorAll(".toggle")) {
       toggle.addEventListener("click", () => {
-        const setting = toggle.getAttribute("data-setting") as keyof SettingsType;
+        const setting = toggle.getAttribute(
+          "data-setting"
+        ) as keyof SettingsType;
         if (setting && settings) {
           const newValue = !settings[setting];
           toggle.classList.toggle("active", newValue as boolean);
           handleSettingChange(setting, newValue);
         }
       });
-    });
+    }
 
     const micSelect = el.querySelector(".mic-select") as HTMLSelectElement;
     micSelect?.addEventListener("change", () => {
@@ -428,7 +478,9 @@ function renderAbout(el: HTMLElement): void {
 
 function showOnboarding(): void {
   const app = document.getElementById("app");
-  if (!app) return;
+  if (!app) {
+    return;
+  }
 
   app.innerHTML = `<div id="onboarding-container"></div>`;
   const container = document.getElementById("onboarding-container");
@@ -439,7 +491,9 @@ function showOnboarding(): void {
 
 function showMainUI(): void {
   const app = document.getElementById("app");
-  if (!app) return;
+  if (!app) {
+    return;
+  }
 
   app.innerHTML = `
     <aside id="sidebar" class="sidebar"></aside>
@@ -471,7 +525,7 @@ async function init(): Promise<void> {
     showMainUI();
   });
 
-  listen("app-state-changed", async (event) => {
+  listen("app-state-changed", (event) => {
     const newState = event.payload as AppState;
     if (newState !== "needs-setup" && currentAppState === "needs-setup") {
       cleanupOnboarding();
@@ -481,8 +535,14 @@ async function init(): Promise<void> {
     renderContent();
   });
 
-  listen("transcript-added", async () => {
-    stats = await getStats().catch(() => null);
+  listen("transcript-added", () => {
+    getStats()
+      .then((s) => {
+        stats = s;
+      })
+      .catch(() => {
+        // Ignore stats fetch errors
+      });
     renderContent();
   });
 

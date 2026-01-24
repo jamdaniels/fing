@@ -19,15 +19,22 @@ mod updates;
 
 use audio::{AudioCapture, AudioDevice, MicrophoneTest};
 use state::AppState;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::TrayIconBuilder,
     Emitter, Manager,
 };
 
-// TODO: Audio capture needs to run on dedicated thread (cpal::Stream is !Send)
-// For now, audio commands create temporary AudioCapture instances
-// Future: Use channels to communicate with audio thread
+// Global mic test state using atomics (thread-safe)
+static MIC_TEST_RUNNING: AtomicBool = AtomicBool::new(false);
+static MIC_TEST_LEVEL: AtomicU32 = AtomicU32::new(0); // Store as fixed-point (level * 10000)
+static MIC_TEST_RECEIVING: AtomicBool = AtomicBool::new(false);
+
+lazy_static::lazy_static! {
+    static ref MIC_TEST_DEVICE: Mutex<Option<String>> = Mutex::new(None);
+}
 
 #[tauri::command]
 fn get_app_state() -> String {
@@ -48,10 +55,104 @@ fn set_audio_device(_device_id: Option<String>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn test_microphone() -> Result<MicrophoneTest, String> {
-    // Create temporary capture for testing
+fn test_microphone(device_id: Option<String>) -> Result<MicrophoneTest, String> {
+    tracing::debug!("test_microphone called with device_id: {:?}", device_id);
     let mut capture = AudioCapture::new();
-    capture.test_microphone().map_err(|e| e.to_string())
+    if let Some(ref id) = device_id {
+        tracing::debug!("Setting device to: {}", id);
+        capture.set_device(Some(id.clone()));
+    }
+    let result = capture.test_microphone();
+    tracing::debug!("test_microphone result: {:?}", result);
+    result.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn start_mic_test(device_id: Option<String>) -> Result<String, String> {
+    tracing::info!("Starting mic test with device: {:?}", device_id);
+
+    // Stop any existing test
+    MIC_TEST_RUNNING.store(false, Ordering::SeqCst);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // Store device ID
+    {
+        let mut guard = MIC_TEST_DEVICE.lock().unwrap();
+        *guard = device_id.clone();
+    }
+
+    // Get device name
+    let mut capture = AudioCapture::new();
+    if let Some(ref id) = device_id {
+        capture.set_device(Some(id.clone()));
+    }
+
+    let device_name = match capture.start_mic_test() {
+        Ok(name) => name,
+        Err(e) => return Err(e.to_string()),
+    };
+    capture.stop_mic_test();
+
+    // Start mic test thread
+    MIC_TEST_RUNNING.store(true, Ordering::SeqCst);
+
+    std::thread::spawn(move || {
+        let mut capture = AudioCapture::new();
+        if let Some(id) = device_id {
+            capture.set_device(Some(id));
+        }
+
+        if let Err(e) = capture.init_capture() {
+            tracing::error!("Failed to init mic test capture: {}", e);
+            MIC_TEST_RUNNING.store(false, Ordering::SeqCst);
+            return;
+        }
+
+        tracing::info!("Mic test capture initialized, starting recording");
+
+        // Start recording
+        capture.begin_recording();
+
+        while MIC_TEST_RUNNING.load(Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            // Get current level from buffer (this also clears it)
+            let level_info = capture.get_mic_level();
+            let level_fixed = (level_info.peak_level * 10000.0) as u32;
+            MIC_TEST_LEVEL.store(level_fixed, Ordering::SeqCst);
+            MIC_TEST_RECEIVING.store(level_info.is_receiving_audio, Ordering::SeqCst);
+
+            if level_info.peak_level > 0.01 {
+                tracing::debug!("Mic level: {:.4}", level_info.peak_level);
+            }
+        }
+
+        capture.close_capture();
+        tracing::info!("Mic test thread stopped");
+    });
+
+    Ok(device_name)
+}
+
+#[tauri::command]
+fn get_mic_test_level() -> MicrophoneTest {
+    let level_fixed = MIC_TEST_LEVEL.load(Ordering::SeqCst);
+    let peak_level = level_fixed as f32 / 10000.0;
+    let is_receiving = MIC_TEST_RECEIVING.load(Ordering::SeqCst);
+
+    MicrophoneTest {
+        device_name: String::new(),
+        peak_level,
+        is_receiving_audio: is_receiving,
+    }
+}
+
+#[tauri::command]
+fn stop_mic_test() {
+    tracing::info!("Stopping mic test");
+    MIC_TEST_RUNNING.store(false, Ordering::SeqCst);
+    MIC_TEST_LEVEL.store(0, Ordering::SeqCst);
+    MIC_TEST_RECEIVING.store(false, Ordering::SeqCst);
 }
 
 #[tauri::command]
@@ -117,6 +218,49 @@ fn check_accessibility_permission() -> bool {
 #[tauri::command]
 fn request_accessibility_permission() -> bool {
     platform::request_accessibility_permission()
+}
+
+#[derive(serde::Serialize)]
+struct PermissionStatus {
+    microphone: String,
+    accessibility: String,
+}
+
+#[tauri::command]
+fn request_permissions() -> PermissionStatus {
+    // Check microphone permission
+    let mic_status = if cfg!(target_os = "macos") {
+        platform::check_microphone_permission()
+    } else {
+        // On other platforms, assume granted if devices exist
+        if AudioCapture::list_devices().is_empty() {
+            "denied".to_string()
+        } else {
+            "granted".to_string()
+        }
+    };
+
+    // Check accessibility
+    let acc_status = if cfg!(target_os = "macos") {
+        if platform::check_accessibility_permission() {
+            "granted"
+        } else {
+            "denied"
+        }
+    } else {
+        "not-applicable"
+    };
+
+    PermissionStatus {
+        microphone: mic_status,
+        accessibility: acc_status.to_string(),
+    }
+}
+
+#[tauri::command]
+fn request_microphone_permission() {
+    #[cfg(target_os = "macos")]
+    platform::request_microphone_permission();
 }
 
 #[tauri::command]
@@ -327,6 +471,9 @@ pub fn run() {
             get_audio_devices,
             set_audio_device,
             test_microphone,
+            start_mic_test,
+            get_mic_test_level,
+            stop_mic_test,
             // Hotkey testing
             hotkey::test_transcription,
             // Indicator controls
@@ -351,9 +498,11 @@ pub fn run() {
             // Auto-start
             set_auto_start,
             get_auto_start,
-            // Accessibility permission
+            // Permissions
             check_accessibility_permission,
             request_accessibility_permission,
+            request_microphone_permission,
+            request_permissions,
             try_register_hotkey,
         ])
         .run(tauri::generate_context!())

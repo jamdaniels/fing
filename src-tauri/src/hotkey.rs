@@ -27,7 +27,6 @@ static RECORDING_SESSION_ID: AtomicU64 = AtomicU64::new(0);
 enum AudioCommand {
     StartRecording,
     StopRecording,
-    Shutdown,
 }
 
 // Response from the audio thread
@@ -86,7 +85,7 @@ fn ensure_audio_thread() {
 
                     let _ = resp_tx.send(AudioResponse { buffer: resampled });
                 }
-                Ok(AudioCommand::Shutdown) | Err(_) => {
+                Err(_) => {
                     tracing::info!("Audio thread shutting down");
                     capture.close_capture();
                     break;
@@ -387,23 +386,6 @@ pub fn register_hotkey(app: &AppHandle) -> Result<(), String> {
         let _ = app;
         Ok(())
     }
-}
-
-/// Unregister the global hotkey
-pub fn unregister_hotkey() -> Result<(), String> {
-    // Shutdown audio thread
-    if let Some(ref thread) = *AUDIO_THREAD.lock().unwrap() {
-        let _ = thread.cmd_tx.send(AudioCommand::Shutdown);
-    }
-
-    // TODO: Clean up platform-specific hotkey listener
-    tracing::info!("Hotkey unregistration placeholder");
-    Ok(())
-}
-
-/// Check if recording key is currently held
-pub fn is_key_held() -> bool {
-    KEY_HELD.load(Ordering::SeqCst)
 }
 
 // Tauri commands for testing

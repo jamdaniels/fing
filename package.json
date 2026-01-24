@@ -8,15 +8,19 @@
     "build": "bunx tauri build",
     "frontend:dev": "bunx --bun vite",
     "frontend:build": "bunx --bun vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "bunx ultracite check",
+    "lint:fix": "bunx ultracite fix"
   },
   "dependencies": {
     "lucide": "^0.460.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.3.11",
     "@tauri-apps/api": "^2.2.0",
     "@tauri-apps/cli": "^2.2.7",
     "typescript": "^5.7.3",
+    "ultracite": "7.0.12",
     "vite": "^6.0.7"
   }
 }
