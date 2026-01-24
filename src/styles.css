@@ -107,7 +107,7 @@ html, body {
   gap: 8px;
   padding: 8px 16px;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -119,7 +119,7 @@ html, body {
 }
 
 .btn-primary:hover {
-  opacity: 0.9;
+  filter: brightness(1.1);
 }
 
 .btn-secondary {
@@ -139,6 +139,7 @@ html, body {
 
 .btn-outline:hover {
   background-color: var(--bg-secondary);
+  border-color: var(--text-secondary);
 }
 
 .btn-danger {
@@ -395,17 +396,30 @@ html, body {
 }
 
 /* Onboarding */
+#onboarding-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .onboarding {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 560px;
   min-height: 100vh;
-  padding: 24px;
+  padding: 32px;
 }
 
 .onboarding-skip {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
+  position: absolute;
+  top: 24px;
+  right: 24px;
 }
 
 .btn-link {
@@ -413,13 +427,14 @@ html, body {
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 14px;
-  padding: 4px 8px;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 6px;
 }
 
 .btn-link:hover {
   color: var(--text-primary);
-  text-decoration: underline;
+  background-color: var(--bg-secondary);
 }
 
 .onboarding-content {
@@ -429,70 +444,78 @@ html, body {
   align-items: center;
   justify-content: center;
   text-align: center;
-  max-width: 480px;
-  margin: 0 auto;
+  width: 100%;
+  padding: 24px 0;
 }
 
 .onboarding-icon {
-  width: 80px;
-  height: 80px;
+  width: 96px;
+  height: 96px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 24px;
+  margin-bottom: 28px;
   color: var(--accent);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%);
+  border-radius: 24px;
 }
 
 .onboarding-icon.success {
   color: var(--success);
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(34, 197, 94, 0.05) 100%);
 }
 
 .onboarding-icon svg {
-  width: 64px;
-  height: 64px;
+  width: 48px;
+  height: 48px;
 }
 
 .onboarding-title {
-  font-size: 28px;
-  font-weight: 600;
+  font-size: 32px;
+  font-weight: 700;
   margin-bottom: 12px;
+  letter-spacing: -0.5px;
 }
 
 .onboarding-desc {
   font-size: 16px;
   color: var(--text-secondary);
-  margin-bottom: 32px;
-  line-height: 1.5;
+  margin-bottom: 36px;
+  line-height: 1.6;
+  max-width: 360px;
 }
 
 .onboarding-features {
   list-style: none;
   text-align: left;
-  margin-bottom: 32px;
+  margin-bottom: 40px;
   width: 100%;
 }
 
 .onboarding-features li {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 14px;
+  padding: 14px 18px;
   background-color: var(--bg-secondary);
-  border-radius: 8px;
-  margin-bottom: 8px;
+  border-radius: 10px;
+  margin-bottom: 10px;
   font-size: 14px;
+  line-height: 1.4;
 }
 
 .onboarding-features li svg {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
   color: var(--accent);
 }
 
 .btn-lg {
-  padding: 12px 24px;
+  padding: 14px 32px;
   font-size: 16px;
+  font-weight: 600;
+  border-radius: 10px;
 }
 
 .btn-lg svg {
@@ -509,7 +532,7 @@ html, body {
   display: flex;
   align-items: center;
   width: 100%;
-  margin: 24px 0;
+  margin: 28px 0;
   color: var(--text-secondary);
 }
 
@@ -522,25 +545,38 @@ html, body {
 }
 
 .onboarding-divider span {
-  padding: 0 16px;
+  padding: 0 20px;
   font-size: 12px;
+  font-weight: 500;
   text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .download-progress-container {
   width: 100%;
-  margin-bottom: 16px;
+  margin-bottom: 24px;
+  padding: 24px;
+  background-color: var(--bg-secondary);
+  border-radius: 12px;
 }
 
 .download-progress-container .progress-bar {
-  height: 12px;
-  margin-bottom: 12px;
+  height: 10px;
+  margin-bottom: 16px;
+  border-radius: 5px;
+  background-color: var(--bg-primary);
+}
+
+.download-progress-container .progress-bar-fill {
+  border-radius: 5px;
+  background: linear-gradient(90deg, var(--accent), #60a5fa);
 }
 
 .download-status {
   font-size: 14px;
   color: var(--text-secondary);
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+  font-weight: 500;
 }
 
 .download-status.error {
@@ -549,78 +585,90 @@ html, body {
 
 .permissions-list {
   width: 100%;
-  margin-bottom: 32px;
+  margin-bottom: 40px;
 }
 
 .permission-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px;
+  padding: 18px 20px;
   background-color: var(--bg-secondary);
-  border-radius: 8px;
-  margin-bottom: 8px;
+  border-radius: 12px;
+  margin-bottom: 12px;
 }
 
 .permission-info {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   text-align: left;
 }
 
 .permission-info svg {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   color: var(--accent);
 }
 
 .permission-label {
-  font-weight: 500;
-  margin-bottom: 2px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  font-size: 15px;
 }
 
 .permission-desc {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-secondary);
+  line-height: 1.4;
 }
 
 .permission-status {
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text-secondary);
-  padding: 4px 12px;
-  border-radius: 4px;
+  padding: 6px 14px;
+  border-radius: 6px;
   background-color: var(--bg-primary);
 }
 
 .permission-status.granted {
   color: var(--success);
+  background-color: rgba(34, 197, 94, 0.1);
 }
 
 .permission-status.denied {
   color: var(--danger);
+  background-color: rgba(239, 68, 68, 0.1);
 }
 
 .mic-test-container {
   width: 100%;
-  margin-bottom: 32px;
+  margin-bottom: 40px;
+  padding: 24px;
+  background-color: var(--bg-secondary);
+  border-radius: 16px;
 }
 
 .mic-select-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 24px;
+  gap: 14px;
+  margin-bottom: 28px;
 }
 
 .mic-select-row label {
   font-size: 14px;
+  font-weight: 500;
   color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 .mic-select-row select {
   flex: 1;
-  padding: 8px 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background-color: var(--bg-primary);
 }
 
 .audio-level-container {
@@ -628,44 +676,62 @@ html, body {
 }
 
 .audio-level-label {
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text-secondary);
-  margin-bottom: 8px;
+  margin-bottom: 12px;
   text-align: left;
 }
 
 .audio-level-bar {
   width: 100%;
-  height: 24px;
-  background-color: var(--bg-secondary);
-  border-radius: 4px;
+  height: 32px;
+  background-color: var(--bg-primary);
+  border-radius: 8px;
   overflow: hidden;
+  position: relative;
+}
+
+.audio-level-bar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent,
+    transparent 8px,
+    rgba(255, 255, 255, 0.03) 8px,
+    rgba(255, 255, 255, 0.03) 9px
+  );
+  pointer-events: none;
 }
 
 .audio-level-fill {
   height: 100%;
   background-color: var(--border);
-  border-radius: 4px;
+  border-radius: 8px;
 }
 
 .audio-level-fill.active {
-  background-color: var(--success);
+  background: linear-gradient(90deg, var(--success), #4ade80);
 }
 
 .mic-test-prompt {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 16px;
-  background-color: var(--bg-secondary);
-  border-radius: 8px;
+  gap: 10px;
+  padding: 18px;
+  background-color: var(--bg-primary);
+  border-radius: 10px;
   color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .mic-test-prompt svg {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
 }
 
 .mic-test-prompt.success {
@@ -675,38 +741,44 @@ html, body {
 
 .completion-instructions {
   width: 100%;
-  margin-bottom: 32px;
+  margin-bottom: 40px;
 }
 
 .instruction-item {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 16px 20px;
+  gap: 18px;
+  padding: 20px 24px;
   background-color: var(--bg-secondary);
-  border-radius: 8px;
-  margin-bottom: 8px;
-  font-size: 16px;
+  border-radius: 12px;
+  margin-bottom: 12px;
+  font-size: 15px;
+  text-align: left;
 }
 
 .instruction-key {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 48px;
-  padding: 8px 16px;
+  min-width: 56px;
+  padding: 10px 18px;
   background-color: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-family: monospace;
-  font-weight: 600;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-weight: 700;
+  font-size: 16px;
+  box-shadow: 0 2px 0 var(--border);
 }
 
 .instruction-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
+  width: 56px;
+  height: 40px;
+  background-color: rgba(34, 197, 94, 0.1);
+  border-radius: 10px;
 }
 
 .instruction-icon svg {

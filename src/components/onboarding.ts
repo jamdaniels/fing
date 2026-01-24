@@ -384,7 +384,12 @@ async function handleStartDownload(): Promise<void> {
   };
   render();
 
-  await startModelDownload();
+  // Start download in background (don't await - let polling handle progress)
+  startModelDownload().catch((err) => {
+    console.error("Download error:", err);
+  });
+
+  // Start polling immediately to track progress
   startDownloadPolling();
 }
 
@@ -430,11 +435,14 @@ async function handleMicChange(e: Event): Promise<void> {
 }
 
 function startDownloadPolling(): void {
+  console.log("[onboarding] Starting download polling");
   downloadPollInterval = window.setInterval(async () => {
     const progress = await getDownloadProgress();
+    console.log("[onboarding] Download progress:", progress);
     state.downloadProgress = progress;
 
     if (progress.status === "complete" || progress.status === "failed") {
+      console.log("[onboarding] Download finished with status:", progress.status);
       stopPolling();
     }
 

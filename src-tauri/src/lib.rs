@@ -110,6 +110,21 @@ fn get_auto_start() -> bool {
 }
 
 #[tauri::command]
+fn check_accessibility_permission() -> bool {
+    platform::check_accessibility_permission()
+}
+
+#[tauri::command]
+fn request_accessibility_permission() -> bool {
+    platform::request_accessibility_permission()
+}
+
+#[tauri::command]
+fn try_register_hotkey(app: tauri::AppHandle) -> Result<(), String> {
+    hotkey::register_hotkey(&app)
+}
+
+#[tauri::command]
 fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
     // Verify model exists at default path
     let model_path = model::default_model_path();
@@ -336,6 +351,10 @@ pub fn run() {
             // Auto-start
             set_auto_start,
             get_auto_start,
+            // Accessibility permission
+            check_accessibility_permission,
+            request_accessibility_permission,
+            try_register_hotkey,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

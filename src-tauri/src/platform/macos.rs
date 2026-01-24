@@ -264,11 +264,12 @@ pub fn is_auto_start_enabled() -> bool {
 }
 
 /// Register global hotkey using CGEventTap
+/// Note: Does NOT open System Preferences if permission is missing.
+/// Use request_accessibility_permission() to prompt the user explicitly.
 pub fn register_global_hotkey(app: AppHandle) -> Result<(), String> {
-    // Check accessibility permission first
+    // Check accessibility permission first - but don't open System Preferences
     if !check_accessibility_permission() {
-        tracing::warn!("Accessibility permission not granted, requesting...");
-        request_accessibility_permission();
+        tracing::warn!("Accessibility permission not granted - hotkey registration skipped");
         return Err("Accessibility permission required for global hotkey".to_string());
     }
 
