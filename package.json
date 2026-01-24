@@ -1,0 +1,22 @@
+{
+  "name": "fing",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bunx tauri dev",
+    "build": "bunx tauri build",
+    "frontend:dev": "bunx --bun vite",
+    "frontend:build": "bunx --bun vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "lucide": "^0.460.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/cli": "^2.2.7",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7"
+  }
+}
