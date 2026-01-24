@@ -11,6 +11,7 @@ pub const WHISPER_SAMPLE_RATE: u32 = 16000;
 pub const MAX_BUFFER_SIZE: usize = (MAX_RECORDING_DURATION_SECS * WHISPER_SAMPLE_RATE) as usize;
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AudioDevice {
     pub id: String,
     pub name: String,
@@ -18,6 +19,7 @@ pub struct AudioDevice {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MicrophoneTest {
     pub device_name: String,
     pub peak_level: f32,
@@ -122,12 +124,21 @@ impl AudioCapture {
 
     pub fn init_capture(&mut self) -> Result<(), AudioError> {
         let device = self.get_device()?;
+        let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
 
         let config = device
             .default_input_config()
             .map_err(|e| AudioError::DeviceInitFailed(e.to_string()))?;
 
         self.native_sample_rate = config.sample_rate().0;
+
+        tracing::info!(
+            "Initializing audio capture: device='{}', format={:?}, channels={}, sample_rate={}",
+            device_name,
+            config.sample_format(),
+            config.channels(),
+            config.sample_rate().0
+        );
 
         let buffer = Arc::clone(&self.buffer);
         let channels = config.channels() as usize;
@@ -142,10 +153,19 @@ impl AudioCapture {
             tracing::error!("Audio stream error: {}", err);
         };
 
+        // Counter for logging
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static CALLBACK_COUNT: AtomicU64 = AtomicU64::new(0);
+
         let stream = match config.sample_format() {
             cpal::SampleFormat::F32 => device.build_input_stream(
                 &stream_config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    let count = CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
+                    if count % 100 == 0 {
+                        let peak: f32 = data.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+                        tracing::info!("Audio callback #{}: {} samples, peak={:.4}", count, data.len(), peak);
+                    }
                     let mut buf = buffer.lock().unwrap();
                     // Convert to mono by averaging channels
                     for chunk in data.chunks(channels) {
@@ -163,6 +183,11 @@ impl AudioCapture {
                 device.build_input_stream(
                     &stream_config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        let count = CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
+                        if count % 100 == 0 {
+                            let peak: f32 = data.iter().map(|&s| (s as f32 / 32768.0).abs()).fold(0.0f32, f32::max);
+                            tracing::info!("Audio callback #{}: {} samples, peak={:.4}", count, data.len(), peak);
+                        }
                         let mut buf = buffer.lock().unwrap();
                         for chunk in data.chunks(channels) {
                             let mono: f32 = chunk.iter().map(|&s| s as f32 / 32768.0).sum::<f32>()
@@ -342,8 +367,8 @@ impl AudioCapture {
             let _ = stream.play();
         }
 
-        // Wait a bit for samples
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        // Wait a bit for samples (keep short to avoid blocking IPC)
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         if let Some(ref stream) = self.stream {
             let _ = stream.pause();
@@ -365,5 +390,54 @@ impl AudioCapture {
             peak_level,
             is_receiving_audio,
         })
+    }
+
+    /// Start continuous mic test - keeps stream open
+    pub fn start_mic_test(&mut self) -> Result<String, AudioError> {
+        let device = self.get_device()?;
+        let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+
+        self.init_capture()?;
+
+        if let Ok(mut buf) = self.buffer.lock() {
+            buf.clear();
+        }
+
+        if let Some(ref stream) = self.stream {
+            let _ = stream.play();
+        }
+
+        self.is_recording = true;
+        Ok(device_name)
+    }
+
+    /// Get current audio level during mic test and clear old samples
+    pub fn get_mic_level(&mut self) -> MicrophoneTest {
+        let mut buf = self.buffer.lock().unwrap();
+        let buf_len = buf.len();
+
+        // Calculate peak from all samples
+        let peak_level = buf.iter().map(|&s| s.abs()).fold(0.0f32, f32::max);
+        let is_receiving_audio = buf_len > 0 && peak_level > 0.001;
+
+        // Clear buffer for next reading
+        buf.clear();
+
+        tracing::trace!("Mic level: {} (samples: {})", peak_level, buf_len);
+
+        MicrophoneTest {
+            device_name: String::new(),
+            peak_level,
+            is_receiving_audio,
+        }
+    }
+
+    /// Stop continuous mic test
+    pub fn stop_mic_test(&mut self) {
+        if let Some(ref stream) = self.stream {
+            let _ = stream.pause();
+        }
+        self.close_capture();
+        self.is_recording = false;
     }
 }
