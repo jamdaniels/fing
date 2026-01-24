@@ -1,7 +1,7 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 use crate::audio::AudioCapture;
@@ -9,10 +9,19 @@ use crate::db::{save_transcript, NewTranscript};
 use crate::model::default_model_path;
 use crate::paste::set_clipboard_and_paste;
 use crate::settings::load_settings;
+use crate::sounds;
 use crate::transcribe::{get_transcriber, init_transcriber, transcribe_audio};
+
+// Minimum recording duration in milliseconds
+const MIN_RECORDING_DURATION_MS: u64 = 200;
+// Maximum recording duration (2 minutes) in milliseconds
+const MAX_RECORDING_DURATION_MS: u64 = 2 * 60 * 1000;
 
 // Track if key is currently held
 static KEY_HELD: AtomicBool = AtomicBool::new(false);
+
+// Recording session ID to track auto-stop timer validity
+static RECORDING_SESSION_ID: AtomicU64 = AtomicU64::new(0);
 
 // Commands sent to the audio thread
 enum AudioCommand {
@@ -114,6 +123,25 @@ pub fn on_key_down(app: &AppHandle) {
         *start = Some(Instant::now());
     }
 
+    // Increment session ID and start auto-stop timer (2 min max)
+    let session_id = RECORDING_SESSION_ID.fetch_add(1, Ordering::SeqCst) + 1;
+    let app_for_timer = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(MAX_RECORDING_DURATION_MS)).await;
+
+        // Only trigger auto-stop if this session is still active
+        let current_session = RECORDING_SESSION_ID.load(Ordering::SeqCst);
+        if current_session == session_id && KEY_HELD.load(Ordering::SeqCst) {
+            tracing::info!("Auto-stopping recording after 2 minutes");
+            crate::notifications::show_info(
+                &app_for_timer,
+                "Recording Stopped",
+                "Maximum recording duration (2 min) reached",
+            );
+            on_key_up(&app_for_timer);
+        }
+    });
+
     // Ensure audio thread is running and start recording
     ensure_audio_thread();
 
@@ -123,10 +151,19 @@ pub fn on_key_down(app: &AppHandle) {
         }
     }
 
-    // TODO: Play start sound if enabled
-    // if settings.sounds_enabled {
-    //     sounds::play_start();
-    // }
+    // Play start sound if enabled (load settings synchronously via spawn_blocking)
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let settings = rt.block_on(load_settings());
+        if settings.sound_enabled {
+            sounds::play_start();
+        }
+        drop(app_clone);
+    });
 }
 
 /// Called when F8 is released
@@ -143,6 +180,37 @@ pub fn on_key_up(app: &AppHandle) {
     }
     drop(state);
 
+    // Calculate recording duration
+    let duration_ms = {
+        let start = RECORDING_START.lock().unwrap();
+        start.map(|s| s.elapsed().as_millis() as u64).unwrap_or(0)
+    };
+
+    // Minimum recording duration guard (200ms)
+    if duration_ms < MIN_RECORDING_DURATION_MS {
+        tracing::info!("Recording too short ({}ms), ignoring", duration_ms);
+        crate::notifications::show_info(app, "Fing", "Recording too short");
+        // Hide indicator and return to Ready
+        crate::indicator::hide(app).ok();
+        crate::state::transition_to(crate::state::AppState::Ready).ok();
+        app.emit("app-state-changed", "ready").ok();
+        // Still need to stop recording to reset audio state and drain response
+        {
+            let thread_guard = AUDIO_THREAD.lock().unwrap();
+            if let Some(ref thread) = *thread_guard {
+                let _ = thread.cmd_tx.send(AudioCommand::StopRecording);
+            }
+        }
+        // Drain the response in a background thread to avoid blocking
+        std::thread::spawn(|| {
+            let thread_guard = AUDIO_THREAD.lock().unwrap();
+            if let Some(ref thread) = *thread_guard {
+                let _ = thread.resp_rx.recv();
+            }
+        });
+        return;
+    }
+
     // Transition to Processing
     crate::state::transition_to(crate::state::AppState::Processing).ok();
     app.emit("app-state-changed", "processing").ok();
@@ -150,11 +218,7 @@ pub fn on_key_up(app: &AppHandle) {
     // Show processing indicator
     crate::indicator::show_processing(app).ok();
 
-    // Calculate recording duration
-    let duration_ms = {
-        let start = RECORDING_START.lock().unwrap();
-        start.map(|s| s.elapsed().as_millis() as i64).unwrap_or(0)
-    };
+    let duration_ms = duration_ms as i64;
 
     // Stop recording and get audio buffer
     // We need to send command and then receive response
@@ -254,8 +318,11 @@ pub fn on_key_up(app: &AppHandle) {
             }
         };
 
+        // Handle empty or whitespace-only transcription
+        let text = text.trim().to_string();
         if text.is_empty() {
             tracing::warn!("Transcription returned empty text");
+            crate::notifications::show_info(&app_handle, "Fing", "No speech detected");
             finish_transcription(&app_handle, None, duration_ms).await;
             return;
         }
@@ -285,10 +352,10 @@ pub fn on_key_up(app: &AppHandle) {
             }
         }
 
-        // TODO: Play done sound if enabled
-        // if settings.sound_enabled {
-        //     sounds::play_done();
-        // }
+        // Play done sound if enabled
+        if settings.sound_enabled {
+            sounds::play_done();
+        }
 
         finish_transcription(&app_handle, Some(text), duration_ms).await;
     });

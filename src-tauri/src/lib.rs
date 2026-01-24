@@ -11,6 +11,7 @@ mod notifications;
 mod paste;
 mod platform;
 mod settings;
+mod sounds;
 mod state;
 mod stats;
 mod transcribe;
@@ -92,6 +93,20 @@ fn open_main_window(app: tauri::AppHandle, tab: Option<String>) -> Result<(), St
 fn quit_app(app: tauri::AppHandle) {
     tracing::info!("Application shutdown requested");
     app.exit(0);
+}
+
+#[tauri::command]
+fn set_auto_start(enabled: bool) -> Result<(), String> {
+    if enabled {
+        platform::enable_auto_start()
+    } else {
+        platform::disable_auto_start()
+    }
+}
+
+#[tauri::command]
+fn get_auto_start() -> bool {
+    platform::is_auto_start_enabled()
 }
 
 #[tauri::command]
@@ -318,6 +333,9 @@ pub fn run() {
             complete_setup,
             // Updates
             updates::check_for_updates_cmd,
+            // Auto-start
+            set_auto_start,
+            get_auto_start,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

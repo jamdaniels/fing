@@ -33,6 +33,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 lazy_static = "1"
 futures-util = "0.3"
 tauri-plugin-dialog = "2"
+rodio = "0.20"
 
 # macOS: Metal for Apple GPUs
 [target.'cfg(target_os = "macos")'.dependencies]

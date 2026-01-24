@@ -172,6 +172,97 @@ pub fn paste_text() -> Result<(), String> {
     Ok(())
 }
 
+/// Get the application bundle path
+fn get_app_path() -> Result<String, String> {
+    let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
+
+    // Navigate up to find the .app bundle
+    // Typically: /Applications/Fing.app/Contents/MacOS/fing
+    let mut path = exe_path.as_path();
+    while let Some(parent) = path.parent() {
+        if path.extension().map_or(false, |ext| ext == "app") {
+            return Ok(path.to_string_lossy().to_string());
+        }
+        path = parent;
+    }
+
+    // Fallback to the executable path if not in a bundle
+    Ok(exe_path.to_string_lossy().to_string())
+}
+
+/// Enable auto-start on login using macOS Login Items
+pub fn enable_auto_start() -> Result<(), String> {
+    let app_path = get_app_path()?;
+
+    let script = format!(
+        r#"tell application "System Events"
+            if not (exists login item "Fing") then
+                make login item at end with properties {{path:"{}", hidden:false}}
+            end if
+        end tell"#,
+        app_path
+    );
+
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to run osascript: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to add login item: {}", stderr));
+    }
+
+    tracing::info!("Auto-start enabled for: {}", app_path);
+    Ok(())
+}
+
+/// Disable auto-start on login
+pub fn disable_auto_start() -> Result<(), String> {
+    let script = r#"tell application "System Events"
+        if exists login item "Fing" then
+            delete login item "Fing"
+        end if
+    end tell"#;
+
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|e| format!("Failed to run osascript: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to remove login item: {}", stderr));
+    }
+
+    tracing::info!("Auto-start disabled");
+    Ok(())
+}
+
+/// Check if auto-start is enabled
+pub fn is_auto_start_enabled() -> bool {
+    let script = r#"tell application "System Events"
+        return exists login item "Fing"
+    end tell"#;
+
+    let output = match std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::error!("Failed to check login item: {}", e);
+            return false;
+        }
+    };
+
+    let result = String::from_utf8_lossy(&output.stdout);
+    result.trim() == "true"
+}
+
 /// Register global hotkey using CGEventTap
 pub fn register_global_hotkey(app: AppHandle) -> Result<(), String> {
     // Check accessibility permission first
