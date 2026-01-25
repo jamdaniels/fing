@@ -208,16 +208,7 @@ function renderWelcome(): void {
         <button class="btn-link" id="skip-btn">Skip Setup</button>
       </div>
       <div class="onboarding-content">
-        <div class="onboarding-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M2 10v3"/>
-            <path d="M6 6v11"/>
-            <path d="M10 3v18"/>
-            <path d="M14 8v7"/>
-            <path d="M18 5v13"/>
-            <path d="M22 10v3"/>
-          </svg>
-        </div>
+        <img class="onboarding-logo" src="/icon.png" alt="Fing" />
         <h1 class="onboarding-title">Welcome to Fing</h1>
         <p class="onboarding-desc">Fast, private, local speech-to-text</p>
         <ul class="onboarding-features">
@@ -428,7 +419,7 @@ function renderTestMicrophone(): void {
         <div class="mic-test-container">
           <div class="mic-select-row">
             <label for="mic-select">Microphone:</label>
-            <select id="mic-select" class="btn btn-outline">
+            <select id="mic-select" class="settings-select">
               ${state.audioDevices
                 .map(
                   (d) => `
@@ -752,6 +743,14 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     micTest: null,
     audioDetected: false,
   };
+
+  // Check if this is a manual reset - always start from step 1
+  const isReset = sessionStorage.getItem("onboarding-reset") === "true";
+  if (isReset) {
+    sessionStorage.removeItem("onboarding-reset");
+    render();
+    return;
+  }
 
   // Check if model already exists - skip to permissions step if so
   try {

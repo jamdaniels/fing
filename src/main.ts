@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  ArrowUpRight,
   Check,
   Copy,
   History,
@@ -687,6 +688,16 @@ async function renderSettings(el: HTMLElement): Promise<void> {
         <div class="toggle ${settings?.autoStart ? "active" : ""}" data-setting="autoStart"></div>
       </div>
     </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Setup</div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">Reset onboarding</div>
+          <div class="settings-row-desc">Go through the setup process again</div>
+        </div>
+        <button class="btn btn-outline reset-onboarding-btn">Reset</button>
+      </div>
+    </div>
   `;
 
   for (const toggle of el.querySelectorAll(".toggle")) {
@@ -719,6 +730,16 @@ async function renderSettings(el: HTMLElement): Promise<void> {
 
   const hotkeyBtn = el.querySelector(".hotkey-btn");
   hotkeyBtn?.addEventListener("click", showHotkeyModal);
+
+  const resetBtn = el.querySelector(".reset-onboarding-btn");
+  resetBtn?.addEventListener("click", async () => {
+    if (!settings) {
+      return;
+    }
+    await updateSettings({ ...settings, onboardingCompleted: false });
+    sessionStorage.setItem("onboarding-reset", "true");
+    window.location.reload();
+  });
 
   updatePermissionStatus();
 }
@@ -794,7 +815,7 @@ function renderAbout(el: HTMLElement): void {
       <p class="about-tagline">Fast, private, local speech-to-text</p>
       <div class="about-backend">Backend: ${info?.inferenceBackend ?? "Unknown"}</div>
       <br/><br/>
-      <a href="${info?.repository ?? "#"}" target="_blank" class="btn btn-outline">View on GitHub</a>
+      <a href="${info?.repository ?? "#"}" target="_blank" class="btn btn-outline">GitHub ${createIcon(ArrowUpRight)}</a>
     </div>
   `;
 }
