@@ -423,25 +423,37 @@ async function loadSettings(): Promise<void> {
 }
 
 function formatKeyForDisplay(key: string): string {
-  // Convert key codes to display-friendly names
-  const keyMap: Record<string, string> = {
-    F1: "F1",
-    F2: "F2",
-    F3: "F3",
-    F4: "F4",
-    F5: "F5",
-    F6: "F6",
-    F7: "F7",
-    F8: "F8",
-    F9: "F9",
-    F10: "F10",
-    F11: "F11",
-    F12: "F12",
-    Space: "Space",
-    Escape: "Esc",
-    " ": "Space",
-  };
-  return keyMap[key] || key;
+  // Handle combination strings like "Option+Space"
+  const parts = key.split("+");
+  const formatted = parts.map((part) => {
+    const keyMap: Record<string, string> = {
+      Ctrl: "Ctrl",
+      Control: "Ctrl",
+      Option: "Option",
+      Alt: "Option",
+      Shift: "Shift",
+      Cmd: "Cmd",
+      Meta: "Cmd",
+      Fn: "Fn",
+      F1: "F1",
+      F2: "F2",
+      F3: "F3",
+      F4: "F4",
+      F5: "F5",
+      F6: "F6",
+      F7: "F7",
+      F8: "F8",
+      F9: "F9",
+      F10: "F10",
+      F11: "F11",
+      F12: "F12",
+      Space: "Space",
+      Escape: "Esc",
+      " ": "Space",
+    };
+    return keyMap[part] || part;
+  });
+  return formatted.join(" + ");
 }
 
 const FUNCTION_KEY_REGEX = /^F\d+$/;
@@ -450,26 +462,47 @@ function keyEventToHotkey(e: KeyboardEvent): string | null {
   // Get the base key
   let key = e.key;
 
-  // Skip modifier-only presses
+  // Skip modifier-only presses (waiting for base key)
   if (["Control", "Alt", "Shift", "Meta"].includes(key)) {
     return null;
   }
 
-  // Normalize function keys
-  if (FUNCTION_KEY_REGEX.test(key)) {
-    return key;
+  // Escape cancels
+  if (key === "Escape") {
+    return null;
   }
 
-  // Normalize other keys
-  if (key === " ") {
+  // Normalize the base key
+  if (FUNCTION_KEY_REGEX.test(key)) {
+    // Keep as-is
+  } else if (key === " ") {
     key = "Space";
-  } else if (key === "Escape") {
-    return null; // Escape cancels
   } else if (key.length === 1) {
     key = key.toUpperCase();
   }
 
-  return key;
+  // Build modifier prefix (order: Ctrl, Option, Shift, Cmd)
+  const modifiers: string[] = [];
+  if (e.ctrlKey) {
+    modifiers.push("Ctrl");
+  }
+  if (e.altKey) {
+    modifiers.push("Option");
+  }
+  if (e.shiftKey) {
+    modifiers.push("Shift");
+  }
+  if (e.metaKey) {
+    modifiers.push("Cmd");
+  }
+
+  // For function keys without modifiers, return just the key
+  if (modifiers.length === 0) {
+    return key;
+  }
+
+  // Return combination string
+  return [...modifiers, key].join("+");
 }
 
 async function setHotkey(hotkey: string): Promise<boolean> {
@@ -495,38 +528,72 @@ function showHotkeyModal(): void {
   // Remove existing modal if any
   closeHotkeyModal();
 
+  let capturedHotkey: string | null = null;
+  const currentHotkey = settings?.hotkey ?? "F8";
+
   const modal = document.createElement("div");
   modal.className = "hotkey-modal-overlay";
-  modal.innerHTML = `
-    <div class="hotkey-modal">
-      <button class="hotkey-modal-close">${createIcon(X)}</button>
-      <div class="hotkey-modal-icon">${createIcon(Keyboard)}</div>
-      <div class="hotkey-modal-title">Press the new hotkey</div>
-      <div class="hotkey-modal-desc">Press any key to set as your recording hotkey</div>
-      <div class="hotkey-modal-current">Current: <span class="hotkey-modal-key">${formatKeyForDisplay(settings?.hotkey ?? "F8")}</span></div>
-      <button class="btn btn-outline hotkey-fn-btn" style="margin-top: 16px;">Use Fn key</button>
-      <div class="hotkey-modal-hint">Press Escape to cancel</div>
-    </div>
-  `;
 
+  const renderModal = () => {
+    modal.innerHTML = `
+      <div class="hotkey-modal">
+        <button class="hotkey-modal-close">${createIcon(X)}</button>
+        <div class="hotkey-modal-icon">${createIcon(Keyboard)}</div>
+        <div class="hotkey-modal-title">Set recording hotkey</div>
+        <div class="hotkey-modal-desc">Press a key or combination</div>
+        <div class="hotkey-modal-preview">
+          <span class="hotkey-modal-key ${capturedHotkey ? "captured" : ""}">${formatKeyForDisplay(capturedHotkey ?? currentHotkey)}</span>
+          ${capturedHotkey && capturedHotkey !== currentHotkey ? '<span class="hotkey-modal-new">New</span>' : ""}
+        </div>
+        <div class="hotkey-modal-actions">
+          <button class="btn btn-primary hotkey-confirm-btn" ${capturedHotkey ? "" : "disabled"}>Set hotkey</button>
+        </div>
+        <button class="hotkey-fn-link">Use Fn key instead</button>
+        <div class="hotkey-modal-hint">Press Escape to cancel</div>
+      </div>
+    `;
+
+    // Re-attach event listeners after re-render
+    modal
+      .querySelector(".hotkey-modal-close")
+      ?.addEventListener("click", closeHotkeyModal);
+
+    modal.querySelector(".hotkey-fn-link")?.addEventListener("click", () => {
+      capturedHotkey = "Fn";
+      renderModal();
+    });
+
+    modal
+      .querySelector(".hotkey-confirm-btn")
+      ?.addEventListener("click", async () => {
+        if (!capturedHotkey) {
+          return;
+        }
+        const btn = modal.querySelector(
+          ".hotkey-confirm-btn"
+        ) as HTMLButtonElement;
+        btn.disabled = true;
+        btn.textContent = "Setting...";
+
+        if (await setHotkey(capturedHotkey)) {
+          closeHotkeyModal();
+          renderContent();
+        } else {
+          const desc = modal.querySelector(".hotkey-modal-desc");
+          if (desc) {
+            desc.textContent = "Failed to set hotkey. Try another key.";
+            desc.classList.add("error");
+          }
+          btn.disabled = false;
+          btn.textContent = "Set hotkey";
+        }
+      });
+  };
+
+  renderModal();
   document.body.appendChild(modal);
 
-  // Handle Fn key button click
-  const fnBtn = modal.querySelector(".hotkey-fn-btn");
-  fnBtn?.addEventListener("click", async () => {
-    if (await setHotkey("Fn")) {
-      closeHotkeyModal();
-      renderContent();
-    } else {
-      const desc = modal.querySelector(".hotkey-modal-desc");
-      if (desc) {
-        desc.textContent = "Failed to set hotkey. Try another key.";
-        desc.classList.add("error");
-      }
-    }
-  });
-
-  const keyHandler = async (e: KeyboardEvent) => {
+  const keyHandler = (e: KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
@@ -540,16 +607,8 @@ function showHotkeyModal(): void {
       return;
     }
 
-    if (await setHotkey(hotkey)) {
-      closeHotkeyModal();
-      renderContent();
-    } else {
-      const desc = modal.querySelector(".hotkey-modal-desc");
-      if (desc) {
-        desc.textContent = "Failed to set hotkey. Try another key.";
-        desc.classList.add("error");
-      }
-    }
+    capturedHotkey = hotkey;
+    renderModal();
   };
 
   const clickHandler = (e: MouseEvent) => {
@@ -557,9 +616,6 @@ function showHotkeyModal(): void {
       closeHotkeyModal();
     }
   };
-
-  const closeBtn = modal.querySelector(".hotkey-modal-close");
-  closeBtn?.addEventListener("click", closeHotkeyModal);
 
   document.addEventListener("keydown", keyHandler);
   modal.addEventListener("click", clickHandler);

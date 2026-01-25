@@ -1,8 +1,8 @@
 // macOS-specific platform code
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::OnceLock;
+use std::sync::atomic::Ordering;
+use std::sync::{OnceLock, RwLock};
 use tauri::AppHandle;
 
 // Type aliases for CoreFoundation/CoreGraphics types
@@ -54,6 +54,9 @@ extern "C" {
 }
 
 // CGEventFlags
+const K_CG_EVENT_FLAG_MASK_SHIFT: u64 = 1 << 17;
+const K_CG_EVENT_FLAG_MASK_CONTROL: u64 = 1 << 18;
+const K_CG_EVENT_FLAG_MASK_OPTION: u64 = 1 << 19;
 const K_CG_EVENT_FLAG_MASK_COMMAND: u64 = 1 << 20;
 
 // Virtual key codes
@@ -100,11 +103,36 @@ const K_CG_EVENT_SOURCE_STATE_HID_SYSTEM_STATE: i32 = 1;
 // Global app handle storage
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 
-// Current hotkey keycode (default F8 = 100)
-static CURRENT_HOTKEY: AtomicI64 = AtomicI64::new(K_VK_F8);
+/// Parsed hotkey configuration
+#[derive(Clone)]
+struct ParsedHotkey {
+    keycode: Option<i64>,     // None for Fn-only
+    required_modifiers: u64,  // CGEventFlags mask (Ctrl, Option, Shift, Cmd)
+    uses_fn: bool,            // Whether Fn key is part of the combination
+}
+
+impl Default for ParsedHotkey {
+    fn default() -> Self {
+        Self {
+            keycode: Some(K_VK_F8),
+            required_modifiers: 0,
+            uses_fn: false,
+        }
+    }
+}
+
+// Current hotkey configuration
+static CURRENT_HOTKEY: OnceLock<RwLock<ParsedHotkey>> = OnceLock::new();
+
+fn get_hotkey_config() -> &'static RwLock<ParsedHotkey> {
+    CURRENT_HOTKEY.get_or_init(|| RwLock::new(ParsedHotkey::default()))
+}
 
 // Track Fn key state (for detecting press/release)
 static FN_KEY_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+// Track if hotkey is currently pressed (for combinations)
+static HOTKEY_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Map a key name to macOS virtual keycode
 pub fn key_name_to_keycode(key: &str) -> Option<i64> {
@@ -166,17 +194,90 @@ pub fn key_name_to_keycode(key: &str) -> Option<i64> {
     }
 }
 
-/// Update the current hotkey
+/// Parse modifier name to CGEventFlags mask
+fn modifier_name_to_flag(name: &str) -> Option<u64> {
+    match name.to_uppercase().as_str() {
+        "CTRL" | "CONTROL" => Some(K_CG_EVENT_FLAG_MASK_CONTROL),
+        "OPTION" | "ALT" => Some(K_CG_EVENT_FLAG_MASK_OPTION),
+        "SHIFT" => Some(K_CG_EVENT_FLAG_MASK_SHIFT),
+        "CMD" | "COMMAND" | "META" => Some(K_CG_EVENT_FLAG_MASK_COMMAND),
+        _ => None,
+    }
+}
+
+/// Update the current hotkey (supports combinations like "Option+Space")
 pub fn set_hotkey(key: &str) -> Result<(), String> {
-    let keycode = key_name_to_keycode(key).ok_or_else(|| format!("Unknown key: {}", key))?;
-    CURRENT_HOTKEY.store(keycode, Ordering::SeqCst);
-    tracing::info!("Hotkey updated to {} (keycode {})", key, keycode);
+    let parts: Vec<&str> = key.split('+').collect();
+
+    let mut required_modifiers: u64 = 0;
+    let mut keycode: Option<i64> = None;
+    let mut uses_fn = false;
+
+    for part in parts {
+        let part = part.trim();
+
+        // Check if it's a modifier
+        if let Some(flag) = modifier_name_to_flag(part) {
+            required_modifiers |= flag;
+            continue;
+        }
+
+        // Check if it's Fn key
+        if part.to_uppercase() == "FN" {
+            uses_fn = true;
+            continue;
+        }
+
+        // It's the base key
+        if keycode.is_some() {
+            return Err(format!("Multiple base keys in hotkey: {}", key));
+        }
+        keycode = Some(key_name_to_keycode(part).ok_or_else(|| format!("Unknown key: {}", part))?);
+    }
+
+    // Fn-only mode: no base key and no modifiers
+    if keycode.is_none() && required_modifiers == 0 && !uses_fn {
+        return Err("No valid key in hotkey".to_string());
+    }
+
+    let config = ParsedHotkey {
+        keycode,
+        required_modifiers,
+        uses_fn,
+    };
+
+    // Store the config
+    let hotkey_lock = get_hotkey_config();
+    let mut hotkey = hotkey_lock.write().map_err(|e| format!("Lock error: {}", e))?;
+    *hotkey = config;
+
+    // Reset state
+    HOTKEY_ACTIVE.store(false, Ordering::SeqCst);
+    FN_KEY_DOWN.store(false, Ordering::SeqCst);
+
+    tracing::info!("Hotkey updated to: {} (keycode: {:?}, modifiers: 0x{:x}, fn: {})",
+        key, keycode, required_modifiers, uses_fn);
     Ok(())
 }
 
-/// Get the current hotkey keycode
-pub fn get_current_hotkey() -> i64 {
-    CURRENT_HOTKEY.load(Ordering::SeqCst)
+/// Get a copy of the current hotkey configuration
+fn get_current_hotkey() -> ParsedHotkey {
+    get_hotkey_config()
+        .read()
+        .map(|h| h.clone())
+        .unwrap_or_default()
+}
+
+/// Check if the current modifier flags match the required modifiers exactly
+fn modifiers_match(current_flags: u64, required: u64) -> bool {
+    // Mask to extract only the modifier bits we care about
+    let modifier_mask = K_CG_EVENT_FLAG_MASK_SHIFT
+        | K_CG_EVENT_FLAG_MASK_CONTROL
+        | K_CG_EVENT_FLAG_MASK_OPTION
+        | K_CG_EVENT_FLAG_MASK_COMMAND;
+
+    let current_modifiers = current_flags & modifier_mask;
+    current_modifiers == required
 }
 
 // CGEventTap callback
@@ -186,44 +287,75 @@ extern "C" fn event_tap_callback(
     event: CGEventRef,
     _user_info: *mut c_void,
 ) -> CGEventRef {
-    let current_hotkey = get_current_hotkey();
+    let config = get_current_hotkey();
+    let flags = unsafe { CGEventGetFlags(event) };
+    let fn_pressed = (flags & K_CG_EVENT_FLAG_MASK_FN) != 0;
 
-    // Handle Fn key specially via flags changed event
-    if current_hotkey == K_VK_FN {
+    // Handle Fn-only mode (no base key, just Fn)
+    if config.keycode.is_none() && config.uses_fn && config.required_modifiers == 0 {
         if event_type == K_CG_EVENT_FLAGS_CHANGED {
-            let flags = unsafe { CGEventGetFlags(event) };
-            let fn_pressed = (flags & K_CG_EVENT_FLAG_MASK_FN) != 0;
-            let was_pressed = FN_KEY_DOWN.load(std::sync::atomic::Ordering::SeqCst);
+            let was_pressed = FN_KEY_DOWN.load(Ordering::SeqCst);
 
             if fn_pressed && !was_pressed {
-                // Fn key pressed
-                FN_KEY_DOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+                FN_KEY_DOWN.store(true, Ordering::SeqCst);
                 if let Some(app) = APP_HANDLE.get() {
                     crate::hotkey::on_key_down(app);
                 }
             } else if !fn_pressed && was_pressed {
-                // Fn key released
-                FN_KEY_DOWN.store(false, std::sync::atomic::Ordering::SeqCst);
+                FN_KEY_DOWN.store(false, Ordering::SeqCst);
                 if let Some(app) = APP_HANDLE.get() {
                     crate::hotkey::on_key_up(app);
                 }
             }
         }
-    } else {
-        // Handle regular key events
+        return event;
+    }
+
+    // Handle hotkeys with a base key (with optional modifiers and/or Fn)
+    if let Some(target_keycode) = config.keycode {
         let keycode = unsafe { CGEventGetIntegerValueField(event, K_CG_KEYBOARD_EVENT_KEYCODE) };
 
-        if keycode == current_hotkey {
-            if let Some(app) = APP_HANDLE.get() {
+        if keycode == target_keycode {
+            // Check if modifiers match exactly
+            let modifiers_ok = modifiers_match(flags, config.required_modifiers);
+            // Check Fn requirement
+            let fn_ok = !config.uses_fn || fn_pressed;
+
+            if modifiers_ok && fn_ok {
+                let was_active = HOTKEY_ACTIVE.load(Ordering::SeqCst);
+
                 match event_type {
                     K_CG_EVENT_KEY_DOWN => {
-                        crate::hotkey::on_key_down(app);
+                        if !was_active {
+                            HOTKEY_ACTIVE.store(true, Ordering::SeqCst);
+                            if let Some(app) = APP_HANDLE.get() {
+                                crate::hotkey::on_key_down(app);
+                            }
+                        }
                     }
                     K_CG_EVENT_KEY_UP => {
-                        crate::hotkey::on_key_up(app);
+                        if was_active {
+                            HOTKEY_ACTIVE.store(false, Ordering::SeqCst);
+                            if let Some(app) = APP_HANDLE.get() {
+                                crate::hotkey::on_key_up(app);
+                            }
+                        }
                     }
                     _ => {}
                 }
+            }
+        }
+    }
+
+    // Also handle modifier release while hotkey is active (user releases modifier before key)
+    if HOTKEY_ACTIVE.load(Ordering::SeqCst) && event_type == K_CG_EVENT_FLAGS_CHANGED {
+        let modifiers_ok = modifiers_match(flags, config.required_modifiers);
+        let fn_ok = !config.uses_fn || fn_pressed;
+
+        if !modifiers_ok || !fn_ok {
+            HOTKEY_ACTIVE.store(false, Ordering::SeqCst);
+            if let Some(app) = APP_HANDLE.get() {
+                crate::hotkey::on_key_up(app);
             }
         }
     }

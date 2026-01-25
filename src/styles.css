@@ -1024,6 +1024,48 @@ body {
 .hotkey-modal-hint {
   font-size: 12px;
   color: var(--text-secondary);
+  margin-top: 16px;
+}
+
+.hotkey-modal-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.hotkey-modal-key.captured {
+  border-color: var(--accent);
+  background-color: oklch(0.768 0.233 130.85 / 0.1);
+}
+
+.hotkey-modal-new {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--accent);
+  background-color: oklch(0.768 0.233 130.85 / 0.15);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.hotkey-modal-actions {
+  margin-bottom: 16px;
+}
+
+.hotkey-fn-link {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.hotkey-fn-link:hover {
+  color: var(--text-primary);
 }
 
 /* Step Indicator */
