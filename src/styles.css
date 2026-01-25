@@ -48,13 +48,24 @@ body {
 #app {
   display: flex;
   height: 100%;
+  position: relative;
+}
+
+.titlebar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  z-index: 100;
+  background-color: var(--bg-primary);
 }
 
 .sidebar {
   width: 180px;
   background-color: var(--bg-primary);
   color: var(--text-primary);
-  padding: 40px 8px 16px;
+  padding: 40px 8px 8px;
   display: flex;
   flex-direction: column;
 }

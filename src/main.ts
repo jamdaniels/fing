@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Copy,
   History,
@@ -688,11 +689,29 @@ async function showOnboarding(): Promise<void> {
     return;
   }
 
-  app.innerHTML = `<div id="onboarding-container"></div>`;
+  app.innerHTML = `
+    <div class="titlebar"></div>
+    <div id="onboarding-container"></div>
+  `;
+  setupTitlebarDrag();
   const container = document.getElementById("onboarding-container");
   if (container) {
     await renderOnboarding(container);
   }
+}
+
+function setupTitlebarDrag(): void {
+  const titlebar = document.querySelector(".titlebar");
+  if (!titlebar) {
+    return;
+  }
+
+  titlebar.addEventListener("mousedown", (e) => {
+    const event = e as MouseEvent;
+    if (event.buttons === 1) {
+      getCurrentWindow().startDragging();
+    }
+  });
 }
 
 function showMainUI(): void {
@@ -702,10 +721,12 @@ function showMainUI(): void {
   }
 
   app.innerHTML = `
+    <div class="titlebar"></div>
     <aside id="sidebar" class="sidebar"></aside>
     <main id="content" class="content"></main>
   `;
 
+  setupTitlebarDrag();
   renderSidebar();
   renderContent();
 }
