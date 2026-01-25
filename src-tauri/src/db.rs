@@ -219,14 +219,14 @@ pub fn get_db_stats() -> Result<DbStats, String> {
 
         let transcriptions_today: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM transcripts WHERE date(created_at) = date('now')",
+                "SELECT COUNT(*) FROM transcripts WHERE date(created_at, 'localtime') = date('now', 'localtime')",
                 [],
                 |row| row.get(0),
             )?;
 
         let words_today: i64 = conn
             .query_row(
-                "SELECT COALESCE(SUM(word_count), 0) FROM transcripts WHERE date(created_at) = date('now')",
+                "SELECT COALESCE(SUM(word_count), 0) FROM transcripts WHERE date(created_at, 'localtime') = date('now', 'localtime')",
                 [],
                 |row| row.get(0),
             )?;
