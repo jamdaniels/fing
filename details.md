@@ -72,7 +72,7 @@ The Whisper tiny.en model must be provided by the user (downloaded or selected l
 
 **Model location:**
 - Default path: `{app_data_dir}/models/ggml-tiny.en.bin`
-  - macOS: `~/Library/Application Support/com.fing.app/models/`
+  - macOS: `~/Library/Application Support/com.jamdaniels.fing/models/`
   - Windows: `%APPDATA%\Fing\models\`
 - User can override via Settings or by selecting a file during onboarding
 
@@ -100,10 +100,10 @@ If any verification step fails, refuse to load model and show clear error.
 
 | Type | Path |
 |------|------|
-| App Support | `~/Library/Application Support/com.fing.app/` |
-| Model | `~/Library/Application Support/com.fing.app/models/ggml-tiny.en.bin` |
-| Database | `~/Library/Application Support/com.fing.app/transcripts.db` |
-| Settings | `~/Library/Application Support/com.fing.app/settings.json` |
+| App Support | `~/Library/Application Support/com.jamdaniels.fing/` |
+| Model | `~/Library/Application Support/com.jamdaniels.fing/models/ggml-tiny.en.bin` |
+| Database | `~/Library/Application Support/com.jamdaniels.fing/transcripts.db` |
+| Settings | `~/Library/Application Support/com.jamdaniels.fing/settings.json` |
 
 ### Windows
 

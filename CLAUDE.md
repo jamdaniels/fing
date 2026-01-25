@@ -54,13 +54,19 @@ Hotkey is only registered when state is `Ready`. Model must be downloaded and ve
 | hotkey.rs | F8 hold detection, full recording pipeline |
 | audio.rs | cpal capture, rubato resampling |
 | transcribe.rs | whisper-rs inference wrapper |
+| engine.rs | Transcription engine trait |
 | model.rs | Model download, SHA256 verification |
 | paste.rs | Clipboard + Cmd/Ctrl+V injection |
 | platform/macos.rs | CGEventTap for global hotkey, accessibility |
 | platform/windows.rs | Stubs (Windows LL keyboard hook TODO) |
 | db.rs | SQLite with FTS5 for transcript history |
+| stats.rs | Usage statistics computation |
+| settings.rs | Settings persistence (JSON) |
 | indicator.rs | Floating overlay window control |
 | sounds.rs | rodio playback for start/stop sounds |
+| notifications.rs | Native OS notifications (paste fallback) |
+| updates.rs | GitHub release update checker |
+| app_info.rs | Build info and version metadata |
 
 ### Frontend (src/)
 | File | Purpose |
@@ -70,6 +76,7 @@ Hotkey is only registered when state is `Ready`. Model must be downloaded and ve
 | components/onboarding.ts | First-run setup wizard |
 | lib/ipc.ts | Typed Tauri invoke wrappers |
 | lib/types.ts | Shared TypeScript types |
+| lib/icons.ts | Lucide icon rendering helper |
 
 ### IPC Pattern
 Frontend calls Rust via `invoke()`. Types in `lib/types.ts` mirror Rust structs. Events emitted from Rust via `app.emit()` (e.g., `app-state-changed`, `transcript-added`).
@@ -84,6 +91,6 @@ Frontend calls Rust via `invoke()`. Types in `lib/types.ts` mirror Rust structs.
 
 ## File Locations
 
-**Model:** `~/Library/Application Support/com.fing.app/models/ggml-tiny.en.bin` (macOS)
-**Database:** `~/Library/Application Support/com.fing.app/transcripts.db`
-**Settings:** `~/Library/Application Support/com.fing.app/settings.json`
+**Model:** `~/Library/Application Support/com.jamdaniels.fing/models/ggml-tiny.en.bin` (macOS)
+**Database:** `~/Library/Application Support/com.jamdaniels.fing/transcripts.db`
+**Settings:** `~/Library/Application Support/com.jamdaniels.fing/settings.json`

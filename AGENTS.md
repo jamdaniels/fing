@@ -8,7 +8,7 @@ Guidance for autonomous coding agents working inside Fing.
 - Respect onboarding: model must be downloaded and verified before exiting `NeedsSetup`.
 - Refer to `CLAUDE.md` for architecture, modules, and storage locations before making structural changes.
 - `details.md` documents assets (tray icons, sounds), model integrity rules, logging expectations, and platform-specific setups.
-- No Cursor or Copilot rule files exist; this handbook supersedes external defaults.
+- Cursor/Copilot rules: none found in `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md`.
 
 ## Repository Guardrails
 - **Do not touch `.env` or `.env.local`** under any circumstance; only read/write `.env.example` if needed.
@@ -25,9 +25,10 @@ Guidance for autonomous coding agents working inside Fing.
 ## Commands & Tooling
 - **Install deps**: `bun install` (installs frontend + Tauri hooks) and `cd src-tauri && cargo fetch` for Rust crates if cold cache.
 - **Model download (optional for dev)**: `mkdir -p .models && curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin" -o .models/ggml-tiny.en.bin`.
-- **Development app**: `bun run dev` launches Vite + Tauri (watches Rust + frontend). App window auto-spawns but UI mainly lives in tray.
-- **Frontend-only dev**: `bun run frontend:dev` to iterate on HTML/CSS/TS without the Rust host.
-- **Production build**: `bun run build` (runs Vite build then `tauri build`, producing bundles under `src-tauri/target/release/bundle`).
+- **Development app**: `bun run dev` launches Tauri (runs `bun run frontend:dev` via `beforeDevCommand`). App window auto-spawns but UI mainly lives in tray.
+- **Frontend-only dev**: `bun run frontend:dev` runs Vite without the Rust host.
+- **Frontend-only build**: `bun run frontend:build` runs `vite build` for static output.
+- **Production build**: `bun run build` runs `tauri build` (executes `bun run frontend:build` via `beforeBuildCommand`, bundles under `src-tauri/target/release/bundle`).
 - **Frontend typecheck**: `bun run typecheck` (tsc `--noEmit`, uses `tsconfig.json`).
 - **Lint/format (ultracite/biome)**: `bun run lint` for checks, `bun run lint:fix` for autofixes; run these before heavier loops.
 - **Rust lint**: `cd src-tauri && cargo clippy --all-targets -- -D warnings` (keep warnings fatal; align with `tracing` usage).
@@ -81,7 +82,7 @@ Guidance for autonomous coding agents working inside Fing.
 - Before transitioning app state, ensure prerequisites hold (model verified, transcriber initialized) and bubble human-readable errors to the UI.
 
 ## Data & Storage Notes
-- Default model path: `~/Library/Application Support/com.fing.app/models/ggml-tiny.en.bin` on macOS; `%APPDATA%\Fing\models\...` on Windows.
+- Default model path: `~/Library/Application Support/com.jamdaniels.fing/models/ggml-tiny.en.bin` on macOS; `%APPDATA%\Fing\models\...` on Windows.
 - Transcripts DB: SQLite with FTS5 under each platform’s app data directory; keep schema migrations idempotent.
 - Settings stored in JSON under app data; updates must go through Rust `settings` module to keep watchers consistent.
 - History can be disabled; honor `historyEnabled` before writing transcripts.

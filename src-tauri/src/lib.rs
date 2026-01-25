@@ -24,7 +24,7 @@ use std::sync::Mutex;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::TrayIconBuilder,
-    Emitter, Manager,
+    ActivationPolicy, Emitter, Manager,
 };
 
 // Global mic test state using atomics (thread-safe)
@@ -490,6 +490,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                app.set_activation_policy(ActivationPolicy::Accessory);
+            }
+
             // Initialize database
             if let Err(e) = db::init_db() {
                 tracing::error!("Failed to initialize database: {}", e);
@@ -507,6 +512,17 @@ pub fn run() {
                     handle_menu_event(app, event.id.as_ref());
                 })
                 .build(app)?;
+
+            // Prevent main window from being destroyed on close - hide it instead
+            if let Some(window) = app.get_webview_window("main") {
+                let window_clone = window.clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = window_clone.hide();
+                    }
+                });
+            }
 
             // Check if onboarding was previously completed
             let app_handle = app.handle().clone();
@@ -528,13 +544,16 @@ pub fn run() {
                         if let Err(e) = platform::set_hotkey(&saved_settings.hotkey) {
                             tracing::warn!("Failed to set hotkey from settings: {}", e);
                         }
-                        // Register hotkey and transition to Ready
+                        // Register hotkey (don't block Ready state if this fails)
                         if let Err(e) = hotkey::register_hotkey(&app_handle) {
-                            tracing::error!("Failed to register hotkey: {}", e);
-                        } else {
-                            state::set_state(&app_handle, AppState::Ready).ok();
-                            tracing::info!("Restored to Ready state from saved settings");
+                            tracing::warn!("Failed to register hotkey: {} - will work after restart with permissions", e);
                         }
+                        // Transition to Ready and rebuild tray menu
+                        state::set_state(&app_handle, AppState::Ready).ok();
+                        if let Err(e) = rebuild_tray_menu(&app_handle) {
+                            tracing::error!("Failed to rebuild tray menu: {}", e);
+                        }
+                        tracing::info!("Restored to Ready state from saved settings");
                     }
                 } else {
                     tracing::warn!("Onboarding completed but model invalid, showing setup");

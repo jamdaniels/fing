@@ -931,7 +931,7 @@ impl ModelManager {
 
 **Model Location:**
 - Default path: `{app_data_dir}/models/ggml-tiny.en.bin`
-  - macOS: `~/Library/Application Support/com.fing.app/models/`
+  - macOS: `~/Library/Application Support/com.jamdaniels.fing/models/`
   - Windows: `%APPDATA%\Fing\models\`
 - User can override via Settings or by selecting a file during onboarding
 
