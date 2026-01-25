@@ -1056,3 +1056,17 @@ body {
 .step-dot.completed {
   background-color: var(--text-secondary);
 }
+
+/* Mic Test Modal */
+.mic-test-modal {
+  min-width: 380px;
+}
+
+.mic-test-modal .mic-test-container {
+  margin-bottom: 16px;
+}
+
+.mic-test-modal .mic-test-actions {
+  display: flex;
+  justify-content: flex-end;
+}

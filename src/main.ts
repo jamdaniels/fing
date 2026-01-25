@@ -4,12 +4,14 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ArrowUpRight,
   Check,
+  CheckCircle,
   Copy,
   History,
   Home,
   type IconNode,
   Info,
   Keyboard,
+  Mic,
   Power,
   Search,
   Settings,
@@ -25,6 +27,7 @@ import {
   getAppState,
   getAudioDevices,
   getAutoStart,
+  getMicTestLevel,
   getRecentTranscripts,
   getSettings,
   getStats,
@@ -33,12 +36,15 @@ import {
   requestPermissions,
   searchTranscripts,
   setAutoStart,
+  startMicTest,
+  stopMicTest,
   updateSettings,
 } from "./lib/ipc";
 import type {
   AppInfo,
   AppState,
   AudioDevice,
+  MicrophoneTest,
   Settings as SettingsType,
   SidebarItem,
   Stats,
@@ -57,6 +63,7 @@ const PAGE_SIZE = 50;
 let settings: SettingsType | null = null;
 let audioDevices: AudioDevice[] = [];
 let hotkeyModalCleanup: (() => void) | null = null;
+let micTestModalCleanup: (() => void) | null = null;
 
 function renderSidebar(): void {
   const sidebar = document.getElementById("sidebar");
@@ -571,6 +578,169 @@ function closeHotkeyModal(): void {
   }
 }
 
+async function showMicTestModal(): Promise<void> {
+  closeMicTestModal();
+
+  let micTestInterval: number | null = null;
+  let currentMicTest: MicrophoneTest | null = null;
+  let audioDetected = false;
+  let selectedDeviceId = settings?.selectedMicrophoneId ?? null;
+
+  const modal = document.createElement("div");
+  modal.className = "hotkey-modal-overlay";
+
+  const micOptions = audioDevices
+    .map(
+      (d) =>
+        `<option value="${d.id}" ${selectedDeviceId === d.id || (selectedDeviceId === null && d.isDefault) ? "selected" : ""}>${d.name}${d.isDefault ? " (Default)" : ""}</option>`
+    )
+    .join("");
+
+  const renderModalContent = () => {
+    const level = currentMicTest?.peakLevel ?? 0;
+    const levelPercent = Math.min(level * 100, 100);
+
+    modal.innerHTML = `
+      <div class="hotkey-modal mic-test-modal">
+        <button class="hotkey-modal-close">${createIcon(X)}</button>
+        <div class="hotkey-modal-icon">${createIcon(Mic)}</div>
+        <div class="hotkey-modal-title">Test Microphone</div>
+        <div class="hotkey-modal-desc">Make sure your microphone is working</div>
+
+        <div class="mic-test-container">
+          <div class="mic-select-row">
+            <label for="modal-mic-select">Device:</label>
+            <select id="modal-mic-select" class="settings-select">
+              <option value="" ${selectedDeviceId === null ? "selected" : ""}>System Default</option>
+              ${micOptions}
+            </select>
+          </div>
+
+          <div class="audio-level-container">
+            <div class="audio-level-label">Audio Level</div>
+            <div class="audio-level-bar">
+              <div class="audio-level-fill ${levelPercent > 10 ? "active" : ""}" style="width: ${levelPercent}%"></div>
+            </div>
+          </div>
+
+          <div class="mic-test-prompt ${audioDetected ? "success" : ""}">
+            ${
+              audioDetected
+                ? `${createIcon(CheckCircle)} Audio detected! Your microphone is working.`
+                : `${createIcon(Mic)} Say something to test...`
+            }
+          </div>
+        </div>
+
+        <div class="mic-test-actions">
+          <button class="btn btn-primary mic-test-done-btn">Done</button>
+        </div>
+      </div>
+    `;
+
+    const closeBtn = modal.querySelector(".hotkey-modal-close");
+    closeBtn?.addEventListener("click", closeMicTestModal);
+
+    const doneBtn = modal.querySelector(".mic-test-done-btn");
+    doneBtn?.addEventListener("click", closeMicTestModal);
+
+    const micSelect = modal.querySelector(
+      "#modal-mic-select"
+    ) as HTMLSelectElement;
+    micSelect?.addEventListener("change", async () => {
+      selectedDeviceId = micSelect.value || null;
+      audioDetected = false;
+      try {
+        await stopMicTest();
+        await startMicTest(selectedDeviceId);
+      } catch (err) {
+        console.error("Failed to switch mic:", err);
+      }
+    });
+  };
+
+  const updateAudioLevel = () => {
+    const level = currentMicTest?.peakLevel ?? 0;
+    const levelPercent = Math.min(level * 100, 100);
+
+    const levelFill = modal.querySelector(".audio-level-fill") as HTMLElement;
+    if (levelFill) {
+      levelFill.style.width = `${levelPercent}%`;
+      if (levelPercent > 10) {
+        levelFill.classList.add("active");
+      } else {
+        levelFill.classList.remove("active");
+      }
+    }
+
+    const prompt = modal.querySelector(".mic-test-prompt") as HTMLElement;
+    if (prompt && audioDetected && !prompt.classList.contains("success")) {
+      prompt.classList.add("success");
+      prompt.innerHTML = `${createIcon(CheckCircle)} Audio detected! Your microphone is working.`;
+    }
+  };
+
+  renderModalContent();
+  document.body.appendChild(modal);
+
+  // Start mic test
+  try {
+    await startMicTest(selectedDeviceId);
+  } catch (err) {
+    console.error("Failed to start mic test:", err);
+  }
+
+  // Poll for audio levels
+  micTestInterval = window.setInterval(async () => {
+    try {
+      currentMicTest = await getMicTestLevel();
+      if (currentMicTest.isReceivingAudio && currentMicTest.peakLevel > 0.1) {
+        audioDetected = true;
+      }
+      updateAudioLevel();
+    } catch (err) {
+      console.error("Mic test error:", err);
+    }
+  }, 100);
+
+  const clickHandler = (e: MouseEvent) => {
+    if ((e.target as HTMLElement).classList.contains("hotkey-modal-overlay")) {
+      closeMicTestModal();
+    }
+  };
+
+  const keyHandler = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      closeMicTestModal();
+    }
+  };
+
+  modal.addEventListener("click", clickHandler);
+  document.addEventListener("keydown", keyHandler);
+
+  micTestModalCleanup = async () => {
+    if (micTestInterval) {
+      clearInterval(micTestInterval);
+      micTestInterval = null;
+    }
+    try {
+      await stopMicTest();
+    } catch (err) {
+      console.error("Error stopping mic test:", err);
+    }
+    modal.removeEventListener("click", clickHandler);
+    document.removeEventListener("keydown", keyHandler);
+    modal.remove();
+    micTestModalCleanup = null;
+  };
+}
+
+function closeMicTestModal(): void {
+  if (micTestModalCleanup) {
+    micTestModalCleanup();
+  }
+}
+
 async function handleSettingChange(
   key: keyof SettingsType,
   value: unknown
@@ -649,6 +819,13 @@ async function renderSettings(el: HTMLElement): Promise<void> {
           <div class="settings-row-desc">Play sounds for recording start/stop</div>
         </div>
         <div class="toggle ${settings?.soundEnabled ? "active" : ""}" data-setting="soundEnabled"></div>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">Test microphone</div>
+          <div class="settings-row-desc">Check if your microphone is working</div>
+        </div>
+        <button class="btn btn-outline mic-test-btn">Test</button>
       </div>
     </div>
     <div class="settings-section">
@@ -730,6 +907,9 @@ async function renderSettings(el: HTMLElement): Promise<void> {
 
   const hotkeyBtn = el.querySelector(".hotkey-btn");
   hotkeyBtn?.addEventListener("click", showHotkeyModal);
+
+  const micTestBtn = el.querySelector(".mic-test-btn");
+  micTestBtn?.addEventListener("click", showMicTestModal);
 
   const resetBtn = el.querySelector(".reset-onboarding-btn");
   resetBtn?.addEventListener("click", async () => {
