@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  Check,
   Copy,
   History,
   Home,
@@ -46,6 +47,9 @@ let stats: Stats | null = null;
 let currentAppState: AppState = "initializing";
 let transcripts: Transcript[] = [];
 let searchQuery = "";
+let transcriptOffset = 0;
+let hasMoreTranscripts = true;
+const PAGE_SIZE = 50;
 let settings: SettingsType | null = null;
 let audioDevices: AudioDevice[] = [];
 let hotkeyModalCleanup: (() => void) | null = null;
@@ -107,6 +111,7 @@ function renderContent(): void {
       renderHome(content);
       break;
     case "history":
+      transcriptOffset = 0;
       renderHistory(content);
       break;
     case "settings":
@@ -208,21 +213,30 @@ function truncateText(text: string, maxLength: number): string {
   return `${text.slice(0, maxLength)}...`;
 }
 
-async function loadTranscripts(): Promise<void> {
+async function loadTranscripts(append = false): Promise<void> {
   try {
+    let newItems: Transcript[];
     if (searchQuery.trim()) {
-      transcripts = await searchTranscripts(searchQuery);
+      newItems = await searchTranscripts(
+        searchQuery,
+        PAGE_SIZE,
+        transcriptOffset
+      );
     } else {
-      transcripts = await getRecentTranscripts(50);
+      newItems = await getRecentTranscripts(PAGE_SIZE, transcriptOffset);
     }
+    hasMoreTranscripts = newItems.length === PAGE_SIZE;
+    transcripts = append ? [...transcripts, ...newItems] : newItems;
   } catch {
-    transcripts = [];
+    transcripts = append ? transcripts : [];
+    hasMoreTranscripts = false;
   }
 }
 
 async function handleDeleteTranscript(id: number): Promise<void> {
   try {
     await deleteTranscript(id);
+    transcriptOffset = 0;
     await loadTranscripts();
     stats = await getStats().catch(() => null);
     renderContent();
@@ -242,6 +256,7 @@ async function handleClearAll(): Promise<void> {
   }
   try {
     await deleteAllTranscripts();
+    transcriptOffset = 0;
     await loadTranscripts();
     stats = await getStats().catch(() => null);
     renderContent();
@@ -256,9 +271,13 @@ function copyToClipboard(text: string): void {
   });
 }
 
-function renderHistory(el: HTMLElement): void {
+function renderHistory(
+  el: HTMLElement,
+  options: { restoreFocus?: boolean; skipLoad?: boolean } = {}
+): void {
+  const { restoreFocus = false, skipLoad = false } = options;
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI rendering with necessary loops
-  loadTranscripts().then(() => {
+  const doRender = () => {
     const grouped = groupTranscriptsByDate(transcripts);
     const hasTranscripts = transcripts.length > 0;
 
@@ -295,7 +314,8 @@ function renderHistory(el: HTMLElement): void {
       </div>
       ${
         hasTranscripts
-          ? `<div class="transcript-list">${listHtml}</div>`
+          ? `<div class="transcript-list">${listHtml}</div>
+             ${hasMoreTranscripts ? `<button class="btn btn-secondary load-more-btn">Load more</button>` : ""}`
           : `
         <div class="empty-state">
           <div class="empty-state-title">${searchQuery ? "No results found" : "No transcripts yet"}</div>
@@ -306,13 +326,26 @@ function renderHistory(el: HTMLElement): void {
     `;
 
     const searchInput = el.querySelector(".search-input") as HTMLInputElement;
+    if (restoreFocus && searchInput) {
+      searchInput.focus();
+      searchInput.setSelectionRange(searchQuery.length, searchQuery.length);
+    }
+
     let searchTimeout: ReturnType<typeof setTimeout>;
     searchInput?.addEventListener("input", (e) => {
+      const input = e.target as HTMLInputElement;
+      searchQuery = input.value;
+      transcriptOffset = 0;
       clearTimeout(searchTimeout);
       searchTimeout = setTimeout(() => {
-        searchQuery = (e.target as HTMLInputElement).value;
-        renderHistory(el);
+        renderHistory(el, { restoreFocus: true });
       }, 300);
+    });
+
+    el.querySelector(".load-more-btn")?.addEventListener("click", async () => {
+      transcriptOffset += PAGE_SIZE;
+      await loadTranscripts(true);
+      renderHistory(el, { skipLoad: true });
     });
 
     el.querySelector(".clear-all-btn")?.addEventListener(
@@ -334,15 +367,29 @@ function renderHistory(el: HTMLElement): void {
     for (const btn of el.querySelectorAll(".copy-btn")) {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
-        const listItem = (e.target as HTMLElement).closest(".list-item");
+        const button = (e.target as HTMLElement).closest(
+          ".copy-btn"
+        ) as HTMLButtonElement;
+        const listItem = button?.closest(".list-item");
         const id = listItem?.getAttribute("data-id");
         const transcript = transcripts.find((t) => t.id === Number(id));
-        if (transcript) {
+        if (transcript && button) {
           copyToClipboard(transcript.text);
+          const originalIcon = button.innerHTML;
+          button.innerHTML = createIcon(Check);
+          setTimeout(() => {
+            button.innerHTML = originalIcon;
+          }, 2000);
         }
       });
     }
-  });
+  };
+
+  if (skipLoad) {
+    doRender();
+  } else {
+    loadTranscripts().then(doRender);
+  }
 }
 
 async function loadSettings(): Promise<void> {

@@ -160,7 +160,7 @@ pub fn get_recent_transcripts(limit: i64, offset: i64) -> Result<Vec<Transcript>
     })
 }
 
-pub fn search_transcripts(query: &str, limit: i64) -> Result<Vec<Transcript>, String> {
+pub fn search_transcripts(query: &str, limit: i64, offset: i64) -> Result<Vec<Transcript>, String> {
     with_db(|conn| {
         let mut stmt = conn.prepare(
             "SELECT t.id, t.text, t.created_at, t.duration_ms, t.app_context, t.word_count
@@ -168,10 +168,10 @@ pub fn search_transcripts(query: &str, limit: i64) -> Result<Vec<Transcript>, St
              JOIN transcripts_fts fts ON t.id = fts.rowid
              WHERE transcripts_fts MATCH ?1
              ORDER BY rank
-             LIMIT ?2"
+             LIMIT ?2 OFFSET ?3"
         )?;
 
-        let rows = stmt.query_map(params![query, limit], |row| {
+        let rows = stmt.query_map(params![query, limit, offset], |row| {
             Ok(Transcript {
                 id: row.get(0)?,
                 text: row.get(1)?,
@@ -252,8 +252,8 @@ pub fn db_get_recent(limit: i64, offset: i64) -> Result<Vec<Transcript>, String>
 }
 
 #[tauri::command]
-pub fn db_search(query: String, limit: i64) -> Result<Vec<Transcript>, String> {
-    search_transcripts(&query, limit)
+pub fn db_search(query: String, limit: i64, offset: i64) -> Result<Vec<Transcript>, String> {
+    search_transcripts(&query, limit, offset)
 }
 
 #[tauri::command]

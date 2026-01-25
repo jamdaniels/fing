@@ -42,9 +42,10 @@ export async function getRecentTranscripts(
 
 export async function searchTranscripts(
   query: string,
-  limit = 50
+  limit = 50,
+  offset = 0
 ): Promise<Transcript[]> {
-  return await invoke<Transcript[]>("db_search", { query, limit });
+  return await invoke<Transcript[]>("db_search", { query, limit, offset });
 }
 
 export async function deleteTranscript(id: number): Promise<void> {

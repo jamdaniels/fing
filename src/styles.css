@@ -111,7 +111,7 @@ body {
 
 .content {
   flex: 1;
-  padding: 24px;
+  padding: 40px 24px 24px;
   overflow-y: auto;
 }
 
@@ -826,6 +826,11 @@ body {
 .transcript-list {
   display: flex;
   flex-direction: column;
+}
+
+.load-more-btn {
+  margin: 16px auto;
+  display: block;
 }
 
 .list-item-actions button svg {
