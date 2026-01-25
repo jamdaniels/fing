@@ -13,12 +13,14 @@ pub struct Settings {
     pub paste_enabled: bool,
     pub history_enabled: bool,
     pub history_limit: i64,
+    #[serde(default)]
+    pub onboarding_completed: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            hotkey: "CommandOrControl+Shift+Space".to_string(),
+            hotkey: "F8".to_string(),
             model_path: String::new(),
             selected_microphone_id: None,
             auto_start: false,
@@ -26,6 +28,7 @@ impl Default for Settings {
             paste_enabled: true,
             history_enabled: true,
             history_limit: 1000,
+            onboarding_completed: false,
         }
     }
 }
@@ -41,6 +44,17 @@ pub async fn load_settings() -> Settings {
     let path = get_settings_path();
 
     if let Ok(contents) = fs::read_to_string(&path).await {
+        serde_json::from_str(&contents).unwrap_or_default()
+    } else {
+        Settings::default()
+    }
+}
+
+/// Sync version of load_settings for use in menu building
+pub fn load_settings_sync() -> Settings {
+    let path = get_settings_path();
+
+    if let Ok(contents) = std::fs::read_to_string(&path) {
         serde_json::from_str(&contents).unwrap_or_default()
     } else {
         Settings::default()

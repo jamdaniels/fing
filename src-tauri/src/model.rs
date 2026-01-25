@@ -278,7 +278,7 @@ pub fn get_progress() -> DownloadProgress {
     DownloadProgress::from(&*state)
 }
 
-/// Open file picker dialog to select a model file
+/// Open file picker dialog to select a model file and copy it to the default location
 pub fn select_file(app: &tauri::AppHandle) -> Option<PathBuf> {
     use tauri_plugin_dialog::DialogExt;
 
@@ -289,5 +289,25 @@ pub fn select_file(app: &tauri::AppHandle) -> Option<PathBuf> {
         .set_title("Select Whisper Model")
         .blocking_pick_file();
 
-    file_path.and_then(|f| f.into_path().ok())
+    let selected_path = file_path.and_then(|f| f.into_path().ok())?;
+
+    // Get the default model path
+    let dest_path = default_model_path();
+
+    // Create directory if needed
+    if let Some(parent) = dest_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            tracing::error!("Failed to create model directory: {}", e);
+            return None;
+        }
+    }
+
+    // Copy the selected file to the default location
+    if let Err(e) = std::fs::copy(&selected_path, &dest_path) {
+        tracing::error!("Failed to copy model file: {}", e);
+        return None;
+    }
+
+    tracing::info!("Copied model from {:?} to {:?}", selected_path, dest_path);
+    Some(dest_path)
 }

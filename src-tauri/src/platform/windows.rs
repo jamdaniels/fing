@@ -51,3 +51,10 @@ pub fn paste_text() -> Result<(), String> {
 
     Ok(())
 }
+
+/// Set the hotkey (stub for Windows)
+pub fn set_hotkey(_key: &str) -> Result<(), String> {
+    // TODO: Implement Windows hotkey registration
+    tracing::warn!("Windows hotkey change not yet implemented");
+    Ok(())
+}

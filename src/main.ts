@@ -6,10 +6,12 @@ import {
   Home,
   type IconNode,
   Info,
+  Keyboard,
   Power,
   Search,
   Settings,
   Trash2,
+  X,
 } from "lucide";
 import { cleanupOnboarding, renderOnboarding } from "./components/onboarding";
 import { createIcon } from "./lib/icons";
@@ -43,6 +45,7 @@ let transcripts: Transcript[] = [];
 let searchQuery = "";
 let settings: SettingsType | null = null;
 let audioDevices: AudioDevice[] = [];
+let hotkeyModalCleanup: (() => void) | null = null;
 
 function renderSidebar(): void {
   const sidebar = document.getElementById("sidebar");
@@ -61,19 +64,18 @@ function renderSidebar(): void {
     ${items
       .map(
         (item) => `
-      <div class="sidebar-item ${currentView === item.id ? "active" : ""}" data-view="${item.id}">
+      <button class="sidebar-item ${currentView === item.id ? "active" : ""}" data-view="${item.id}">
         ${createIcon(item.icon)}
         <span>${item.label}</span>
-      </div>
+      </button>
     `
       )
       .join("")}
     <div class="sidebar-spacer"></div>
-    <div class="sidebar-divider"></div>
-    <div class="sidebar-item" data-action="quit">
+    <button class="sidebar-item" data-action="quit">
       ${createIcon(Power)}
       <span>Quit</span>
-    </div>
+    </button>
   `;
 
   for (const el of sidebar.querySelectorAll(".sidebar-item")) {
@@ -350,6 +352,162 @@ async function loadSettings(): Promise<void> {
   }
 }
 
+function formatKeyForDisplay(key: string): string {
+  // Convert key codes to display-friendly names
+  const keyMap: Record<string, string> = {
+    F1: "F1",
+    F2: "F2",
+    F3: "F3",
+    F4: "F4",
+    F5: "F5",
+    F6: "F6",
+    F7: "F7",
+    F8: "F8",
+    F9: "F9",
+    F10: "F10",
+    F11: "F11",
+    F12: "F12",
+    Space: "Space",
+    Escape: "Esc",
+    " ": "Space",
+  };
+  return keyMap[key] || key;
+}
+
+const FUNCTION_KEY_REGEX = /^F\d+$/;
+
+function keyEventToHotkey(e: KeyboardEvent): string | null {
+  // Get the base key
+  let key = e.key;
+
+  // Skip modifier-only presses
+  if (["Control", "Alt", "Shift", "Meta"].includes(key)) {
+    return null;
+  }
+
+  // Normalize function keys
+  if (FUNCTION_KEY_REGEX.test(key)) {
+    return key;
+  }
+
+  // Normalize other keys
+  if (key === " ") {
+    key = "Space";
+  } else if (key === "Escape") {
+    return null; // Escape cancels
+  } else if (key.length === 1) {
+    key = key.toUpperCase();
+  }
+
+  return key;
+}
+
+async function setHotkey(hotkey: string): Promise<boolean> {
+  if (!settings) {
+    return false;
+  }
+
+  try {
+    const updated = { ...settings, hotkey };
+    await updateSettings(updated);
+    settings = updated;
+
+    // Re-register the hotkey in backend
+    await invoke("update_hotkey", { hotkey });
+    return true;
+  } catch (err) {
+    console.error("Failed to update hotkey:", err);
+    return false;
+  }
+}
+
+function showHotkeyModal(): void {
+  // Remove existing modal if any
+  closeHotkeyModal();
+
+  const modal = document.createElement("div");
+  modal.className = "hotkey-modal-overlay";
+  modal.innerHTML = `
+    <div class="hotkey-modal">
+      <button class="hotkey-modal-close">${createIcon(X)}</button>
+      <div class="hotkey-modal-icon">${createIcon(Keyboard)}</div>
+      <div class="hotkey-modal-title">Press the new hotkey</div>
+      <div class="hotkey-modal-desc">Press any key to set as your recording hotkey</div>
+      <div class="hotkey-modal-current">Current: <span class="hotkey-modal-key">${formatKeyForDisplay(settings?.hotkey ?? "F8")}</span></div>
+      <button class="btn btn-outline hotkey-fn-btn" style="margin-top: 16px;">Use Fn key</button>
+      <div class="hotkey-modal-hint">Press Escape to cancel</div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  // Handle Fn key button click
+  const fnBtn = modal.querySelector(".hotkey-fn-btn");
+  fnBtn?.addEventListener("click", async () => {
+    if (await setHotkey("Fn")) {
+      closeHotkeyModal();
+      renderContent();
+    } else {
+      const desc = modal.querySelector(".hotkey-modal-desc");
+      if (desc) {
+        desc.textContent = "Failed to set hotkey. Try another key.";
+        desc.classList.add("error");
+      }
+    }
+  });
+
+  const keyHandler = async (e: KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.key === "Escape") {
+      closeHotkeyModal();
+      return;
+    }
+
+    const hotkey = keyEventToHotkey(e);
+    if (!hotkey) {
+      return;
+    }
+
+    if (await setHotkey(hotkey)) {
+      closeHotkeyModal();
+      renderContent();
+    } else {
+      const desc = modal.querySelector(".hotkey-modal-desc");
+      if (desc) {
+        desc.textContent = "Failed to set hotkey. Try another key.";
+        desc.classList.add("error");
+      }
+    }
+  };
+
+  const clickHandler = (e: MouseEvent) => {
+    if ((e.target as HTMLElement).classList.contains("hotkey-modal-overlay")) {
+      closeHotkeyModal();
+    }
+  };
+
+  const closeBtn = modal.querySelector(".hotkey-modal-close");
+  closeBtn?.addEventListener("click", closeHotkeyModal);
+
+  document.addEventListener("keydown", keyHandler);
+  modal.addEventListener("click", clickHandler);
+
+  hotkeyModalCleanup = () => {
+    document.removeEventListener("keydown", keyHandler);
+    modal.removeEventListener("click", clickHandler);
+    modal.remove();
+    hotkeyModalCleanup = null;
+  };
+}
+
+function closeHotkeyModal(): void {
+  if (hotkeyModalCleanup) {
+    hotkeyModalCleanup();
+  }
+}
+
 async function handleSettingChange(
   key: keyof SettingsType,
   value: unknown
@@ -384,7 +542,7 @@ function renderSettings(el: HTMLElement): void {
             <div class="settings-row-label">Hotkey</div>
             <div class="settings-row-desc">Press and hold to record</div>
           </div>
-          <button class="btn btn-outline">${settings?.hotkey ?? "F8"}</button>
+          <button class="btn btn-outline hotkey-btn">${formatKeyForDisplay(settings?.hotkey ?? "F8")}</button>
         </div>
       </div>
       <div class="settings-section">
@@ -447,6 +605,9 @@ function renderSettings(el: HTMLElement): void {
       const value = micSelect.value || null;
       handleSettingChange("selectedMicrophoneId", value);
     });
+
+    const hotkeyBtn = el.querySelector(".hotkey-btn");
+    hotkeyBtn?.addEventListener("click", showHotkeyModal);
   });
 }
 
@@ -476,7 +637,7 @@ function renderAbout(el: HTMLElement): void {
   `;
 }
 
-function showOnboarding(): void {
+async function showOnboarding(): Promise<void> {
   const app = document.getElementById("app");
   if (!app) {
     return;
@@ -485,7 +646,7 @@ function showOnboarding(): void {
   app.innerHTML = `<div id="onboarding-container"></div>`;
   const container = document.getElementById("onboarding-container");
   if (container) {
-    renderOnboarding(container);
+    await renderOnboarding(container);
   }
 }
 
@@ -514,7 +675,7 @@ async function init(): Promise<void> {
   }
 
   if (currentAppState === "needs-setup") {
-    showOnboarding();
+    await showOnboarding();
   } else {
     showMainUI();
   }

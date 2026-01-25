@@ -1,6 +1,7 @@
 import { Check, CheckCircle, ChevronRight, Mic, Shield, Upload } from "lucide";
 import { createIcon } from "../lib/icons";
 import {
+  checkModelExists,
   completeSetup,
   getAudioDevices,
   getDownloadProgress,
@@ -47,6 +48,44 @@ let state: OnboardingState = {
 let container: HTMLElement | null = null;
 let downloadPollInterval: number | null = null;
 let micTestInterval: number | null = null;
+
+const TOTAL_STEPS = 5;
+
+function renderStepIndicator(currentStep: OnboardingStep): string {
+  if (currentStep === 5) {
+    return ""; // Don't show on completion
+  }
+
+  const dots: string[] = [];
+  for (let i = 1; i <= TOTAL_STEPS - 1; i++) {
+    // 4 dots (exclude completion)
+    const isActive = i === currentStep;
+    const isPast = i < currentStep;
+    const clickable = isPast;
+    dots.push(`
+      <button
+        class="step-dot ${isActive ? "active" : ""} ${isPast ? "completed" : ""}"
+        data-step="${i}"
+        ${clickable ? "" : "disabled"}
+        aria-label="Step ${i}"
+      ></button>
+    `);
+  }
+  return `<div class="step-indicator">${dots.join("")}</div>`;
+}
+
+function attachStepIndicatorListeners(): void {
+  for (const dot of document.querySelectorAll(".step-dot[data-step]")) {
+    dot.addEventListener("click", (e) => {
+      const step = Number(
+        (e.currentTarget as HTMLElement).dataset.step
+      ) as OnboardingStep;
+      if (step < state.step) {
+        goToStep(step);
+      }
+    });
+  }
+}
 
 // Use shared createIcon from lib/icons.ts
 
@@ -174,6 +213,7 @@ function renderWelcome(): void {
           ${createIcon(ChevronRight)}
         </button>
       </div>
+      ${renderStepIndicator(1)}
     </div>
   `;
 
@@ -183,6 +223,7 @@ function renderWelcome(): void {
   document
     .getElementById("get-started-btn")
     ?.addEventListener("click", () => goToStep(2));
+  attachStepIndicatorListeners();
 }
 
 function renderDownloadModel(): void {
@@ -225,6 +266,8 @@ function renderDownloadModel(): void {
         <h1 class="onboarding-title">Download Speech Model</h1>
         <p class="onboarding-desc">Fing needs a speech recognition model (~75 MB, one-time download)</p>
 
+        ${state.downloadError ? `<div class="download-status error" style="margin-bottom: 16px;">${state.downloadError}</div>` : ""}
+
         ${renderDownloadButton(isDownloading, isComplete, isFailed, statusText, progress)}
 
         ${
@@ -252,6 +295,7 @@ function renderDownloadModel(): void {
         `
         }
       </div>
+      ${renderStepIndicator(2)}
     </div>
   `;
 
@@ -273,6 +317,7 @@ function renderDownloadModel(): void {
   document
     .getElementById("continue-btn")
     ?.addEventListener("click", () => goToStep(3));
+  attachStepIndicatorListeners();
 }
 
 function renderPermissions(): void {
@@ -326,6 +371,7 @@ function renderPermissions(): void {
           ${createIcon(ChevronRight)}
         </button>
       </div>
+      ${renderStepIndicator(3)}
     </div>
   `;
 
@@ -341,6 +387,7 @@ function renderPermissions(): void {
   document
     .getElementById("continue-btn")
     ?.addEventListener("click", () => goToStep(4));
+  attachStepIndicatorListeners();
 }
 
 function renderTestMicrophone(): void {
@@ -398,6 +445,7 @@ function renderTestMicrophone(): void {
           ${createIcon(ChevronRight)}
         </button>
       </div>
+      ${renderStepIndicator(4)}
     </div>
   `;
 
@@ -410,6 +458,7 @@ function renderTestMicrophone(): void {
   document
     .getElementById("finish-btn")
     ?.addEventListener("click", () => goToStep(5));
+  attachStepIndicatorListeners();
 }
 
 function renderCompletion(): void {
@@ -467,8 +516,16 @@ async function goToStep(step: OnboardingStep): Promise<void> {
 
 async function handleSkipSetup(): Promise<void> {
   await stopPolling();
-  await completeSetup();
-  window.dispatchEvent(new CustomEvent("setup-complete"));
+  try {
+    await completeSetup();
+    window.dispatchEvent(new CustomEvent("setup-complete"));
+  } catch (err) {
+    console.error("Failed to complete setup:", err);
+    state.step = 2;
+    state.downloadProgress = null;
+    state.downloadError = String(err);
+    render();
+  }
 }
 
 function handleStartDownload(): void {
@@ -644,11 +701,20 @@ async function stopPolling(): Promise<void> {
 
 async function handleComplete(): Promise<void> {
   await stopPolling();
-  await completeSetup();
-  window.dispatchEvent(new CustomEvent("setup-complete"));
+  try {
+    await completeSetup();
+    window.dispatchEvent(new CustomEvent("setup-complete"));
+  } catch (err) {
+    console.error("Failed to complete setup:", err);
+    // Show error to user - go back to step 2 (download) if model issue
+    state.step = 2;
+    state.downloadProgress = null;
+    state.downloadError = String(err);
+    render();
+  }
 }
 
-export function renderOnboarding(el: HTMLElement): void {
+export async function renderOnboarding(el: HTMLElement): Promise<void> {
   container = el;
   state = {
     step: 1,
@@ -660,6 +726,25 @@ export function renderOnboarding(el: HTMLElement): void {
     micTest: null,
     audioDetected: false,
   };
+
+  // Check if model already exists - skip to permissions step if so
+  try {
+    const modelStatus = await checkModelExists();
+    if (modelStatus.isValid) {
+      // Model exists, mark download as complete and skip to permissions
+      state.downloadProgress = {
+        bytesDownloaded: 0,
+        totalBytes: 0,
+        percentage: 100,
+        status: "complete",
+      };
+      state.step = 3; // Go to permissions step
+      handleRequestPermissions(); // Load permission status
+    }
+  } catch (e) {
+    console.error("Failed to check model status:", e);
+  }
+
   render();
 }
 

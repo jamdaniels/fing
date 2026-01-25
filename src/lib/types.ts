@@ -31,6 +31,7 @@ export interface Settings {
   pasteEnabled: boolean;
   historyEnabled: boolean;
   historyLimit: HistoryLimit;
+  onboardingCompleted: boolean;
 }
 
 export interface UpdateInfo {

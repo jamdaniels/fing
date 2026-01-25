@@ -1,6 +1,7 @@
 // macOS-specific platform code
 
 use std::ffi::c_void;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::OnceLock;
 use tauri::AppHandle;
 
@@ -49,6 +50,7 @@ extern "C" {
     ) -> CFMachPortRef;
     fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
     fn CGEventGetIntegerValueField(event: CGEventRef, field: u32) -> i64;
+    fn CGEventGetFlags(event: CGEventRef) -> u64;
 }
 
 // CGEventFlags
@@ -71,13 +73,21 @@ const K_CG_EVENT_TAP_OPTION_LISTEN_ONLY: u32 = 1;
 // CGEventType
 const K_CG_EVENT_KEY_DOWN: u32 = 10;
 const K_CG_EVENT_KEY_UP: u32 = 11;
+const K_CG_EVENT_FLAGS_CHANGED: u32 = 12;
 
 // CGEventMask
 const K_CG_EVENT_MASK_FOR_KEY_DOWN: u64 = 1 << K_CG_EVENT_KEY_DOWN;
 const K_CG_EVENT_MASK_FOR_KEY_UP: u64 = 1 << K_CG_EVENT_KEY_UP;
+const K_CG_EVENT_MASK_FOR_FLAGS_CHANGED: u64 = 1 << K_CG_EVENT_FLAGS_CHANGED;
 
 // CGEventField
 const K_CG_KEYBOARD_EVENT_KEYCODE: u32 = 9;
+
+// Fn key flag (NX_SECONDARYFNMASK)
+const K_CG_EVENT_FLAG_MASK_FN: u64 = 1 << 23;
+
+// Special keycode for Fn key (not a real keycode, used internally)
+const K_VK_FN: i64 = -1;
 
 // kCFRunLoopCommonModes
 extern "C" {
@@ -90,6 +100,85 @@ const K_CG_EVENT_SOURCE_STATE_HID_SYSTEM_STATE: i32 = 1;
 // Global app handle storage
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 
+// Current hotkey keycode (default F8 = 100)
+static CURRENT_HOTKEY: AtomicI64 = AtomicI64::new(K_VK_F8);
+
+// Track Fn key state (for detecting press/release)
+static FN_KEY_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Map a key name to macOS virtual keycode
+pub fn key_name_to_keycode(key: &str) -> Option<i64> {
+    match key.to_uppercase().as_str() {
+        "FN" => Some(K_VK_FN), // Special case for Fn key
+        "F1" => Some(122),
+        "F2" => Some(120),
+        "F3" => Some(99),
+        "F4" => Some(118),
+        "F5" => Some(96),
+        "F6" => Some(97),
+        "F7" => Some(98),
+        "F8" => Some(100),
+        "F9" => Some(101),
+        "F10" => Some(109),
+        "F11" => Some(103),
+        "F12" => Some(111),
+        "F13" => Some(105),
+        "F14" => Some(107),
+        "F15" => Some(113),
+        "A" => Some(0),
+        "B" => Some(11),
+        "C" => Some(8),
+        "D" => Some(2),
+        "E" => Some(14),
+        "F" => Some(3),
+        "G" => Some(5),
+        "H" => Some(4),
+        "I" => Some(34),
+        "J" => Some(38),
+        "K" => Some(40),
+        "L" => Some(37),
+        "M" => Some(46),
+        "N" => Some(45),
+        "O" => Some(31),
+        "P" => Some(35),
+        "Q" => Some(12),
+        "R" => Some(15),
+        "S" => Some(1),
+        "T" => Some(17),
+        "U" => Some(32),
+        "V" => Some(9),
+        "W" => Some(13),
+        "X" => Some(7),
+        "Y" => Some(16),
+        "Z" => Some(6),
+        "0" => Some(29),
+        "1" => Some(18),
+        "2" => Some(19),
+        "3" => Some(20),
+        "4" => Some(21),
+        "5" => Some(23),
+        "6" => Some(22),
+        "7" => Some(26),
+        "8" => Some(28),
+        "9" => Some(25),
+        "SPACE" => Some(49),
+        _ => None,
+    }
+}
+
+/// Update the current hotkey
+pub fn set_hotkey(key: &str) -> Result<(), String> {
+    let keycode = key_name_to_keycode(key).ok_or_else(|| format!("Unknown key: {}", key))?;
+    CURRENT_HOTKEY.store(keycode, Ordering::SeqCst);
+    tracing::info!("Hotkey updated to {} (keycode {})", key, keycode);
+    Ok(())
+}
+
+/// Get the current hotkey keycode
+pub fn get_current_hotkey() -> i64 {
+    CURRENT_HOTKEY.load(Ordering::SeqCst)
+}
+
 // CGEventTap callback
 extern "C" fn event_tap_callback(
     _proxy: CGEventTapProxy,
@@ -97,18 +186,44 @@ extern "C" fn event_tap_callback(
     event: CGEventRef,
     _user_info: *mut c_void,
 ) -> CGEventRef {
-    let keycode = unsafe { CGEventGetIntegerValueField(event, K_CG_KEYBOARD_EVENT_KEYCODE) };
+    let current_hotkey = get_current_hotkey();
 
-    if keycode == K_VK_F8 {
-        if let Some(app) = APP_HANDLE.get() {
-            match event_type {
-                K_CG_EVENT_KEY_DOWN => {
+    // Handle Fn key specially via flags changed event
+    if current_hotkey == K_VK_FN {
+        if event_type == K_CG_EVENT_FLAGS_CHANGED {
+            let flags = unsafe { CGEventGetFlags(event) };
+            let fn_pressed = (flags & K_CG_EVENT_FLAG_MASK_FN) != 0;
+            let was_pressed = FN_KEY_DOWN.load(std::sync::atomic::Ordering::SeqCst);
+
+            if fn_pressed && !was_pressed {
+                // Fn key pressed
+                FN_KEY_DOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+                if let Some(app) = APP_HANDLE.get() {
                     crate::hotkey::on_key_down(app);
                 }
-                K_CG_EVENT_KEY_UP => {
+            } else if !fn_pressed && was_pressed {
+                // Fn key released
+                FN_KEY_DOWN.store(false, std::sync::atomic::Ordering::SeqCst);
+                if let Some(app) = APP_HANDLE.get() {
                     crate::hotkey::on_key_up(app);
                 }
-                _ => {}
+            }
+        }
+    } else {
+        // Handle regular key events
+        let keycode = unsafe { CGEventGetIntegerValueField(event, K_CG_KEYBOARD_EVENT_KEYCODE) };
+
+        if keycode == current_hotkey {
+            if let Some(app) = APP_HANDLE.get() {
+                match event_type {
+                    K_CG_EVENT_KEY_DOWN => {
+                        crate::hotkey::on_key_down(app);
+                    }
+                    K_CG_EVENT_KEY_UP => {
+                        crate::hotkey::on_key_up(app);
+                    }
+                    _ => {}
+                }
             }
         }
     }
@@ -320,8 +435,8 @@ pub fn register_global_hotkey(app: AppHandle) -> Result<(), String> {
     // Spawn background thread for event tap run loop
     std::thread::spawn(|| {
         unsafe {
-            // Create event tap for key events
-            let event_mask = K_CG_EVENT_MASK_FOR_KEY_DOWN | K_CG_EVENT_MASK_FOR_KEY_UP;
+            // Create event tap for key events and flags changed (for Fn key)
+            let event_mask = K_CG_EVENT_MASK_FOR_KEY_DOWN | K_CG_EVENT_MASK_FOR_KEY_UP | K_CG_EVENT_MASK_FOR_FLAGS_CHANGED;
 
             let event_tap = CGEventTapCreate(
                 K_CG_SESSION_EVENT_TAP,

@@ -22,7 +22,7 @@ use state::AppState;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::TrayIconBuilder,
     Emitter, Manager,
 };
@@ -171,6 +171,12 @@ fn verify_model(path: String) -> model::ModelVerification {
 }
 
 #[tauri::command]
+fn check_model_exists() -> model::ModelVerification {
+    let path = model::default_model_path();
+    model::verify(&path)
+}
+
+#[tauri::command]
 fn select_model_file(app: tauri::AppHandle) -> Option<String> {
     model::select_file(&app).map(|p| p.to_string_lossy().to_string())
 }
@@ -269,7 +275,12 @@ fn try_register_hotkey(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
+fn update_hotkey(hotkey: String) -> Result<(), String> {
+    platform::set_hotkey(&hotkey)
+}
+
+#[tauri::command]
+async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
     // Verify model exists at default path
     let model_path = model::default_model_path();
     let verification = model::verify(&model_path);
@@ -289,8 +300,29 @@ fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
     transcribe::init_transcriber(&model_path_str)
         .map_err(|e| format!("Failed to initialize transcriber: {:?}", e))?;
 
+    // Save onboarding_completed to settings
+    let mut current_settings = settings::load_settings().await;
+    current_settings.onboarding_completed = true;
+    settings::save_settings(&current_settings).await?;
+
+    // Set hotkey from settings
+    if let Err(e) = platform::set_hotkey(&current_settings.hotkey) {
+        tracing::warn!("Failed to set hotkey: {}", e);
+    }
+
+    // Register the hotkey (creates the event tap)
+    // Don't fail setup if this fails - user can fix permissions and restart
+    if let Err(e) = hotkey::register_hotkey(&app) {
+        tracing::warn!("Failed to register hotkey: {} - hotkey will work after app restart with proper permissions", e);
+    }
+
     // Transition to Ready state (this also emits app-state-changed event)
     state::set_state(&app, AppState::Ready)?;
+
+    // Rebuild tray menu to show full menu instead of "Complete Setup..."
+    if let Err(e) = rebuild_tray_menu(&app) {
+        tracing::error!("Failed to rebuild tray menu: {}", e);
+    }
 
     tracing::info!("Setup complete, app is ready");
     Ok(())
@@ -298,7 +330,10 @@ fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
 
 fn build_tray_menu(app: &tauri::App) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
     let current_state = state::get_state();
+    build_tray_menu_for_state(app, current_state)
+}
 
+fn build_tray_menu_for_state(app: &impl tauri::Manager<tauri::Wry>, current_state: AppState) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
     if current_state == AppState::NeedsSetup {
         // Simplified menu for setup state
         let setup = MenuItem::with_id(app, "setup", "Complete Setup...", true, None::<&str>)?;
@@ -312,7 +347,7 @@ fn build_tray_menu(app: &tauri::App) -> Result<Menu<tauri::Wry>, Box<dyn std::er
         let separator1 = PredefinedMenuItem::separator(app)?;
 
         // Build microphone submenu
-        let mic_submenu = build_mic_submenu(app)?;
+        let mic_submenu = build_mic_submenu_for_handle(app)?;
 
         let separator2 = PredefinedMenuItem::separator(app)?;
         let updates = MenuItem::with_id(app, "check_updates", "Check for Updates", true, None::<&str>)?;
@@ -327,17 +362,40 @@ fn build_tray_menu(app: &tauri::App) -> Result<Menu<tauri::Wry>, Box<dyn std::er
     }
 }
 
-fn build_mic_submenu(app: &tauri::App) -> Result<Submenu<tauri::Wry>, Box<dyn std::error::Error>> {
+/// Tray icon ID constant
+const TRAY_ID: &str = "fing-tray";
+
+/// Rebuild the tray menu based on current app state
+fn rebuild_tray_menu(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let current_state = state::get_state();
+    let menu = build_tray_menu_for_state(app, current_state)?;
+
+    // Get the tray icon by ID and update its menu
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        tray.set_menu(Some(menu))?;
+        tracing::info!("Tray menu rebuilt for state: {:?}", current_state);
+    } else {
+        tracing::warn!("Could not find tray icon with ID: {}", TRAY_ID);
+    }
+
+    Ok(())
+}
+
+fn build_mic_submenu_for_handle(app: &impl tauri::Manager<tauri::Wry>) -> Result<Submenu<tauri::Wry>, Box<dyn std::error::Error>> {
     let devices = AudioCapture::list_devices();
+    let current_settings = settings::load_settings_sync();
+    let selected_id = current_settings.selected_microphone_id;
 
-    let mut mic_items: Vec<MenuItem<tauri::Wry>> = Vec::new();
+    let mut mic_items: Vec<CheckMenuItem<tauri::Wry>> = Vec::new();
 
-    // Add system default option
-    let default_item = MenuItem::with_id(
+    // Add system default option (selected when selected_microphone_id is None)
+    let default_checked = selected_id.is_none();
+    let default_item = CheckMenuItem::with_id(
         app,
         "mic_default",
         "System Default",
         true,
+        default_checked,
         None::<&str>,
     )?;
     mic_items.push(default_item);
@@ -345,19 +403,15 @@ fn build_mic_submenu(app: &tauri::App) -> Result<Submenu<tauri::Wry>, Box<dyn st
     // Add each device
     for device in devices {
         let item_id = format!("mic_{}", device.id.replace(' ', "_"));
-        let label = if device.is_default {
-            format!("{} (Default)", device.name)
-        } else {
-            device.name.clone()
-        };
-        let item = MenuItem::with_id(app, &item_id, &label, true, None::<&str>)?;
+        let is_checked = selected_id.as_ref() == Some(&device.id);
+        let item = CheckMenuItem::with_id(app, &item_id, &device.name, true, is_checked, None::<&str>)?;
         mic_items.push(item);
     }
 
     let mic_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
         mic_items.iter().map(|i| i as &dyn tauri::menu::IsMenuItem<tauri::Wry>).collect();
 
-    Ok(Submenu::with_items(app, "Select Mic", true, &mic_refs)?)
+    Ok(Submenu::with_items(app, "Microphone", true, &mic_refs)?)
 }
 
 fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
@@ -403,7 +457,24 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
                 Some(id.strip_prefix("mic_").unwrap().replace('_', " "))
             };
             tracing::info!("Microphone changed via tray: {:?}", device_id);
-            // TODO: Store in settings and apply to audio capture
+
+            // Save to settings and rebuild menu
+            let app_clone = app.clone();
+            let device_id_clone = device_id.clone();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    let mut current_settings = settings::load_settings().await;
+                    current_settings.selected_microphone_id = device_id_clone;
+                    if let Err(e) = settings::save_settings(&current_settings).await {
+                        tracing::error!("Failed to save mic setting: {}", e);
+                    }
+                });
+                // Rebuild tray menu to update checkmarks
+                if let Err(e) = rebuild_tray_menu(&app_clone) {
+                    tracing::error!("Failed to rebuild tray menu: {}", e);
+                }
+            });
         }
         _ => {
             tracing::debug!("Unknown menu event: {}", event_id);
@@ -427,27 +498,56 @@ pub fn run() {
             // Build tray menu based on app state
             let menu = build_tray_menu(app)?;
 
-            // Create tray icon
-            TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+            // Create tray icon with explicit ID for later access
+            TrayIconBuilder::with_id(TRAY_ID)
+                .icon(tauri::include_image!("icons/tray.png"))
+                .icon_as_template(true)
                 .menu(&menu)
                 .on_menu_event(|app, event| {
                     handle_menu_event(app, event.id.as_ref());
                 })
                 .build(app)?;
 
-            // Show main window on first launch
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-            }
-
-            // Register global hotkey and transition to Ready state
+            // Check if onboarding was previously completed
             let app_handle = app.handle().clone();
-            if let Err(e) = hotkey::register_hotkey(&app_handle) {
-                tracing::error!("Failed to register hotkey: {}", e);
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let saved_settings = rt.block_on(settings::load_settings());
+
+            if saved_settings.onboarding_completed {
+                // User already completed onboarding - verify model and init
+                let model_path = model::default_model_path();
+                let verification = model::verify(&model_path);
+
+                if verification.is_valid {
+                    // Initialize transcriber
+                    let model_path_str = model_path.to_string_lossy().to_string();
+                    if let Err(e) = transcribe::init_transcriber(&model_path_str) {
+                        tracing::error!("Failed to init transcriber: {:?}", e);
+                    } else {
+                        // Set hotkey from settings before registering
+                        if let Err(e) = platform::set_hotkey(&saved_settings.hotkey) {
+                            tracing::warn!("Failed to set hotkey from settings: {}", e);
+                        }
+                        // Register hotkey and transition to Ready
+                        if let Err(e) = hotkey::register_hotkey(&app_handle) {
+                            tracing::error!("Failed to register hotkey: {}", e);
+                        } else {
+                            state::set_state(&app_handle, AppState::Ready).ok();
+                            tracing::info!("Restored to Ready state from saved settings");
+                        }
+                    }
+                } else {
+                    tracing::warn!("Onboarding completed but model invalid, showing setup");
+                    // Show main window for re-setup
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                    }
+                }
             } else {
-                // Transition to Ready state
-                state::set_state(&app_handle, state::AppState::Ready).ok();
+                // First run - show main window for onboarding
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                }
             }
 
             Ok(())
@@ -490,6 +590,7 @@ pub fn run() {
             start_model_download,
             get_download_progress,
             verify_model,
+            check_model_exists,
             select_model_file,
             // Setup
             complete_setup,
@@ -504,6 +605,7 @@ pub fn run() {
             request_microphone_permission,
             request_permissions,
             try_register_hotkey,
+            update_hotkey,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

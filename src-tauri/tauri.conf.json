@@ -12,21 +12,19 @@
   "app": {
     "macOSPrivateApi": true,
     "withGlobalTauri": true,
-    "trayIcon": {
-      "iconPath": "icons/tray.png",
-      "iconAsTemplate": true
-    },
     "windows": [
       {
         "label": "main",
-        "title": "Fing",
+        "title": "",
         "width": 800,
         "height": 600,
         "visible": false,
         "resizable": true,
         "minWidth": 600,
         "minHeight": 400,
-        "center": true
+        "center": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       },
       {
         "label": "indicator",

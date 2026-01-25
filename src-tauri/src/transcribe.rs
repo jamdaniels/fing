@@ -67,6 +67,12 @@ impl TranscriptionEngine for Transcriber {
 static TRANSCRIBER: once_cell::sync::OnceCell<Transcriber> = once_cell::sync::OnceCell::new();
 
 pub fn init_transcriber(model_path: &str) -> Result<(), TranscribeError> {
+    // If already initialized, just return Ok
+    if TRANSCRIBER.get().is_some() {
+        tracing::info!("Transcriber already initialized, skipping");
+        return Ok(());
+    }
+
     let transcriber = Transcriber::new(model_path)?;
     TRANSCRIBER
         .set(transcriber)

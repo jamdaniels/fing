@@ -83,6 +83,10 @@ export async function verifyModel(path: string): Promise<ModelVerification> {
   return await invoke<ModelVerification>("verify_model", { path });
 }
 
+export async function checkModelExists(): Promise<ModelVerification> {
+  return await invoke<ModelVerification>("check_model_exists");
+}
+
 export async function completeSetup(): Promise<void> {
   return await invoke("complete_setup");
 }
