@@ -27,6 +27,9 @@ import {
   getRecentTranscripts,
   getSettings,
   getStats,
+  requestAccessibilityPermission,
+  requestMicrophonePermission,
+  requestPermissions,
   searchTranscripts,
   setAutoStart,
   updateSettings,
@@ -605,103 +608,176 @@ async function handleAutoStartToggle(
   }
 }
 
-function renderSettings(el: HTMLElement): void {
-  loadSettings().then(() => {
-    const micOptions = audioDevices
-      .map(
-        (d) =>
-          `<option value="${d.id}" ${settings?.selectedMicrophoneId === d.id ? "selected" : ""}>${d.name}${d.isDefault ? " (Default)" : ""}</option>`
-      )
-      .join("");
+async function renderSettings(el: HTMLElement): Promise<void> {
+  await loadSettings();
 
-    el.innerHTML = `
-      <h1>Settings</h1>
-      <div class="settings-section">
-        <div class="settings-section-title">Recording</div>
-        <div class="settings-row">
-          <div>
-            <div class="settings-row-label">Hotkey</div>
-            <div class="settings-row-desc">Press and hold to record</div>
-          </div>
-          <button class="btn btn-outline hotkey-btn">${formatKeyForDisplay(settings?.hotkey ?? "F8")}</button>
-        </div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Audio</div>
-        <div class="settings-row">
-          <div>
-            <div class="settings-row-label">Microphone</div>
-            <div class="settings-row-desc">Select audio input device</div>
-          </div>
-          <select class="btn btn-outline mic-select">
-            <option value="" ${settings?.selectedMicrophoneId ? "" : "selected"}>System Default</option>
-            ${micOptions}
-          </select>
-        </div>
-        <div class="settings-row">
-          <div>
-            <div class="settings-row-label">Sound feedback</div>
-            <div class="settings-row-desc">Play sounds for recording start/stop</div>
-          </div>
-          <div class="toggle ${settings?.soundEnabled ? "active" : ""}" data-setting="soundEnabled"></div>
-        </div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">Privacy</div>
-        <div class="settings-row">
-          <div>
-            <div class="settings-row-label">Save transcript history</div>
-            <div class="settings-row-desc">Store transcripts locally for search</div>
-          </div>
-          <div class="toggle ${settings?.historyEnabled ? "active" : ""}" data-setting="historyEnabled"></div>
-        </div>
-      </div>
-      <div class="settings-section">
-        <div class="settings-section-title">System</div>
-        <div class="settings-row">
-          <div>
-            <div class="settings-row-label">Start on login</div>
-            <div class="settings-row-desc">Launch Fing when you log in</div>
-          </div>
-          <div class="toggle ${settings?.autoStart ? "active" : ""}" data-setting="autoStart"></div>
-        </div>
-      </div>
-    `;
+  const micOptions = audioDevices
+    .map(
+      (d) =>
+        `<option value="${d.id}" ${settings?.selectedMicrophoneId === d.id ? "selected" : ""}>${d.name}${d.isDefault ? " (Default)" : ""}</option>`
+    )
+    .join("");
 
-    for (const toggle of el.querySelectorAll(".toggle")) {
-      toggle.addEventListener("click", () => {
-        const setting = toggle.getAttribute(
-          "data-setting"
-        ) as keyof SettingsType;
-        if (!(setting && settings)) {
-          return;
-        }
+  el.innerHTML = `
+    <h1>Settings</h1>
+    <div class="settings-section">
+      <div class="settings-section-title">Recording</div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">Hotkey</div>
+          <div class="settings-row-desc">Press and hold to record</div>
+        </div>
+        <button class="btn btn-outline hotkey-btn">${formatKeyForDisplay(settings?.hotkey ?? "F8")}</button>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Audio</div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">Microphone</div>
+          <div class="settings-row-desc">Select audio input device</div>
+        </div>
+        <select class="settings-select mic-select">
+          <option value="" ${settings?.selectedMicrophoneId ? "" : "selected"}>System Default</option>
+          ${micOptions}
+        </select>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">Sound feedback</div>
+          <div class="settings-row-desc">Play sounds for recording start/stop</div>
+        </div>
+        <div class="toggle ${settings?.soundEnabled ? "active" : ""}" data-setting="soundEnabled"></div>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Permissions</div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">Microphone</div>
+          <div class="settings-row-desc">Required for voice recording</div>
+        </div>
+        <span class="permission-badge" data-permission="microphone">Checking...</span>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">Accessibility</div>
+          <div class="settings-row-desc">Required for global hotkey and paste</div>
+        </div>
+        <span class="permission-badge" data-permission="accessibility">Checking...</span>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Privacy</div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">Save transcript history</div>
+          <div class="settings-row-desc">Store transcripts locally for search</div>
+        </div>
+        <div class="toggle ${settings?.historyEnabled ? "active" : ""}" data-setting="historyEnabled"></div>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">System</div>
+      <div class="settings-row">
+        <div>
+          <div class="settings-row-label">Start on login</div>
+          <div class="settings-row-desc">Launch Fing when you log in</div>
+        </div>
+        <div class="toggle ${settings?.autoStart ? "active" : ""}" data-setting="autoStart"></div>
+      </div>
+    </div>
+  `;
 
-        const newValue = !settings[setting];
-        if (setting === "autoStart") {
-          handleAutoStartToggle(
-            toggle as HTMLElement,
-            newValue as boolean
-          ).catch((err) => {
+  for (const toggle of el.querySelectorAll(".toggle")) {
+    toggle.addEventListener("click", () => {
+      const setting = toggle.getAttribute("data-setting") as keyof SettingsType;
+      if (!(setting && settings)) {
+        return;
+      }
+
+      const newValue = !settings[setting];
+      if (setting === "autoStart") {
+        handleAutoStartToggle(toggle as HTMLElement, newValue as boolean).catch(
+          (err) => {
             console.error("Failed to update auto-start:", err);
-          });
-          return;
-        }
+          }
+        );
+        return;
+      }
 
-        toggle.classList.toggle("active", newValue as boolean);
-        handleSettingChange(setting, newValue);
-      });
-    }
-
-    const micSelect = el.querySelector(".mic-select") as HTMLSelectElement;
-    micSelect?.addEventListener("change", () => {
-      const value = micSelect.value || null;
-      handleSettingChange("selectedMicrophoneId", value);
+      toggle.classList.toggle("active", newValue as boolean);
+      handleSettingChange(setting, newValue);
     });
+  }
 
-    const hotkeyBtn = el.querySelector(".hotkey-btn");
-    hotkeyBtn?.addEventListener("click", showHotkeyModal);
+  const micSelect = el.querySelector(".mic-select") as HTMLSelectElement;
+  micSelect?.addEventListener("change", () => {
+    const value = micSelect.value || null;
+    handleSettingChange("selectedMicrophoneId", value);
   });
+
+  const hotkeyBtn = el.querySelector(".hotkey-btn");
+  hotkeyBtn?.addEventListener("click", showHotkeyModal);
+
+  updatePermissionStatus();
+}
+
+async function updatePermissionStatus(): Promise<void> {
+  const micBadge = document.querySelector(
+    '[data-permission="microphone"]'
+  ) as HTMLElement;
+  const accBadge = document.querySelector(
+    '[data-permission="accessibility"]'
+  ) as HTMLElement;
+
+  if (!(micBadge && accBadge)) {
+    return;
+  }
+
+  try {
+    const status = await requestPermissions();
+
+    updateBadge(micBadge, status.microphone, "microphone");
+    updateBadge(accBadge, status.accessibility, "accessibility");
+  } catch (e) {
+    console.error("Failed to check permissions:", e);
+    micBadge.textContent = "Error";
+    accBadge.textContent = "Error";
+  }
+}
+
+function updateBadge(
+  badge: HTMLElement,
+  status: string,
+  type: "microphone" | "accessibility"
+): void {
+  badge.className = "permission-badge";
+
+  if (status === "granted") {
+    badge.textContent = "Granted";
+    badge.classList.add("granted");
+  } else if (status === "not-applicable") {
+    badge.textContent = "N/A";
+    badge.classList.add("na");
+  } else {
+    badge.textContent = "Grant";
+    badge.classList.add("action");
+    badge.style.cursor = "pointer";
+    badge.onclick = async () => {
+      badge.textContent = "Opening...";
+      badge.classList.remove("action");
+      badge.style.cursor = "default";
+
+      if (type === "microphone") {
+        await requestMicrophonePermission();
+      } else {
+        await requestAccessibilityPermission();
+      }
+
+      setTimeout(updatePermissionStatus, 1500);
+    };
+  }
 }
 
 function renderAbout(el: HTMLElement): void {
@@ -762,8 +838,10 @@ function showMainUI(): void {
 
   app.innerHTML = `
     <div class="titlebar"></div>
-    <aside id="sidebar" class="sidebar"></aside>
-    <main id="content" class="content"></main>
+    <div class="app-body">
+      <aside id="sidebar" class="sidebar"></aside>
+      <main id="content" class="content"></main>
+    </div>
   `;
 
   setupTitlebarDrag();
