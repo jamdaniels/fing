@@ -824,6 +824,11 @@ async function init(): Promise<void> {
   listen<string>("navigate-to-tab", (event) => {
     const tab = event.payload as SidebarItem;
     if (["home", "history", "settings", "about"].includes(tab)) {
+      // Clear content immediately to prevent flash of old view
+      const content = document.getElementById("content");
+      if (content) {
+        content.innerHTML = "";
+      }
       currentView = tab;
       renderSidebar();
       renderContent();
