@@ -6,6 +6,7 @@ import {
   getAudioDevices,
   getDownloadProgress,
   getMicTestLevel,
+  getSettings,
   requestAccessibilityPermission,
   requestMicrophonePermission,
   requestPermissions,
@@ -13,6 +14,7 @@ import {
   startMicTest,
   startModelDownload,
   stopMicTest,
+  updateSettings,
 } from "../lib/ipc";
 import type {
   AudioDevice,
@@ -97,6 +99,21 @@ function formatBytes(bytes: number): string {
   const sizes = ["B", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${(bytes / k ** i).toFixed(1)} ${sizes[i]}`;
+}
+
+async function persistSelectedDevice(deviceId: string | null): Promise<void> {
+  try {
+    const currentSettings = await getSettings();
+    if (currentSettings.selectedMicrophoneId === deviceId) {
+      return;
+    }
+    await updateSettings({
+      ...currentSettings,
+      selectedMicrophoneId: deviceId,
+    });
+  } catch (err) {
+    console.error("Failed to save microphone selection:", err);
+  }
 }
 
 function renderDownloadButton(
@@ -592,17 +609,24 @@ async function handleGrantMicrophone(): Promise<void> {
 }
 
 async function loadAudioDevices(): Promise<void> {
-  state.audioDevices = await getAudioDevices();
-  const defaultDevice = state.audioDevices.find((d) => d.isDefault);
-  if (defaultDevice && !state.selectedDeviceId) {
-    state.selectedDeviceId = defaultDevice.id;
+  const [devices, currentSettings] = await Promise.all([
+    getAudioDevices(),
+    getSettings().catch(() => null),
+  ]);
+  state.audioDevices = devices;
+
+  if (currentSettings?.selectedMicrophoneId) {
+    state.selectedDeviceId = currentSettings.selectedMicrophoneId;
+  } else if (!state.selectedDeviceId) {
+    const defaultDevice = state.audioDevices.find((d) => d.isDefault);
+    state.selectedDeviceId = defaultDevice?.id ?? null;
   }
   render();
 }
 
 async function handleMicChange(e: Event): Promise<void> {
   const select = e.target as HTMLSelectElement;
-  state.selectedDeviceId = select.value;
+  state.selectedDeviceId = select.value || null;
   state.audioDetected = false;
 
   // Restart mic test with new device
@@ -613,6 +637,8 @@ async function handleMicChange(e: Event): Promise<void> {
   } catch (err) {
     console.error("Failed to switch mic:", err);
   }
+
+  await persistSelectedDevice(state.selectedDeviceId);
 }
 
 function startDownloadPolling(): void {

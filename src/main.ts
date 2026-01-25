@@ -21,10 +21,12 @@ import {
   getAppInfo,
   getAppState,
   getAudioDevices,
+  getAutoStart,
   getRecentTranscripts,
   getSettings,
   getStats,
   searchTranscripts,
+  setAutoStart,
   updateSettings,
 } from "./lib/ipc";
 import type {
@@ -344,8 +346,17 @@ function renderHistory(el: HTMLElement): void {
 
 async function loadSettings(): Promise<void> {
   try {
-    settings = await getSettings();
-    audioDevices = await getAudioDevices();
+    const [loadedSettings, devices] = await Promise.all([
+      getSettings(),
+      getAudioDevices(),
+    ]);
+    settings = loadedSettings;
+    audioDevices = devices;
+
+    const autoStart = await getAutoStart().catch(() => null);
+    if (autoStart !== null && settings) {
+      settings = { ...settings, autoStart };
+    }
   } catch {
     settings = null;
     audioDevices = [];
@@ -524,6 +535,28 @@ async function handleSettingChange(
   }
 }
 
+async function handleAutoStartToggle(
+  toggle: HTMLElement,
+  enabled: boolean
+): Promise<void> {
+  if (!settings) {
+    return;
+  }
+
+  const previous = settings.autoStart;
+  toggle.classList.toggle("active", enabled);
+
+  try {
+    await setAutoStart(enabled);
+    const updated = { ...settings, autoStart: enabled };
+    await updateSettings(updated);
+    settings = updated;
+  } catch (e) {
+    toggle.classList.toggle("active", previous);
+    throw e;
+  }
+}
+
 function renderSettings(el: HTMLElement): void {
   loadSettings().then(() => {
     const micOptions = audioDevices
@@ -592,11 +625,23 @@ function renderSettings(el: HTMLElement): void {
         const setting = toggle.getAttribute(
           "data-setting"
         ) as keyof SettingsType;
-        if (setting && settings) {
-          const newValue = !settings[setting];
-          toggle.classList.toggle("active", newValue as boolean);
-          handleSettingChange(setting, newValue);
+        if (!(setting && settings)) {
+          return;
         }
+
+        const newValue = !settings[setting];
+        if (setting === "autoStart") {
+          handleAutoStartToggle(
+            toggle as HTMLElement,
+            newValue as boolean
+          ).catch((err) => {
+            console.error("Failed to update auto-start:", err);
+          });
+          return;
+        }
+
+        toggle.classList.toggle("active", newValue as boolean);
+        handleSettingChange(setting, newValue);
       });
     }
 

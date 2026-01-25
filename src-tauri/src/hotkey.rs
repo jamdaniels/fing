@@ -8,7 +8,7 @@ use crate::audio::AudioCapture;
 use crate::db::{save_transcript, NewTranscript};
 use crate::model::default_model_path;
 use crate::paste::set_clipboard_and_paste;
-use crate::settings::load_settings;
+use crate::settings::{load_settings, load_settings_sync};
 use crate::sounds;
 use crate::transcribe::{get_transcriber, init_transcriber, transcribe_audio};
 
@@ -25,7 +25,7 @@ static RECORDING_SESSION_ID: AtomicU64 = AtomicU64::new(0);
 
 // Commands sent to the audio thread
 enum AudioCommand {
-    StartRecording,
+    StartRecording(Option<String>),
     StopRecording,
 }
 
@@ -60,7 +60,8 @@ fn ensure_audio_thread() {
 
         loop {
             match cmd_rx.recv() {
-                Ok(AudioCommand::StartRecording) => {
+                Ok(AudioCommand::StartRecording(device_id)) => {
+                    capture.set_device(device_id);
                     // Initialize capture if not already
                     if let Err(e) = capture.init_capture() {
                         tracing::error!("Failed to init audio capture: {}", e);
@@ -145,7 +146,12 @@ pub fn on_key_down(app: &AppHandle) {
     ensure_audio_thread();
 
     if let Some(ref thread) = *AUDIO_THREAD.lock().unwrap() {
-        if thread.cmd_tx.send(AudioCommand::StartRecording).is_err() {
+        let selected_device_id = load_settings_sync().selected_microphone_id;
+        if thread
+            .cmd_tx
+            .send(AudioCommand::StartRecording(selected_device_id))
+            .is_err()
+        {
             tracing::error!("Failed to send StartRecording command");
         }
     }

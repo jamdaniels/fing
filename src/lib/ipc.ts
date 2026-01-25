@@ -136,3 +136,11 @@ export async function openMainWindow(tab?: string): Promise<void> {
 export async function quitApp(): Promise<void> {
   return await invoke("quit_app");
 }
+
+export async function setAutoStart(enabled: boolean): Promise<void> {
+  return await invoke("set_auto_start", { enabled });
+}
+
+export async function getAutoStart(): Promise<boolean> {
+  return await invoke<boolean>("get_auto_start");
+}
