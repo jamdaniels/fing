@@ -29,7 +29,6 @@ pub struct MicrophoneTest {
 #[derive(Debug, Clone, Serialize)]
 pub enum AudioError {
     NoDevicesFound,
-    DeviceNotFound,
     DeviceInitFailed(String),
     StreamError(String),
 }
@@ -38,7 +37,6 @@ impl std::fmt::Display for AudioError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AudioError::NoDevicesFound => write!(f, "No audio input devices found"),
-            AudioError::DeviceNotFound => write!(f, "Specified audio device not found"),
             AudioError::DeviceInitFailed(msg) => write!(f, "Failed to initialize device: {}", msg),
             AudioError::StreamError(msg) => write!(f, "Audio stream error: {}", msg),
         }
@@ -114,7 +112,9 @@ impl AudioCapture {
                         }
                     }
                 }
-                Err(AudioError::DeviceNotFound)
+                // Fall back to default device if selected device not found
+                tracing::warn!("Selected device '{}' not found, falling back to default", id);
+                host.default_input_device().ok_or(AudioError::NoDevicesFound)
             }
             None => host.default_input_device().ok_or(AudioError::NoDevicesFound),
         }

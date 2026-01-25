@@ -327,7 +327,6 @@ pub fn on_key_up(app: &AppHandle) {
         let text = text.trim().to_string();
         if text.is_empty() {
             tracing::warn!("Transcription returned empty text");
-            crate::notifications::show_info(&app_handle, "Fing", "No speech detected");
             finish_transcription(&app_handle, None, duration_ms).await;
             return;
         }

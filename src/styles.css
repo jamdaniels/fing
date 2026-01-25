@@ -375,10 +375,10 @@ body {
 }
 
 .about-icon {
-  width: 64px;
-  height: 64px;
+  width: 96px;
+  height: 96px;
   margin-bottom: 16px;
-  color: var(--accent);
+  border-radius: 16px;
 }
 
 .about-version {
