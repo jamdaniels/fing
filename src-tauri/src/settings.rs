@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use tokio::fs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,15 +32,8 @@ impl Default for Settings {
     }
 }
 
-fn get_settings_path() -> PathBuf {
-    let data_dir = dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("fing");
-    data_dir.join("settings.json")
-}
-
 pub async fn load_settings() -> Settings {
-    let path = get_settings_path();
+    let path = crate::paths::settings_path();
 
     if let Ok(contents) = fs::read_to_string(&path).await {
         serde_json::from_str(&contents).unwrap_or_default()
@@ -52,7 +44,7 @@ pub async fn load_settings() -> Settings {
 
 /// Sync version of load_settings for use in menu building
 pub fn load_settings_sync() -> Settings {
-    let path = get_settings_path();
+    let path = crate::paths::settings_path();
 
     if let Ok(contents) = std::fs::read_to_string(&path) {
         serde_json::from_str(&contents).unwrap_or_default()
@@ -62,7 +54,7 @@ pub fn load_settings_sync() -> Settings {
 }
 
 pub async fn save_settings(settings: &Settings) -> Result<(), String> {
-    let path = get_settings_path();
+    let path = crate::paths::settings_path();
 
     // Ensure directory exists
     if let Some(parent) = path.parent() {

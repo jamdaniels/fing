@@ -104,11 +104,7 @@ lazy_static::lazy_static! {
 }
 
 pub fn default_model_path() -> PathBuf {
-    let app_data = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-    app_data
-        .join("com.jamdaniels.fing")
-        .join("models")
-        .join(MODEL_FILENAME)
+    crate::paths::models_dir().join(MODEL_FILENAME)
 }
 
 pub fn verify(path: &std::path::Path) -> ModelVerification {

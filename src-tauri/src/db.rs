@@ -1,20 +1,12 @@
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
 
 static DB: Lazy<Mutex<Option<Connection>>> = Lazy::new(|| Mutex::new(None));
 
-fn get_db_path() -> PathBuf {
-    let data_dir = dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("fing");
-    data_dir.join("fing.db")
-}
-
 pub fn init_db() -> Result<(), String> {
-    let path = get_db_path();
+    let path = crate::paths::db_path();
 
     // Ensure directory exists
     if let Some(parent) = path.parent() {

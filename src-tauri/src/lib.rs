@@ -9,6 +9,7 @@ mod indicator;
 mod model;
 mod notifications;
 mod paste;
+mod paths;
 mod platform;
 mod settings;
 mod sounds;
@@ -511,6 +512,9 @@ pub fn run() {
             {
                 app.set_activation_policy(ActivationPolicy::Accessory);
             }
+
+            // Initialize paths first (required by db, settings, model)
+            paths::init(app)?;
 
             // Initialize database
             if let Err(e) = db::init_db() {

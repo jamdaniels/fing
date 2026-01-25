@@ -972,7 +972,6 @@ version = "0.1.0"
 dependencies = [
  "arboard",
  "cpal",
- "dirs",
  "futures-util",
  "lazy_static",
  "once_cell",
