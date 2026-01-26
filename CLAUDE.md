@@ -81,6 +81,12 @@ Hotkey is only registered when state is `Ready`. Model must be downloaded and ve
 ### IPC Pattern
 Frontend calls Rust via `invoke()`. Types in `lib/types.ts` mirror Rust structs. Events emitted from Rust via `app.emit()` (e.g., `app-state-changed`, `transcript-added`).
 
+### Frontend Event Handling
+Uses event delegation on `#sidebar` and `#content` to avoid listener leaks on re-render. Handlers: `handleHistoryClick`, `handleHistoryInput`, `handleSettingsClick`, `handleSettingsChange`.
+
+### Async Runtime (Rust)
+Use `tauri::async_runtime::spawn` for async tasks and `tauri::async_runtime::block_on` for sync contexts. Avoid creating ad-hoc `tokio::runtime::Runtime`.
+
 ## Key Constraints
 
 - **Privacy-first**: Mic only active while F8 held, no cloud, no telemetry
