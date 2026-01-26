@@ -37,6 +37,14 @@ lazy_static::lazy_static! {
     static ref MIC_TEST_DEVICE: Mutex<Option<String>> = Mutex::new(None);
 }
 
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MicTestStartResult {
+    pub requested_device: Option<String>,
+    pub actual_device: String,
+    pub device_matched: bool,
+}
+
 #[tauri::command]
 fn get_app_state() -> String {
     let state = state::APP_STATE.read().unwrap();
@@ -45,6 +53,12 @@ fn get_app_state() -> String {
 
 #[tauri::command]
 fn get_audio_devices() -> Vec<AudioDevice> {
+    AudioCapture::list_devices()
+}
+
+#[tauri::command]
+fn refresh_audio_devices() -> Vec<AudioDevice> {
+    tracing::debug!("Refreshing audio device list");
     AudioCapture::list_devices()
 }
 
@@ -69,12 +83,12 @@ fn test_microphone(device_id: Option<String>) -> Result<MicrophoneTest, String> 
 }
 
 #[tauri::command]
-fn start_mic_test(device_id: Option<String>) -> Result<String, String> {
+async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult, String> {
     tracing::info!("Starting mic test with device: {:?}", device_id);
 
     // Stop any existing test
     MIC_TEST_RUNNING.store(false, Ordering::SeqCst);
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     // Store device ID
     {
@@ -82,24 +96,42 @@ fn start_mic_test(device_id: Option<String>) -> Result<String, String> {
         *guard = device_id.clone();
     }
 
-    // Get device name
+    // Get device match info
     let mut capture = AudioCapture::new();
     if let Some(ref id) = device_id {
         capture.set_device(Some(id.clone()));
     }
 
-    let device_name = match capture.start_mic_test() {
-        Ok(name) => name,
+    let match_result = match capture.start_mic_test() {
+        Ok(result) => result,
         Err(e) => return Err(e.to_string()),
     };
     capture.stop_mic_test();
 
-    // Start mic test thread
-    MIC_TEST_RUNNING.store(true, Ordering::SeqCst);
+    let result = MicTestStartResult {
+        requested_device: match_result.requested.clone(),
+        actual_device: match_result.actual.clone(),
+        device_matched: match_result.matched,
+    };
 
+    // Log result for debugging
+    tracing::info!(
+        "Mic test result: requested={:?}, actual='{}', matched={}",
+        result.requested_device,
+        result.actual_device,
+        result.device_matched
+    );
+    if !match_result.matched {
+        tracing::warn!(
+            "Device mismatch! Requested device not found, using fallback."
+        );
+    }
+
+    // Start mic test thread (uses std::thread for blocking audio I/O)
+    let device_id_clone = device_id.clone();
     std::thread::spawn(move || {
         let mut capture = AudioCapture::new();
-        if let Some(id) = device_id {
+        if let Some(id) = device_id_clone {
             capture.set_device(Some(id));
         }
 
@@ -113,6 +145,9 @@ fn start_mic_test(device_id: Option<String>) -> Result<String, String> {
 
         // Start recording
         capture.begin_recording();
+
+        // Start mic test thread
+        MIC_TEST_RUNNING.store(true, Ordering::SeqCst);
 
         while MIC_TEST_RUNNING.load(Ordering::SeqCst) {
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -132,7 +167,7 @@ fn start_mic_test(device_id: Option<String>) -> Result<String, String> {
         tracing::info!("Mic test thread stopped");
     });
 
-    Ok(device_name)
+    Ok(result)
 }
 
 #[tauri::command]
@@ -605,6 +640,7 @@ pub fn run() {
             db::db_delete_all,
             // Audio
             get_audio_devices,
+            refresh_audio_devices,
             set_audio_device,
             test_microphone,
             start_mic_test,

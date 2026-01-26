@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  AlertTriangle,
   ArrowUpRight,
   Check,
   CheckCircle,
@@ -13,6 +14,7 @@ import {
   Keyboard,
   Mic,
   Power,
+  RefreshCw,
   Search,
   Settings,
   Trash2,
@@ -31,6 +33,7 @@ import {
   getRecentTranscripts,
   getSettings,
   getStats,
+  refreshAudioDevices,
   requestAccessibilityPermission,
   requestMicrophonePermission,
   requestPermissions,
@@ -45,6 +48,7 @@ import type {
   AppState,
   AudioDevice,
   MicrophoneTest,
+  MicTestStartResult,
   Settings as SettingsType,
   SidebarItem,
   Stats,
@@ -665,20 +669,25 @@ async function showMicTestModal(): Promise<void> {
   let currentMicTest: MicrophoneTest | null = null;
   let audioDetected = false;
   let selectedDeviceId = settings?.selectedMicrophoneId ?? null;
+  let deviceMatchResult: MicTestStartResult | null = null;
+  let localDevices = [...audioDevices];
 
   const modal = document.createElement("div");
   modal.className = "hotkey-modal-overlay";
 
-  const micOptions = audioDevices
-    .map(
-      (d) =>
-        `<option value="${d.id}" ${selectedDeviceId === d.id || (selectedDeviceId === null && d.isDefault) ? "selected" : ""}>${d.name}${d.isDefault ? " (Default)" : ""}</option>`
-    )
-    .join("");
+  const getMicOptions = () =>
+    localDevices
+      .map(
+        (d) =>
+          `<option value="${d.id}" ${selectedDeviceId === d.id || (selectedDeviceId === null && d.isDefault) ? "selected" : ""}>${d.name}${d.isDefault ? " (Default)" : ""}</option>`
+      )
+      .join("");
 
   const renderModalContent = () => {
     const level = currentMicTest?.peakLevel ?? 0;
     const levelPercent = Math.min(level * 100, 100);
+    const showMismatchWarning =
+      deviceMatchResult && !deviceMatchResult.deviceMatched;
 
     modal.innerHTML = `
       <div class="hotkey-modal mic-test-modal">
@@ -690,11 +699,31 @@ async function showMicTestModal(): Promise<void> {
         <div class="mic-test-container">
           <div class="mic-select-row">
             <label for="modal-mic-select">Device:</label>
-            <select id="modal-mic-select" class="settings-select">
-              <option value="" ${selectedDeviceId === null ? "selected" : ""}>System Default</option>
-              ${micOptions}
-            </select>
+            <div class="mic-select-wrapper">
+              <select id="modal-mic-select" class="settings-select">
+                <option value="" ${selectedDeviceId === null ? "selected" : ""}>System Default</option>
+                ${getMicOptions()}
+              </select>
+              <button class="btn btn-icon mic-refresh-btn" title="Refresh devices">${createIcon(RefreshCw)}</button>
+            </div>
           </div>
+
+          ${
+            deviceMatchResult
+              ? `<div class="mic-using-device ${showMismatchWarning ? "warning" : ""}">
+              ${showMismatchWarning ? createIcon(AlertTriangle) : ""}
+              <span>Using: ${deviceMatchResult.actualDevice}</span>
+            </div>`
+              : ""
+          }
+
+          ${
+            showMismatchWarning
+              ? `<div class="mic-mismatch-warning">
+              Selected device not found. Using fallback device.
+            </div>`
+              : ""
+          }
 
           <div class="audio-level-container">
             <div class="audio-level-label">Audio Level</div>
@@ -724,6 +753,23 @@ async function showMicTestModal(): Promise<void> {
     const doneBtn = modal.querySelector(".mic-test-done-btn");
     doneBtn?.addEventListener("click", closeMicTestModal);
 
+    const refreshBtn = modal.querySelector(".mic-refresh-btn");
+    refreshBtn?.addEventListener("click", async () => {
+      const btn = refreshBtn as HTMLButtonElement;
+      btn.disabled = true;
+      btn.classList.add("spinning");
+      try {
+        localDevices = await refreshAudioDevices();
+        audioDevices = localDevices;
+        renderModalContent();
+      } catch (err) {
+        console.error("Failed to refresh devices:", err);
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove("spinning");
+      }
+    });
+
     const micSelect = modal.querySelector(
       "#modal-mic-select"
     ) as HTMLSelectElement;
@@ -732,7 +778,8 @@ async function showMicTestModal(): Promise<void> {
       audioDetected = false;
       try {
         await stopMicTest();
-        await startMicTest(selectedDeviceId);
+        deviceMatchResult = await startMicTest(selectedDeviceId);
+        renderModalContent();
       } catch (err) {
         console.error("Failed to switch mic:", err);
       }
@@ -765,7 +812,8 @@ async function showMicTestModal(): Promise<void> {
 
   // Start mic test
   try {
-    await startMicTest(selectedDeviceId);
+    deviceMatchResult = await startMicTest(selectedDeviceId);
+    renderModalContent();
   } catch (err) {
     console.error("Failed to start mic test:", err);
   }

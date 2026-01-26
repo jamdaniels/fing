@@ -559,6 +559,23 @@ pub async fn open_settings(app: AppHandle) -> Result<(), String> {
 
 ## 9. Common Gotchas
 
+### IPC Parameter Naming Convention
+
+Frontend uses camelCase, Rust uses snake_case. Tauri converts automatically.
+
+```typescript
+// Frontend - use camelCase
+invoke("my_command", { deviceId: "abc", userName: "john" });
+```
+
+```rust
+// Rust - use snake_case
+#[tauri::command]
+fn my_command(device_id: String, user_name: String) { ... }
+```
+
+**Common mistake:** Using snake_case in frontend (`device_id`) - parameter will be `None`/missing in Rust.
+
 ### Async Commands Cannot Use Borrowed Types
 
 ```rust

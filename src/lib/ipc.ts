@@ -5,6 +5,7 @@ import type {
   AudioDevice,
   DownloadProgress,
   MicrophoneTest,
+  MicTestStartResult,
   ModelVerification,
   PermissionStatus,
   Settings,
@@ -60,6 +61,10 @@ export async function getAudioDevices(): Promise<AudioDevice[]> {
   return await invoke<AudioDevice[]>("get_audio_devices");
 }
 
+export async function refreshAudioDevices(): Promise<AudioDevice[]> {
+  return await invoke<AudioDevice[]>("refresh_audio_devices");
+}
+
 export async function setAudioDevice(deviceId: string | null): Promise<void> {
   return await invoke("set_audio_device", { deviceId });
 }
@@ -96,13 +101,16 @@ export async function testMicrophone(
   deviceId?: string | null
 ): Promise<MicrophoneTest> {
   return await invoke<MicrophoneTest>("test_microphone", {
-    device_id: deviceId ?? null,
+    deviceId: deviceId ?? null,
   });
 }
 
-export async function startMicTest(deviceId?: string | null): Promise<string> {
-  return await invoke<string>("start_mic_test", {
-    device_id: deviceId ?? null,
+export async function startMicTest(
+  deviceId?: string | null
+): Promise<MicTestStartResult> {
+  // Tauri 2 converts camelCase to snake_case for Rust parameters
+  return await invoke<MicTestStartResult>("start_mic_test", {
+    deviceId: deviceId ?? null,
   });
 }
 

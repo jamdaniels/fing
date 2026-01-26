@@ -27,6 +27,14 @@ pub struct MicrophoneTest {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceMatchResult {
+    pub requested: Option<String>,
+    pub actual: String,
+    pub matched: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub enum AudioError {
     NoDevicesFound,
     DeviceInitFailed(String),
@@ -97,32 +105,121 @@ impl AudioCapture {
         self.selected_device_id = device_id;
     }
 
-    fn get_device(&self) -> Result<Device, AudioError> {
+    fn get_device(&self) -> Result<(Device, DeviceMatchResult), AudioError> {
         let host = cpal::default_host();
 
         match &self.selected_device_id {
             Some(id) => {
-                let devices = host
+                let devices: Vec<_> = host
                     .input_devices()
-                    .map_err(|_| AudioError::NoDevicesFound)?;
-                for device in devices {
-                    if let Ok(name) = device.name() {
-                        if &name == id {
-                            return Ok(device);
-                        }
-                    }
+                    .map_err(|_| AudioError::NoDevicesFound)?
+                    .filter_map(|d| d.name().ok().map(|n| (d, n)))
+                    .collect();
+
+                // Log available devices for debugging
+                let device_names: Vec<_> = devices.iter().map(|(_, n)| n.as_str()).collect();
+                tracing::info!("Available input devices: {:?}", device_names);
+                tracing::info!("Looking for device: '{}'", id);
+
+                // Try exact match first
+                if let Some(idx) = devices.iter().position(|(_, name)| name == id) {
+                    let actual_name = devices[idx].1.clone();
+                    tracing::info!("Exact match found for device '{}'", id);
+                    let (device, _) = devices.into_iter().nth(idx).unwrap();
+                    return Ok((
+                        device,
+                        DeviceMatchResult {
+                            requested: Some(id.clone()),
+                            actual: actual_name,
+                            matched: true,
+                        },
+                    ));
                 }
-                // Fall back to default device if selected device not found
-                tracing::warn!("Selected device '{}' not found, falling back to default", id);
-                host.default_input_device().ok_or(AudioError::NoDevicesFound)
+
+                // Try fuzzy match: trim whitespace and case-insensitive
+                let id_normalized = id.trim().to_lowercase();
+                if let Some(idx) = devices
+                    .iter()
+                    .position(|(_, name)| name.trim().to_lowercase() == id_normalized)
+                {
+                    let actual_name = devices[idx].1.clone();
+                    tracing::info!(
+                        "Fuzzy match found: requested='{}', actual='{}'",
+                        id,
+                        actual_name
+                    );
+                    let (device, _) = devices.into_iter().nth(idx).unwrap();
+                    return Ok((
+                        device,
+                        DeviceMatchResult {
+                            requested: Some(id.clone()),
+                            actual: actual_name,
+                            matched: true,
+                        },
+                    ));
+                }
+
+                // Try contains match (for Bluetooth devices that may have varying names)
+                if let Some(idx) = devices.iter().position(|(_, name)| {
+                    let name_normalized = name.trim().to_lowercase();
+                    name_normalized.contains(&id_normalized)
+                        || id_normalized.contains(&name_normalized)
+                }) {
+                    let actual_name = devices[idx].1.clone();
+                    tracing::info!(
+                        "Partial match found: requested='{}', actual='{}'",
+                        id,
+                        actual_name
+                    );
+                    let (device, _) = devices.into_iter().nth(idx).unwrap();
+                    return Ok((
+                        device,
+                        DeviceMatchResult {
+                            requested: Some(id.clone()),
+                            actual: actual_name,
+                            matched: true,
+                        },
+                    ));
+                }
+
+                // Fall back to default device
+                tracing::warn!(
+                    "Device '{}' not found among {:?}, falling back to default",
+                    id,
+                    device_names
+                );
+                let default_device =
+                    host.default_input_device().ok_or(AudioError::NoDevicesFound)?;
+                let default_name = default_device
+                    .name()
+                    .unwrap_or_else(|_| "Unknown".to_string());
+                Ok((
+                    default_device,
+                    DeviceMatchResult {
+                        requested: Some(id.clone()),
+                        actual: default_name,
+                        matched: false,
+                    },
+                ))
             }
-            None => host.default_input_device().ok_or(AudioError::NoDevicesFound),
+            None => {
+                let device = host.default_input_device().ok_or(AudioError::NoDevicesFound)?;
+                let name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+                Ok((
+                    device,
+                    DeviceMatchResult {
+                        requested: None,
+                        actual: name,
+                        matched: true,
+                    },
+                ))
+            }
         }
     }
 
-    pub fn init_capture(&mut self) -> Result<(), AudioError> {
-        let device = self.get_device()?;
-        let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+    pub fn init_capture(&mut self) -> Result<DeviceMatchResult, AudioError> {
+        let (device, match_result) = self.get_device()?;
+        let device_name = match_result.actual.clone();
 
         let config = device
             .default_input_config()
@@ -229,7 +326,7 @@ impl AudioCapture {
         .map_err(|e| AudioError::StreamError(e.to_string()))?;
 
         self.stream = Some(stream);
-        Ok(())
+        Ok(match_result)
     }
 
     pub fn begin_recording(&mut self) {
@@ -343,13 +440,13 @@ impl AudioCapture {
     }
 
     pub fn test_microphone(&mut self) -> Result<MicrophoneTest, AudioError> {
-        let device = self.get_device()?;
-        let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+        let (_, match_result) = self.get_device()?;
+        let device_name = match_result.actual;
 
         // Initialize if not already
         let was_init = self.stream.is_some();
         if !was_init {
-            self.init_capture()?;
+            let _ = self.init_capture()?;
         }
 
         // Clear buffer and record briefly
@@ -387,11 +484,8 @@ impl AudioCapture {
     }
 
     /// Start continuous mic test - keeps stream open
-    pub fn start_mic_test(&mut self) -> Result<String, AudioError> {
-        let device = self.get_device()?;
-        let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
-
-        self.init_capture()?;
+    pub fn start_mic_test(&mut self) -> Result<DeviceMatchResult, AudioError> {
+        let match_result = self.init_capture()?;
 
         if let Ok(mut buf) = self.buffer.lock() {
             buf.clear();
@@ -402,7 +496,7 @@ impl AudioCapture {
         }
 
         self.is_recording = true;
-        Ok(device_name)
+        Ok(match_result)
     }
 
     /// Get current audio level during mic test and clear old samples

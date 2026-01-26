@@ -83,6 +83,12 @@ export interface MicrophoneTest {
   isReceivingAudio: boolean;
 }
 
+export interface MicTestStartResult {
+  requestedDevice: string | null;
+  actualDevice: string;
+  deviceMatched: boolean;
+}
+
 export interface PermissionStatus {
   microphone: "unknown" | "granted" | "denied";
   accessibility: "unknown" | "granted" | "denied" | "not-applicable";
