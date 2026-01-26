@@ -1,5 +1,21 @@
 use tauri::AppHandle;
 
+/// Escape a string for use in AppleScript double-quoted strings
+#[cfg(target_os = "macos")]
+fn escape_applescript(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Escape a string for use in PowerShell single-quoted strings
+#[cfg(target_os = "windows")]
+fn escape_powershell(s: &str) -> String {
+    // In PowerShell single-quoted strings, only ' needs escaping (doubled)
+    // Also escape backticks and dollar signs for extra safety
+    s.replace('\'', "''")
+        .replace('`', "``")
+        .replace('$', "`$")
+}
+
 /// Show notification that text was copied to clipboard
 pub fn show_clipboard_fallback(app: &AppHandle) {
     #[cfg(target_os = "macos")]
@@ -45,10 +61,12 @@ pub fn show_clipboard_fallback(app: &AppHandle) {
 pub fn show_error(app: &AppHandle, title: &str, message: &str) {
     #[cfg(target_os = "macos")]
     {
+        let escaped_title = escape_applescript(title);
+        let escaped_message = escape_applescript(message);
         let script = format!(
             "display notification \"{}\" with title \"{}\"",
-            message.replace('"', "\\\""),
-            title.replace('"', "\\\"")
+            escaped_message,
+            escaped_title
         );
         let _ = std::process::Command::new("osascript")
             .args(["-e", &script])
@@ -57,6 +75,8 @@ pub fn show_error(app: &AppHandle, title: &str, message: &str) {
 
     #[cfg(target_os = "windows")]
     {
+        let escaped_title = escape_powershell(title);
+        let escaped_message = escape_powershell(message);
         let ps_script = format!(
             "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null; \
              $template = [Windows.UI.Notifications.ToastTemplateType]::ToastText02; \
@@ -66,8 +86,8 @@ pub fn show_error(app: &AppHandle, title: &str, message: &str) {
              $text[1].AppendChild($xml.CreateTextNode('{}')) | Out-Null; \
              $toast = [Windows.UI.Notifications.ToastNotification]::new($xml); \
              [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Fing').Show($toast);",
-            title.replace('\'', "''"),
-            message.replace('\'', "''")
+            escaped_title,
+            escaped_message
         );
         let _ = std::process::Command::new("powershell")
             .args(["-Command", &ps_script])
@@ -89,10 +109,12 @@ pub fn show_error(app: &AppHandle, title: &str, message: &str) {
 pub fn show_info(app: &AppHandle, title: &str, message: &str) {
     #[cfg(target_os = "macos")]
     {
+        let escaped_title = escape_applescript(title);
+        let escaped_message = escape_applescript(message);
         let script = format!(
             "display notification \"{}\" with title \"{}\"",
-            message.replace('"', "\\\""),
-            title.replace('"', "\\\"")
+            escaped_message,
+            escaped_title
         );
         let _ = std::process::Command::new("osascript")
             .args(["-e", &script])
@@ -101,6 +123,8 @@ pub fn show_info(app: &AppHandle, title: &str, message: &str) {
 
     #[cfg(target_os = "windows")]
     {
+        let escaped_title = escape_powershell(title);
+        let escaped_message = escape_powershell(message);
         let ps_script = format!(
             "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null; \
              $template = [Windows.UI.Notifications.ToastTemplateType]::ToastText02; \
@@ -110,8 +134,8 @@ pub fn show_info(app: &AppHandle, title: &str, message: &str) {
              $text[1].AppendChild($xml.CreateTextNode('{}')) | Out-Null; \
              $toast = [Windows.UI.Notifications.ToastNotification]::new($xml); \
              [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Fing').Show($toast);",
-            title.replace('\'', "''"),
-            message.replace('\'', "''")
+            escaped_title,
+            escaped_message
         );
         let _ = std::process::Command::new("powershell")
             .args(["-Command", &ps_script])

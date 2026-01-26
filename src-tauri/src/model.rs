@@ -11,8 +11,13 @@ pub const MODEL_FILENAME: &str = "ggml-tiny.en.bin";
 pub const MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin";
 pub const MODEL_SIZE_BYTES: u64 = 77_704_715;
-// Note: Hash verification disabled - HuggingFace may update the file
+// SHA256 hash verification is informational only - HuggingFace may update the file
+// Primary validation is GGML magic bytes + size check
 pub const MODEL_SHA256: &str = "";
+
+// GGML file magic bytes (little-endian): "ggml" = 0x6c6d6767 or "ggjt" = 0x746a6767
+const GGML_MAGIC_GGML: u32 = 0x67676d6c;
+const GGML_MAGIC_GGJT: u32 = 0x67676a74;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -113,20 +118,37 @@ pub fn verify(path: &std::path::Path) -> ModelVerification {
     let mut hash_valid = false;
 
     if exists {
+        // Check file size (1MB tolerance)
         if let Ok(metadata) = std::fs::metadata(path) {
             let size = metadata.len();
-            // Allow 1MB tolerance
             size_valid = size > MODEL_SIZE_BYTES - 1_000_000 && size < MODEL_SIZE_BYTES + 1_000_000;
+            if !size_valid {
+                tracing::warn!("Model file size invalid: {} bytes (expected ~{} bytes)", size, MODEL_SIZE_BYTES);
+            }
         }
 
-        // Verify SHA256 (skip if hash constant is empty)
-        if size_valid && !MODEL_SHA256.is_empty() {
-            if let Ok(hash) = compute_sha256(path) {
-                hash_valid = hash == MODEL_SHA256;
+        // Verify GGML magic bytes - this is the primary validation
+        if size_valid && !validate_ggml_magic(path) {
+            tracing::warn!("Model file has invalid GGML magic bytes: {:?}", path);
+            size_valid = false;
+        }
+
+        // Hash verification is informational only (HuggingFace may update files)
+        // Model is valid if size and magic bytes check pass
+        if size_valid {
+            hash_valid = true; // Accept based on size and magic bytes
+
+            // Log hash for debugging (but don't fail on mismatch)
+            if !MODEL_SHA256.is_empty() {
+                if let Ok(hash) = compute_sha256(path) {
+                    if hash != MODEL_SHA256 {
+                        tracing::info!(
+                            "Model hash differs from expected (this is OK - HuggingFace may have updated the file): {}",
+                            hash
+                        );
+                    }
+                }
             }
-        } else if size_valid {
-            // Skip hash verification, just trust the size
-            hash_valid = true;
         }
     }
 
@@ -153,6 +175,24 @@ fn compute_sha256(path: &std::path::Path) -> std::io::Result<String> {
     }
 
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// Validate GGML file magic bytes
+fn validate_ggml_magic(path: &std::path::Path) -> bool {
+    use std::io::Read;
+
+    let mut file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+
+    let mut magic_bytes = [0u8; 4];
+    if file.read_exact(&mut magic_bytes).is_err() {
+        return false;
+    }
+
+    let magic = u32::from_le_bytes(magic_bytes);
+    magic == GGML_MAGIC_GGML || magic == GGML_MAGIC_GGJT
 }
 
 pub async fn download() -> Result<PathBuf, String> {
@@ -290,6 +330,32 @@ pub fn select_file(app: &tauri::AppHandle) -> Option<PathBuf> {
 
     let selected_path = file_path.and_then(|f| f.into_path().ok())?;
 
+    // Pre-validate selected file before copying
+    // Check size first
+    let file_size = match std::fs::metadata(&selected_path) {
+        Ok(m) => m.len(),
+        Err(e) => {
+            tracing::error!("Failed to read selected file metadata: {}", e);
+            return None;
+        }
+    };
+
+    // Validate size (1MB tolerance)
+    if file_size < MODEL_SIZE_BYTES - 1_000_000 || file_size > MODEL_SIZE_BYTES + 1_000_000 {
+        tracing::error!(
+            "Selected file has invalid size: {} bytes (expected ~{} bytes)",
+            file_size,
+            MODEL_SIZE_BYTES
+        );
+        return None;
+    }
+
+    // Validate GGML magic bytes
+    if !validate_ggml_magic(&selected_path) {
+        tracing::error!("Selected file is not a valid GGML model (invalid magic bytes)");
+        return None;
+    }
+
     // Get the default model path
     let dest_path = default_model_path();
 
@@ -307,6 +373,19 @@ pub fn select_file(app: &tauri::AppHandle) -> Option<PathBuf> {
         return None;
     }
 
-    tracing::info!("Copied model from {:?} to {:?}", selected_path, dest_path);
+    // Verify the copied file
+    let verification = verify(&dest_path);
+    if !verification.is_valid {
+        tracing::error!(
+            "Copied model file verification failed: size_valid={}, hash_valid={}",
+            verification.size_valid,
+            verification.hash_valid
+        );
+        // Delete invalid file
+        let _ = std::fs::remove_file(&dest_path);
+        return None;
+    }
+
+    tracing::info!("Copied and verified model from {:?} to {:?}", selected_path, dest_path);
     Some(dest_path)
 }

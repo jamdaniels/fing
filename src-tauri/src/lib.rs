@@ -20,7 +20,6 @@ mod updates;
 
 use audio::{AudioCapture, AudioDevice, MicrophoneTest};
 use state::AppState;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -28,13 +27,18 @@ use tauri::{
     ActivationPolicy, Emitter, Manager,
 };
 
-// Global mic test state using atomics (thread-safe)
-static MIC_TEST_RUNNING: AtomicBool = AtomicBool::new(false);
-static MIC_TEST_LEVEL: AtomicU32 = AtomicU32::new(0); // Store as fixed-point (level * 10000)
-static MIC_TEST_RECEIVING: AtomicBool = AtomicBool::new(false);
+/// Consolidated mic test state to prevent race conditions
+/// All state changes go through a single lock acquisition
+#[derive(Default)]
+struct MicTestState {
+    running: bool,
+    level: u32,           // Fixed-point (level * 10000)
+    receiving: bool,
+    device_id: Option<String>,
+}
 
 lazy_static::lazy_static! {
-    static ref MIC_TEST_DEVICE: Mutex<Option<String>> = Mutex::new(None);
+    static ref MIC_TEST_STATE: Mutex<MicTestState> = Mutex::new(MicTestState::default());
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -86,15 +90,17 @@ fn test_microphone(device_id: Option<String>) -> Result<MicrophoneTest, String> 
 async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult, String> {
     tracing::info!("Starting mic test with device: {:?}", device_id);
 
-    // Stop any existing test
-    MIC_TEST_RUNNING.store(false, Ordering::SeqCst);
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-    // Store device ID
+    // Stop any existing test and reset state atomically
     {
-        let mut guard = MIC_TEST_DEVICE.lock().unwrap();
-        *guard = device_id.clone();
+        let mut state = MIC_TEST_STATE
+            .lock()
+            .map_err(|e| format!("Mic test state lock poisoned: {}", e))?;
+        state.running = false;
+        state.level = 0;
+        state.receiving = false;
+        state.device_id = device_id.clone();
     }
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     // Get device match info
     let mut capture = AudioCapture::new();
@@ -137,7 +143,9 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
 
         if let Err(e) = capture.init_capture() {
             tracing::error!("Failed to init mic test capture: {}", e);
-            MIC_TEST_RUNNING.store(false, Ordering::SeqCst);
+            if let Ok(mut state) = MIC_TEST_STATE.lock() {
+                state.running = false;
+            }
             return;
         }
 
@@ -146,17 +154,32 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
         // Start recording
         capture.begin_recording();
 
-        // Start mic test thread
-        MIC_TEST_RUNNING.store(true, Ordering::SeqCst);
+        // Mark as running
+        if let Ok(mut state) = MIC_TEST_STATE.lock() {
+            state.running = true;
+        }
 
-        while MIC_TEST_RUNNING.load(Ordering::SeqCst) {
+        loop {
+            // Check if we should stop
+            let should_run = MIC_TEST_STATE
+                .lock()
+                .map(|s| s.running)
+                .unwrap_or(false);
+            if !should_run {
+                break;
+            }
+
             std::thread::sleep(std::time::Duration::from_millis(50));
 
             // Get current level from buffer (this also clears it)
             let level_info = capture.get_mic_level();
             let level_fixed = (level_info.peak_level * 10000.0) as u32;
-            MIC_TEST_LEVEL.store(level_fixed, Ordering::SeqCst);
-            MIC_TEST_RECEIVING.store(level_info.is_receiving_audio, Ordering::SeqCst);
+
+            // Update state atomically
+            if let Ok(mut state) = MIC_TEST_STATE.lock() {
+                state.level = level_fixed;
+                state.receiving = level_info.is_receiving_audio;
+            }
 
             if level_info.peak_level > 0.01 {
                 tracing::debug!("Mic level: {:.4}", level_info.peak_level);
@@ -172,13 +195,14 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
 
 #[tauri::command]
 fn get_mic_test_level() -> MicrophoneTest {
-    let level_fixed = MIC_TEST_LEVEL.load(Ordering::SeqCst);
-    let peak_level = level_fixed as f32 / 10000.0;
-    let is_receiving = MIC_TEST_RECEIVING.load(Ordering::SeqCst);
+    let (level_fixed, is_receiving) = MIC_TEST_STATE
+        .lock()
+        .map(|s| (s.level, s.receiving))
+        .unwrap_or((0, false));
 
     MicrophoneTest {
         device_name: String::new(),
-        peak_level,
+        peak_level: level_fixed as f32 / 10000.0,
         is_receiving_audio: is_receiving,
     }
 }
@@ -186,9 +210,11 @@ fn get_mic_test_level() -> MicrophoneTest {
 #[tauri::command]
 fn stop_mic_test() {
     tracing::info!("Stopping mic test");
-    MIC_TEST_RUNNING.store(false, Ordering::SeqCst);
-    MIC_TEST_LEVEL.store(0, Ordering::SeqCst);
-    MIC_TEST_RECEIVING.store(false, Ordering::SeqCst);
+    if let Ok(mut state) = MIC_TEST_STATE.lock() {
+        state.running = false;
+        state.level = 0;
+        state.receiving = false;
+    }
 }
 
 #[tauri::command]

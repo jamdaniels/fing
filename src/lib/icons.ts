@@ -1,5 +1,18 @@
 import type { IconNode } from "lucide";
 
+/**
+ * Escape HTML special characters to prevent XSS
+ * Use this for any user or backend data interpolated into innerHTML
+ */
+export function escapeHtml(unsafe: string): string {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 export function createIcon(iconData: IconNode): string {
   const [tag, attrs, children] = iconData as [
     string,

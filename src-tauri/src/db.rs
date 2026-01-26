@@ -5,6 +5,53 @@ use once_cell::sync::Lazy;
 
 static DB: Lazy<Mutex<Option<Connection>>> = Lazy::new(|| Mutex::new(None));
 
+/// Maximum allowed FTS5 query length
+const MAX_FTS_QUERY_LENGTH: usize = 500;
+
+/// Sanitize FTS5 search query to prevent injection
+fn sanitize_fts5_query(query: &str) -> String {
+    // Truncate to max length
+    let truncated = if query.len() > MAX_FTS_QUERY_LENGTH {
+        &query[..MAX_FTS_QUERY_LENGTH]
+    } else {
+        query
+    };
+
+    // Remove FTS5 special operators and escape quotes
+    let mut result = String::with_capacity(truncated.len());
+    let mut chars = truncated.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            // Skip FTS5 operators and special characters
+            '*' | '^' | ':' | '(' | ')' | '{' | '}' | '[' | ']' => continue,
+            // Escape double quotes
+            '"' => result.push_str("\"\""),
+            // Handle potential keywords - check if at word boundary
+            _ => {
+                result.push(c);
+            }
+        }
+    }
+
+    // Remove FTS5 keywords (AND, OR, NOT, NEAR) at word boundaries
+    let result = result
+        .split_whitespace()
+        .filter(|word| {
+            let upper = word.to_uppercase();
+            !matches!(upper.as_str(), "AND" | "OR" | "NOT" | "NEAR")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    // Wrap in quotes for phrase search (safer)
+    if result.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\"{}\"", result)
+    }
+}
+
 pub fn init_db() -> Result<(), String> {
     let path = crate::paths::db_path();
 
@@ -16,6 +63,11 @@ pub fn init_db() -> Result<(), String> {
 
     let conn = Connection::open(&path)
         .map_err(|e| format!("Failed to open database: {}", e))?;
+
+    // Enable WAL mode for better reliability (non-fatal if fails)
+    if let Err(e) = conn.execute("PRAGMA journal_mode=WAL", []) {
+        tracing::warn!("Could not enable WAL mode: {}", e);
+    }
 
     // Create main transcripts table
     conn.execute(
@@ -68,7 +120,7 @@ pub fn init_db() -> Result<(), String> {
     )
     .map_err(|e| format!("Failed to create index: {}", e))?;
 
-    let mut db = DB.lock().unwrap();
+    let mut db = DB.lock().map_err(|e| format!("Database lock poisoned: {}", e))?;
     *db = Some(conn);
 
     tracing::info!("Database initialized at {:?}", path);
@@ -79,7 +131,7 @@ fn with_db<T, F>(f: F) -> Result<T, String>
 where
     F: FnOnce(&Connection) -> Result<T, rusqlite::Error>,
 {
-    let db = DB.lock().unwrap();
+    let db = DB.lock().map_err(|e| format!("Database lock poisoned: {}", e))?;
     let conn = db.as_ref().ok_or("Database not initialized")?;
     f(conn).map_err(|e| e.to_string())
 }
@@ -153,6 +205,16 @@ pub fn get_recent_transcripts(limit: i64, offset: i64) -> Result<Vec<Transcript>
 }
 
 pub fn search_transcripts(query: &str, limit: i64, offset: i64) -> Result<Vec<Transcript>, String> {
+    // Validate and clamp limit/offset
+    let limit = limit.clamp(1, 1000);
+    let offset = offset.max(0);
+
+    // Sanitize the FTS5 query
+    let sanitized_query = sanitize_fts5_query(query);
+    if sanitized_query.is_empty() {
+        return Ok(Vec::new());
+    }
+
     with_db(|conn| {
         let mut stmt = conn.prepare(
             "SELECT t.id, t.text, t.created_at, t.duration_ms, t.app_context, t.word_count
@@ -163,7 +225,7 @@ pub fn search_transcripts(query: &str, limit: i64, offset: i64) -> Result<Vec<Tr
              LIMIT ?2 OFFSET ?3"
         )?;
 
-        let rows = stmt.query_map(params![query, limit, offset], |row| {
+        let rows = stmt.query_map(params![sanitized_query, limit, offset], |row| {
             Ok(Transcript {
                 id: row.get(0)?,
                 text: row.get(1)?,

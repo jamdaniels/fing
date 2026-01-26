@@ -1,5 +1,5 @@
 import { Check, CheckCircle, ChevronRight, Mic, Shield, Upload } from "lucide";
-import { createIcon } from "../lib/icons";
+import { createIcon, escapeHtml } from "../lib/icons";
 import {
   checkModelExists,
   completeSetup,
@@ -423,8 +423,8 @@ function renderTestMicrophone(): void {
               ${state.audioDevices
                 .map(
                   (d) => `
-                <option value="${d.id}" ${d.id === state.selectedDeviceId || (state.selectedDeviceId === null && d.isDefault) ? "selected" : ""}>
-                  ${d.name}${d.isDefault ? " (Default)" : ""}
+                <option value="${escapeHtml(d.id)}" ${d.id === state.selectedDeviceId || (state.selectedDeviceId === null && d.isDefault) ? "selected" : ""}>
+                  ${escapeHtml(d.name)}${d.isDefault ? " (Default)" : ""}
                 </option>
               `
                 )

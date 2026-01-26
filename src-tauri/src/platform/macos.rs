@@ -205,9 +205,30 @@ fn modifier_name_to_flag(name: &str) -> Option<u64> {
     }
 }
 
+/// Maximum allowed hotkey string length
+const MAX_HOTKEY_LENGTH: usize = 50;
+
+/// Maximum number of parts in a hotkey combination
+const MAX_HOTKEY_PARTS: usize = 5;
+
 /// Update the current hotkey (supports combinations like "Option+Space")
 pub fn set_hotkey(key: &str) -> Result<(), String> {
+    // Validate total length
+    if key.len() > MAX_HOTKEY_LENGTH {
+        return Err(format!("Hotkey too long (max {} chars)", MAX_HOTKEY_LENGTH));
+    }
+
+    // Validate characters - only allow alphanumeric, +, and space
+    if !key.chars().all(|c| c.is_alphanumeric() || c == '+' || c == ' ') {
+        return Err("Hotkey contains invalid characters".to_string());
+    }
+
     let parts: Vec<&str> = key.split('+').collect();
+
+    // Validate part count
+    if parts.len() > MAX_HOTKEY_PARTS {
+        return Err(format!("Too many keys in combination (max {})", MAX_HOTKEY_PARTS));
+    }
 
     let mut required_modifiers: u64 = 0;
     let mut keycode: Option<i64> = None;
@@ -215,6 +236,11 @@ pub fn set_hotkey(key: &str) -> Result<(), String> {
 
     for part in parts {
         let part = part.trim();
+
+        // Validate individual part length
+        if part.len() > 10 {
+            return Err(format!("Invalid key name: {}", part));
+        }
 
         // Check if it's a modifier
         if let Some(flag) = modifier_name_to_flag(part) {
@@ -228,7 +254,7 @@ pub fn set_hotkey(key: &str) -> Result<(), String> {
             continue;
         }
 
-        // It's the base key
+        // It's the base key - validate against allowlist
         if keycode.is_some() {
             return Err(format!("Multiple base keys in hotkey: {}", key));
         }
@@ -458,6 +484,11 @@ pub fn paste_text() -> Result<(), String> {
     Ok(())
 }
 
+/// Escape a string for safe use in AppleScript double-quoted strings
+fn escape_applescript_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 /// Get the application bundle path
 fn get_app_path() -> Result<String, String> {
     let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
@@ -479,6 +510,7 @@ fn get_app_path() -> Result<String, String> {
 /// Enable auto-start on login using macOS Login Items
 pub fn enable_auto_start() -> Result<(), String> {
     let app_path = get_app_path()?;
+    let escaped_path = escape_applescript_string(&app_path);
 
     let script = format!(
         r#"tell application "System Events"
@@ -486,7 +518,7 @@ pub fn enable_auto_start() -> Result<(), String> {
                 make login item at end with properties {{path:"{}", hidden:false}}
             end if
         end tell"#,
-        app_path
+        escaped_path
     );
 
     let output = std::process::Command::new("osascript")

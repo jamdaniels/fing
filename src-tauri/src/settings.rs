@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
+use std::sync::RwLock;
 use tokio::fs;
+
+/// Cached settings to reduce disk I/O
+static SETTINGS_CACHE: RwLock<Option<Settings>> = RwLock::new(None);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +37,25 @@ impl Default for Settings {
 }
 
 pub async fn load_settings() -> Settings {
+    // Check cache first
+    if let Ok(cache) = SETTINGS_CACHE.read() {
+        if let Some(ref settings) = *cache {
+            return settings.clone();
+        }
+    }
+
+    // Load from disk
+    let settings = load_settings_from_disk().await;
+
+    // Update cache
+    if let Ok(mut cache) = SETTINGS_CACHE.write() {
+        *cache = Some(settings.clone());
+    }
+
+    settings
+}
+
+async fn load_settings_from_disk() -> Settings {
     let path = crate::paths::settings_path();
 
     if let Ok(contents) = fs::read_to_string(&path).await {
@@ -44,13 +67,27 @@ pub async fn load_settings() -> Settings {
 
 /// Sync version of load_settings for use in menu building
 pub fn load_settings_sync() -> Settings {
-    let path = crate::paths::settings_path();
+    // Check cache first
+    if let Ok(cache) = SETTINGS_CACHE.read() {
+        if let Some(ref settings) = *cache {
+            return settings.clone();
+        }
+    }
 
-    if let Ok(contents) = std::fs::read_to_string(&path) {
+    // Load from disk
+    let path = crate::paths::settings_path();
+    let settings = if let Ok(contents) = std::fs::read_to_string(&path) {
         serde_json::from_str(&contents).unwrap_or_default()
     } else {
         Settings::default()
+    };
+
+    // Update cache
+    if let Ok(mut cache) = SETTINGS_CACHE.write() {
+        *cache = Some(settings.clone());
     }
+
+    settings
 }
 
 pub async fn save_settings(settings: &Settings) -> Result<(), String> {
@@ -70,7 +107,20 @@ pub async fn save_settings(settings: &Settings) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to write settings: {}", e))?;
 
+    // Update cache with new settings
+    if let Ok(mut cache) = SETTINGS_CACHE.write() {
+        *cache = Some(settings.clone());
+    }
+
     Ok(())
+}
+
+/// Invalidate the settings cache (call after external changes)
+#[allow(dead_code)]
+pub fn invalidate_settings_cache() {
+    if let Ok(mut cache) = SETTINGS_CACHE.write() {
+        *cache = None;
+    }
 }
 
 #[tauri::command]

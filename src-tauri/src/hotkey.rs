@@ -47,7 +47,9 @@ static RECORDING_START: Mutex<Option<Instant>> = Mutex::new(None);
 
 /// Initialize the audio thread (call once at startup or before first recording)
 fn ensure_audio_thread() {
-    let mut thread_guard = AUDIO_THREAD.lock().unwrap();
+    let mut thread_guard = AUDIO_THREAD
+        .lock()
+        .expect("Audio thread mutex poisoned - audio subsystem crashed");
     if thread_guard.is_some() {
         return;
     }
@@ -119,7 +121,9 @@ pub fn on_key_down(app: &AppHandle) {
 
     // Store recording start time
     {
-        let mut start = RECORDING_START.lock().unwrap();
+        let mut start = RECORDING_START
+            .lock()
+            .expect("Recording start mutex poisoned");
         *start = Some(Instant::now());
     }
 
@@ -145,7 +149,7 @@ pub fn on_key_down(app: &AppHandle) {
     // Ensure audio thread is running and start recording
     ensure_audio_thread();
 
-    if let Some(ref thread) = *AUDIO_THREAD.lock().unwrap() {
+    if let Some(ref thread) = *AUDIO_THREAD.lock().expect("Audio thread mutex poisoned") {
         let selected_device_id = load_settings_sync().selected_microphone_id;
         if thread
             .cmd_tx
@@ -181,7 +185,9 @@ pub fn on_key_up(app: &AppHandle) {
 
     // Calculate recording duration
     let duration_ms = {
-        let start = RECORDING_START.lock().unwrap();
+        let start = RECORDING_START
+            .lock()
+            .expect("Recording start mutex poisoned");
         start.map(|s| s.elapsed().as_millis() as u64).unwrap_or(0)
     };
 
@@ -195,14 +201,18 @@ pub fn on_key_up(app: &AppHandle) {
         app.emit("app-state-changed", "ready").ok();
         // Still need to stop recording to reset audio state and drain response
         {
-            let thread_guard = AUDIO_THREAD.lock().unwrap();
+            let thread_guard = AUDIO_THREAD
+                .lock()
+                .expect("Audio thread mutex poisoned");
             if let Some(ref thread) = *thread_guard {
                 let _ = thread.cmd_tx.send(AudioCommand::StopRecording);
             }
         }
         // Drain the response in a background thread to avoid blocking
         std::thread::spawn(|| {
-            let thread_guard = AUDIO_THREAD.lock().unwrap();
+            let thread_guard = AUDIO_THREAD
+                .lock()
+                .expect("Audio thread mutex poisoned in drain thread");
             if let Some(ref thread) = *thread_guard {
                 let _ = thread.resp_rx.recv();
             }
@@ -222,7 +232,9 @@ pub fn on_key_up(app: &AppHandle) {
     // Stop recording and get audio buffer
     // We need to send command and then receive response
     let cmd_sent = {
-        let thread_guard = AUDIO_THREAD.lock().unwrap();
+        let thread_guard = AUDIO_THREAD
+            .lock()
+            .expect("Audio thread mutex poisoned");
         if let Some(ref thread) = *thread_guard {
             thread.cmd_tx.send(AudioCommand::StopRecording).is_ok()
         } else {
@@ -236,7 +248,9 @@ pub fn on_key_up(app: &AppHandle) {
         // Wait for audio response (blocking recv in async context via spawn_blocking)
         let audio_buffer = if cmd_sent {
             tokio::task::spawn_blocking(|| {
-                let thread_guard = AUDIO_THREAD.lock().unwrap();
+                let thread_guard = AUDIO_THREAD
+                    .lock()
+                    .expect("Audio thread mutex poisoned in recv task");
                 if let Some(ref thread) = *thread_guard {
                     thread.resp_rx.recv().ok().map(|r| r.buffer)
                 } else {

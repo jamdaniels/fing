@@ -21,7 +21,7 @@ import {
   X,
 } from "lucide";
 import { cleanupOnboarding, renderOnboarding } from "./components/onboarding";
-import { createIcon } from "./lib/icons";
+import { createIcon, escapeHtml } from "./lib/icons";
 import {
   deleteAllTranscripts,
   deleteTranscript,
@@ -384,7 +384,7 @@ function renderHistory(
                 <span class="list-item-time">${formatTime(item.createdAt)}</span>
                 <span class="list-item-words">${item.wordCount} words</span>
               </div>
-              <div class="list-item-text">${truncateText(item.text, 150)}</div>
+              <div class="list-item-text">${escapeHtml(truncateText(item.text, 150))}</div>
               <div class="list-item-actions">
                 <button class="copy-btn" title="Copy to clipboard">${createIcon(Copy)}</button>
                 <button class="delete-btn" title="Delete">${createIcon(Trash2)}</button>
@@ -403,7 +403,7 @@ function renderHistory(
         </div>
         <div class="search-wrapper">
           ${createIcon(Search)}
-          <input type="text" class="search-input" placeholder="Search transcripts..." value="${searchQuery}">
+          <input type="text" class="search-input" placeholder="Search transcripts..." value="${escapeHtml(searchQuery)}">
         </div>
       </div>
       <div class="history-scrollable">
@@ -683,7 +683,7 @@ async function showMicTestModal(): Promise<void> {
     localDevices
       .map(
         (d) =>
-          `<option value="${d.id}" ${selectedDeviceId === d.id || (selectedDeviceId === null && d.isDefault) ? "selected" : ""}>${d.name}${d.isDefault ? " (Default)" : ""}</option>`
+          `<option value="${escapeHtml(d.id)}" ${selectedDeviceId === d.id || (selectedDeviceId === null && d.isDefault) ? "selected" : ""}>${escapeHtml(d.name)}${d.isDefault ? " (Default)" : ""}</option>`
       )
       .join("");
 
@@ -716,7 +716,7 @@ async function showMicTestModal(): Promise<void> {
             deviceMatchResult
               ? `<div class="mic-using-device ${showMismatchWarning ? "warning" : ""}">
               ${showMismatchWarning ? createIcon(AlertTriangle) : ""}
-              <span>Using: ${deviceMatchResult.actualDevice}</span>
+              <span>Using: ${escapeHtml(deviceMatchResult.actualDevice)}</span>
             </div>`
               : ""
           }
@@ -976,7 +976,7 @@ async function renderSettings(el: HTMLElement): Promise<void> {
   const micOptions = audioDevices
     .map(
       (d) =>
-        `<option value="${d.id}" ${settings?.selectedMicrophoneId === d.id ? "selected" : ""}>${d.name}${d.isDefault ? " (Default)" : ""}</option>`
+        `<option value="${escapeHtml(d.id)}" ${settings?.selectedMicrophoneId === d.id ? "selected" : ""}>${escapeHtml(d.name)}${d.isDefault ? " (Default)" : ""}</option>`
     )
     .join("");
 
