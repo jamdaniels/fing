@@ -45,6 +45,23 @@ body {
   background-color: var(--bg-primary);
 }
 
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--border) 50%, transparent 50%);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border);
+}
+
 #app {
   display: flex;
   flex-direction: column;
@@ -119,6 +136,13 @@ body {
   min-height: 0;
 }
 
+.content:has(.history-sticky-header) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
 .content h1 {
   font-size: 24px;
   font-weight: 600;
@@ -191,6 +215,7 @@ body {
   background-color: var(--bg-secondary);
   border-radius: 12px;
   position: relative;
+  transition: background-color 200ms ease-out;
 }
 
 .toggle.active {
@@ -206,6 +231,7 @@ body {
   position: absolute;
   top: 2px;
   left: 2px;
+  transition: transform 200ms ease-out;
 }
 
 .toggle.active::after {
@@ -370,6 +396,10 @@ body {
 .search-wrapper {
   position: relative;
   margin-bottom: 16px;
+}
+
+.history-sticky-header .search-wrapper {
+  margin-bottom: 0;
 }
 
 .search-wrapper svg {
@@ -856,6 +886,12 @@ body {
 
 .mic-select-wrapper .settings-select {
   flex: 1;
+  min-width: 240px;
+}
+
+.settings-select.mic-select {
+  min-width: 240px;
+  max-width: 240px;
 }
 
 .btn-icon {
@@ -977,6 +1013,12 @@ body {
   color: var(--success);
 }
 
+.history-sticky-header {
+  flex-shrink: 0;
+  background-color: var(--bg-primary);
+  padding: 16px 24px 16px;
+}
+
 .history-header {
   display: flex;
   justify-content: space-between;
@@ -986,6 +1028,19 @@ body {
 
 .history-header h1 {
   margin-bottom: 0;
+}
+
+.history-scrollable {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 0 24px 24px;
+}
+
+.history-scrollable .transcript-list,
+.history-scrollable .empty-state,
+.history-scrollable .load-more-btn {
+  margin-right: 24px;
 }
 
 .transcript-list {

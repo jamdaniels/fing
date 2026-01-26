@@ -396,25 +396,29 @@ function renderHistory(
     }
 
     el.innerHTML = `
-      <div class="history-header">
-        <h1>History</h1>
-        ${hasTranscripts ? `<button class="btn btn-danger btn-sm clear-all-btn">Clear All</button>` : ""}
-      </div>
-      <div class="search-wrapper">
-        ${createIcon(Search)}
-        <input type="text" class="search-input" placeholder="Search transcripts..." value="${searchQuery}">
-      </div>
-      ${
-        hasTranscripts
-          ? `<div class="transcript-list">${listHtml}</div>
-             ${hasMoreTranscripts ? `<button class="btn btn-secondary load-more-btn">Load more</button>` : ""}`
-          : `
-        <div class="empty-state">
-          <div class="empty-state-title">${searchQuery ? "No results found" : "No transcripts yet"}</div>
-          <p>${searchQuery ? "Try a different search term" : "Press and hold F8 to start recording"}</p>
+      <div class="history-sticky-header">
+        <div class="history-header">
+          <h1>History</h1>
+          ${hasTranscripts ? `<button class="btn btn-danger btn-sm clear-all-btn">Clear All</button>` : ""}
         </div>
-      `
-      }
+        <div class="search-wrapper">
+          ${createIcon(Search)}
+          <input type="text" class="search-input" placeholder="Search transcripts..." value="${searchQuery}">
+        </div>
+      </div>
+      <div class="history-scrollable">
+        ${
+          hasTranscripts
+            ? `<div class="transcript-list">${listHtml}</div>
+               ${hasMoreTranscripts ? `<button class="btn btn-secondary load-more-btn">Load more</button>` : ""}`
+            : `
+          <div class="empty-state">
+            <div class="empty-state-title">${searchQuery ? "No results found" : "No transcripts yet"}</div>
+            <p>${searchQuery ? "Try a different search term" : "Press and hold F8 to start recording"}</p>
+          </div>
+        `
+        }
+      </div>
     `;
 
     const searchInput = el.querySelector(".search-input") as HTMLInputElement;
@@ -1138,7 +1142,7 @@ function renderAbout(el: HTMLElement): void {
       <p class="about-tagline">Fast, private, local speech-to-text</p>
       <div class="about-backend">Backend: ${info?.inferenceBackend ?? "Unknown"}</div>
       <br/><br/>
-      <a href="${info?.repository ?? "#"}" target="_blank" class="btn btn-outline">GitHub ${createIcon(ArrowUpRight)}</a>
+      <a href="https://github.com/jamdaniels/fing" target="_blank" class="btn btn-outline">GitHub ${createIcon(ArrowUpRight)}</a>
     </div>
   `;
 }
