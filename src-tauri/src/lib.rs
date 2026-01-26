@@ -479,15 +479,12 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
             // Save to settings and rebuild menu
             let app_clone = app.clone();
             let device_id_clone = device_id.clone();
-            std::thread::spawn(move || {
-                let rt = tokio::runtime::Runtime::new().unwrap();
-                rt.block_on(async {
-                    let mut current_settings = settings::load_settings().await;
-                    current_settings.selected_microphone_id = device_id_clone;
-                    if let Err(e) = settings::save_settings(&current_settings).await {
-                        tracing::error!("Failed to save mic setting: {}", e);
-                    }
-                });
+            tauri::async_runtime::spawn(async move {
+                let mut current_settings = settings::load_settings().await;
+                current_settings.selected_microphone_id = device_id_clone;
+                if let Err(e) = settings::save_settings(&current_settings).await {
+                    tracing::error!("Failed to save mic setting: {}", e);
+                }
                 // Rebuild tray menu to update checkmarks
                 if let Err(e) = rebuild_tray_menu(&app_clone) {
                     tracing::error!("Failed to rebuild tray menu: {}", e);
@@ -547,8 +544,7 @@ pub fn run() {
 
             // Check if onboarding was previously completed
             let app_handle = app.handle().clone();
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let saved_settings = rt.block_on(settings::load_settings());
+            let saved_settings = tauri::async_runtime::block_on(settings::load_settings());
 
             if saved_settings.onboarding_completed {
                 // User already completed onboarding - verify model and init

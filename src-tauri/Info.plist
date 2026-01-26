@@ -6,5 +6,7 @@
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Fing needs microphone access to transcribe your speech to text.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>Fing needs accessibility permission to detect the hotkey globally and paste text.</string>
 </dict>
 </plist>

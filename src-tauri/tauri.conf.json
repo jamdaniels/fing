@@ -12,6 +12,15 @@
   "app": {
     "macOSPrivateApi": true,
     "withGlobalTauri": true,
+    "security": {
+      "csp": {
+        "default-src": "'self' customprotocol: asset:",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' asset: http://asset.localhost blob: data:",
+        "connect-src": "'self' ipc: http://ipc.localhost"
+      }
+    },
     "windows": [
       {
         "label": "main",

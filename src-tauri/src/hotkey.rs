@@ -156,18 +156,12 @@ pub fn on_key_down(app: &AppHandle) {
         }
     }
 
-    // Play start sound if enabled (load settings synchronously via spawn_blocking)
-    let app_clone = app.clone();
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let settings = rt.block_on(load_settings());
+    // Play start sound if enabled
+    tauri::async_runtime::spawn(async move {
+        let settings = load_settings().await;
         if settings.sound_enabled {
             sounds::play_start();
         }
-        drop(app_clone);
     });
 }
 

@@ -64,6 +64,33 @@ let settings: SettingsType | null = null;
 let audioDevices: AudioDevice[] = [];
 let hotkeyModalCleanup: (() => void) | null = null;
 let micTestModalCleanup: (() => void) | null = null;
+let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+let sidebarListenerAttached = false;
+let contentListenerAttached = false;
+
+function setupSidebarListener(): void {
+  const sidebar = document.getElementById("sidebar");
+  if (!sidebar || sidebarListenerAttached) {
+    return;
+  }
+  sidebarListenerAttached = true;
+
+  sidebar.addEventListener("click", (e) => {
+    const target = (e.target as HTMLElement).closest(".sidebar-item");
+    if (!target) {
+      return;
+    }
+    const view = target.getAttribute("data-view") as SidebarItem | null;
+    const action = target.getAttribute("data-action");
+    if (view) {
+      currentView = view;
+      renderSidebar();
+      renderContent();
+    } else if (action === "quit") {
+      invoke("quit_app");
+    }
+  });
+}
 
 function renderSidebar(): void {
   const sidebar = document.getElementById("sidebar");
@@ -96,19 +123,7 @@ function renderSidebar(): void {
     </button>
   `;
 
-  for (const el of sidebar.querySelectorAll(".sidebar-item")) {
-    el.addEventListener("click", () => {
-      const view = el.getAttribute("data-view") as SidebarItem | null;
-      const action = el.getAttribute("data-action");
-      if (view) {
-        currentView = view;
-        renderSidebar();
-        renderContent();
-      } else if (action === "quit") {
-        invoke("quit_app");
-      }
-    });
-  }
+  setupSidebarListener();
 }
 
 function renderContent(): void {
@@ -282,6 +297,68 @@ function copyToClipboard(text: string): void {
   });
 }
 
+function handleHistoryClick(e: MouseEvent, el: HTMLElement): void {
+  const target = e.target as HTMLElement;
+
+  // Handle load more button
+  if (target.closest(".load-more-btn")) {
+    transcriptOffset += PAGE_SIZE;
+    loadTranscripts(true).then(() => renderHistory(el, { skipLoad: true }));
+    return;
+  }
+
+  // Handle clear all button
+  if (target.closest(".clear-all-btn")) {
+    handleClearAll();
+    return;
+  }
+
+  // Handle delete button
+  const deleteBtn = target.closest(".delete-btn");
+  if (deleteBtn) {
+    e.stopPropagation();
+    const listItem = deleteBtn.closest(".list-item");
+    const id = listItem?.getAttribute("data-id");
+    if (id) {
+      handleDeleteTranscript(Number(id));
+    }
+    return;
+  }
+
+  // Handle copy button
+  const copyBtn = target.closest(".copy-btn") as HTMLButtonElement | null;
+  if (copyBtn) {
+    e.stopPropagation();
+    const listItem = copyBtn.closest(".list-item");
+    const id = listItem?.getAttribute("data-id");
+    const transcript = transcripts.find((t) => t.id === Number(id));
+    if (transcript) {
+      copyToClipboard(transcript.text);
+      const originalIcon = copyBtn.innerHTML;
+      copyBtn.innerHTML = createIcon(Check);
+      setTimeout(() => {
+        copyBtn.innerHTML = originalIcon;
+      }, 2000);
+    }
+  }
+}
+
+function handleHistoryInput(e: Event, el: HTMLElement): void {
+  const target = e.target as HTMLElement;
+  if (!target.classList.contains("search-input")) {
+    return;
+  }
+  const input = target as HTMLInputElement;
+  searchQuery = input.value;
+  transcriptOffset = 0;
+  if (searchTimeout) {
+    clearTimeout(searchTimeout);
+  }
+  searchTimeout = setTimeout(() => {
+    renderHistory(el, { restoreFocus: true });
+  }, 300);
+}
+
 function renderHistory(
   el: HTMLElement,
   options: { restoreFocus?: boolean; skipLoad?: boolean } = {}
@@ -340,59 +417,6 @@ function renderHistory(
     if (restoreFocus && searchInput) {
       searchInput.focus();
       searchInput.setSelectionRange(searchQuery.length, searchQuery.length);
-    }
-
-    let searchTimeout: ReturnType<typeof setTimeout>;
-    searchInput?.addEventListener("input", (e) => {
-      const input = e.target as HTMLInputElement;
-      searchQuery = input.value;
-      transcriptOffset = 0;
-      clearTimeout(searchTimeout);
-      searchTimeout = setTimeout(() => {
-        renderHistory(el, { restoreFocus: true });
-      }, 300);
-    });
-
-    el.querySelector(".load-more-btn")?.addEventListener("click", async () => {
-      transcriptOffset += PAGE_SIZE;
-      await loadTranscripts(true);
-      renderHistory(el, { skipLoad: true });
-    });
-
-    el.querySelector(".clear-all-btn")?.addEventListener(
-      "click",
-      handleClearAll
-    );
-
-    for (const btn of el.querySelectorAll(".delete-btn")) {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const listItem = (e.target as HTMLElement).closest(".list-item");
-        const id = listItem?.getAttribute("data-id");
-        if (id) {
-          handleDeleteTranscript(Number(id));
-        }
-      });
-    }
-
-    for (const btn of el.querySelectorAll(".copy-btn")) {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const button = (e.target as HTMLElement).closest(
-          ".copy-btn"
-        ) as HTMLButtonElement;
-        const listItem = button?.closest(".list-item");
-        const id = listItem?.getAttribute("data-id");
-        const transcript = transcripts.find((t) => t.id === Number(id));
-        if (transcript && button) {
-          copyToClipboard(transcript.text);
-          const originalIcon = button.innerHTML;
-          button.innerHTML = createIcon(Check);
-          setTimeout(() => {
-            button.innerHTML = originalIcon;
-          }, 2000);
-        }
-      });
     }
   };
 
@@ -835,6 +859,65 @@ async function handleAutoStartToggle(
   }
 }
 
+function handleSettingsClick(e: MouseEvent): void {
+  const target = e.target as HTMLElement;
+
+  // Handle toggle clicks
+  const toggle = target.closest(".toggle") as HTMLElement | null;
+  if (toggle) {
+    const setting = toggle.getAttribute("data-setting") as keyof SettingsType;
+    if (!(setting && settings)) {
+      return;
+    }
+
+    const newValue = !settings[setting];
+    if (setting === "autoStart") {
+      handleAutoStartToggle(toggle, newValue as boolean).catch((err) => {
+        console.error("Failed to update auto-start:", err);
+      });
+      return;
+    }
+
+    toggle.classList.toggle("active", newValue as boolean);
+    handleSettingChange(setting, newValue);
+    return;
+  }
+
+  // Handle hotkey button
+  if (target.closest(".hotkey-btn")) {
+    showHotkeyModal();
+    return;
+  }
+
+  // Handle mic test button
+  if (target.closest(".mic-test-btn")) {
+    showMicTestModal();
+    return;
+  }
+
+  // Handle reset onboarding button
+  if (target.closest(".reset-onboarding-btn")) {
+    if (!settings) {
+      return;
+    }
+    updateSettings({ ...settings, onboardingCompleted: false }).then(() => {
+      sessionStorage.setItem("onboarding-reset", "true");
+      window.location.reload();
+    });
+  }
+}
+
+function handleSettingsChange(e: Event): void {
+  const target = e.target as HTMLElement;
+
+  // Handle mic select change
+  if (target.classList.contains("mic-select")) {
+    const select = target as HTMLSelectElement;
+    const value = select.value || null;
+    handleSettingChange("selectedMicrophoneId", value);
+  }
+}
+
 async function renderSettings(el: HTMLElement): Promise<void> {
   await loadSettings();
 
@@ -932,50 +1015,6 @@ async function renderSettings(el: HTMLElement): Promise<void> {
       </div>
     </div>
   `;
-
-  for (const toggle of el.querySelectorAll(".toggle")) {
-    toggle.addEventListener("click", () => {
-      const setting = toggle.getAttribute("data-setting") as keyof SettingsType;
-      if (!(setting && settings)) {
-        return;
-      }
-
-      const newValue = !settings[setting];
-      if (setting === "autoStart") {
-        handleAutoStartToggle(toggle as HTMLElement, newValue as boolean).catch(
-          (err) => {
-            console.error("Failed to update auto-start:", err);
-          }
-        );
-        return;
-      }
-
-      toggle.classList.toggle("active", newValue as boolean);
-      handleSettingChange(setting, newValue);
-    });
-  }
-
-  const micSelect = el.querySelector(".mic-select") as HTMLSelectElement;
-  micSelect?.addEventListener("change", () => {
-    const value = micSelect.value || null;
-    handleSettingChange("selectedMicrophoneId", value);
-  });
-
-  const hotkeyBtn = el.querySelector(".hotkey-btn");
-  hotkeyBtn?.addEventListener("click", showHotkeyModal);
-
-  const micTestBtn = el.querySelector(".mic-test-btn");
-  micTestBtn?.addEventListener("click", showMicTestModal);
-
-  const resetBtn = el.querySelector(".reset-onboarding-btn");
-  resetBtn?.addEventListener("click", async () => {
-    if (!settings) {
-      return;
-    }
-    await updateSettings({ ...settings, onboardingCompleted: false });
-    sessionStorage.setItem("onboarding-reset", "true");
-    window.location.reload();
-  });
 
   updatePermissionStatus();
 }
@@ -1087,11 +1126,43 @@ function setupTitlebarDrag(): void {
   });
 }
 
+function setupContentListener(): void {
+  const content = document.getElementById("content");
+  if (!content || contentListenerAttached) {
+    return;
+  }
+  contentListenerAttached = true;
+
+  content.addEventListener("click", (e) => {
+    if (currentView === "history") {
+      handleHistoryClick(e, content);
+    } else if (currentView === "settings") {
+      handleSettingsClick(e);
+    }
+  });
+
+  content.addEventListener("input", (e) => {
+    if (currentView === "history") {
+      handleHistoryInput(e, content);
+    }
+  });
+
+  content.addEventListener("change", (e) => {
+    if (currentView === "settings") {
+      handleSettingsChange(e);
+    }
+  });
+}
+
 function showMainUI(): void {
   const app = document.getElementById("app");
   if (!app) {
     return;
   }
+
+  // Reset listener flags since we're rebuilding the DOM
+  sidebarListenerAttached = false;
+  contentListenerAttached = false;
 
   app.innerHTML = `
     <div class="titlebar"></div>
@@ -1102,6 +1173,7 @@ function showMainUI(): void {
   `;
 
   setupTitlebarDrag();
+  setupContentListener();
   renderSidebar();
   renderContent();
 }
