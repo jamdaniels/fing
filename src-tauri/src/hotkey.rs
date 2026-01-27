@@ -393,7 +393,12 @@ pub fn register_hotkey(app: &AppHandle) -> Result<(), String> {
         crate::platform::register_global_hotkey(app.clone())
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        crate::platform::register_global_hotkey(app.clone())
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         tracing::warn!("Global hotkey not implemented for this platform");
         let _ = app;
