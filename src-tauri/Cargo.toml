@@ -45,3 +45,9 @@ whisper-rs = { version = "0.14", features = ["vulkan"] }
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"

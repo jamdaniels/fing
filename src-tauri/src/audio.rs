@@ -4,7 +4,10 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream, StreamConfig};
 use rubato::{FftFixedIn, Resampler};
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+
+static OVERFLOW_LOGGED: AtomicBool = AtomicBool::new(false);
 
 pub const MAX_RECORDING_DURATION_SECS: u32 = 120;
 pub const WHISPER_SAMPLE_RATE: u32 = 16000;
@@ -267,6 +270,8 @@ impl AudioCapture {
                         let mono: f32 = chunk.iter().sum::<f32>() / channels as f32;
                         if buf.len() < MAX_BUFFER_SIZE {
                             buf.push(mono);
+                        } else if !OVERFLOW_LOGGED.swap(true, Ordering::Relaxed) {
+                            tracing::warn!("Audio buffer full (120s max), samples dropped");
                         }
                     }
                 },
@@ -289,6 +294,8 @@ impl AudioCapture {
                                 / channels as f32;
                             if buf.len() < MAX_BUFFER_SIZE {
                                 buf.push(mono);
+                            } else if !OVERFLOW_LOGGED.swap(true, Ordering::Relaxed) {
+                                tracing::warn!("Audio buffer full (120s max), samples dropped");
                             }
                         }
                     },
@@ -310,6 +317,8 @@ impl AudioCapture {
                                 / channels as f32;
                             if buf.len() < MAX_BUFFER_SIZE {
                                 buf.push(mono);
+                            } else if !OVERFLOW_LOGGED.swap(true, Ordering::Relaxed) {
+                                tracing::warn!("Audio buffer full (120s max), samples dropped");
                             }
                         }
                     },
@@ -330,6 +339,9 @@ impl AudioCapture {
     }
 
     pub fn begin_recording(&mut self) {
+        // Reset overflow flag for new session
+        OVERFLOW_LOGGED.store(false, Ordering::Relaxed);
+
         // Clear buffer
         if let Ok(mut buf) = self.buffer.lock() {
             buf.clear();

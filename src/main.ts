@@ -833,7 +833,7 @@ async function showMicTestModal(): Promise<void> {
     } catch (err) {
       console.error("Mic test error:", err);
     }
-  }, 100);
+  }, 150);
 
   const clickHandler = (e: MouseEvent) => {
     if ((e.target as HTMLElement).classList.contains("hotkey-modal-overlay")) {

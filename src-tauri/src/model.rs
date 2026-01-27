@@ -5,7 +5,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 pub const MODEL_FILENAME: &str = "ggml-tiny.en.bin";
 pub const MODEL_URL: &str =
@@ -104,8 +104,8 @@ impl From<&InternalDownloadState> for DownloadProgress {
 
 // Global download state
 lazy_static::lazy_static! {
-    static ref DOWNLOAD_STATE: Arc<Mutex<InternalDownloadState>> =
-        Arc::new(Mutex::new(InternalDownloadState::default()));
+    static ref DOWNLOAD_STATE: Mutex<InternalDownloadState> =
+        Mutex::new(InternalDownloadState::default());
 }
 
 pub fn default_model_path() -> PathBuf {
