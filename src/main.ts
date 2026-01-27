@@ -65,7 +65,11 @@ let transcriptOffset = 0;
 let hasMoreTranscripts = true;
 const PAGE_SIZE = 50;
 let settings: SettingsType | null = null;
+let settingsLoadedAt = 0;
 let audioDevices: AudioDevice[] = [];
+let permissionStatus: { microphone: string; accessibility: string } | null =
+  null;
+let permissionCheckedAt = 0;
 let hotkeyModalCleanup: (() => void) | null = null;
 let micTestModalCleanup: (() => void) | null = null;
 let searchTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -435,7 +439,18 @@ function renderHistory(
   }
 }
 
-async function loadSettings(): Promise<void> {
+const SETTINGS_CACHE_TTL = 5000; // 5 seconds
+
+async function loadSettings(force = false): Promise<void> {
+  // Skip if cache is fresh (within TTL)
+  if (
+    !force &&
+    settings &&
+    Date.now() - settingsLoadedAt < SETTINGS_CACHE_TTL
+  ) {
+    return;
+  }
+
   try {
     const [loadedSettings, devices] = await Promise.all([
       getSettings(),
@@ -448,6 +463,7 @@ async function loadSettings(): Promise<void> {
     if (autoStart !== null && settings) {
       settings = { ...settings, autoStart };
     }
+    settingsLoadedAt = Date.now();
   } catch {
     settings = null;
     audioDevices = [];
@@ -970,9 +986,7 @@ function handleSettingsChange(e: Event): void {
   }
 }
 
-async function renderSettings(el: HTMLElement): Promise<void> {
-  await loadSettings();
-
+function renderSettingsUI(el: HTMLElement): void {
   const micOptions = audioDevices
     .map(
       (d) =>
@@ -1071,6 +1085,22 @@ async function renderSettings(el: HTMLElement): Promise<void> {
   updatePermissionStatus();
 }
 
+function renderSettings(el: HTMLElement): void {
+  if (settings && Date.now() - settingsLoadedAt < SETTINGS_CACHE_TTL) {
+    // Cache is fresh, render once
+    renderSettingsUI(el);
+  } else {
+    // Cache is stale, fetch then render
+    loadSettings().then(() => {
+      if (currentView === "settings") {
+        renderSettingsUI(el);
+      }
+    });
+  }
+}
+
+const PERMISSION_CACHE_TTL = 10_000; // 10 seconds
+
 async function updatePermissionStatus(): Promise<void> {
   const micBadge = document.querySelector(
     '[data-permission="microphone"]'
@@ -1083,8 +1113,20 @@ async function updatePermissionStatus(): Promise<void> {
     return;
   }
 
+  // Use cached values if fresh
+  if (
+    permissionStatus &&
+    Date.now() - permissionCheckedAt < PERMISSION_CACHE_TTL
+  ) {
+    updateBadge(micBadge, permissionStatus.microphone, "microphone");
+    updateBadge(accBadge, permissionStatus.accessibility, "accessibility");
+    return;
+  }
+
   try {
     const status = await requestPermissions();
+    permissionStatus = status;
+    permissionCheckedAt = Date.now();
 
     updateBadge(micBadge, status.microphone, "microphone");
     updateBadge(accBadge, status.accessibility, "accessibility");

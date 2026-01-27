@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter};
 use crate::audio::AudioCapture;
 use crate::db::{save_transcript, NewTranscript};
 use crate::model::default_model_path;
-use crate::paste::set_clipboard_and_paste;
+use crate::paste::paste_text;
 use crate::settings::{load_settings, load_settings_sync};
 use crate::sounds;
 use crate::transcribe::{get_transcriber, init_transcriber, transcribe_audio};
@@ -344,9 +344,9 @@ pub fn on_key_up(app: &AppHandle) {
         // Load settings
         let settings = load_settings().await;
 
-        // Clipboard and paste
+        // Paste text directly (no clipboard), with trailing space for continuation
         if settings.paste_enabled {
-            let paste_result = set_clipboard_and_paste(&text);
+            let paste_result = paste_text(&format!("{} ", text));
             if paste_result.should_notify() {
                 crate::notifications::show_clipboard_fallback(&app_handle);
             }

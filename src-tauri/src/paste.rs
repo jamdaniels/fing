@@ -1,53 +1,34 @@
-// Clipboard and paste functionality
-
-use arboard::Clipboard;
-use serde::Serialize;
+// Direct text input (no clipboard)
 
 use crate::platform;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum PasteResult {
     Success,
-    ClipboardOnlyElevated,
-    ClipboardOnlySent,
+    Failed(String),
+    NoAccessibility,
 }
 
 impl PasteResult {
     pub fn should_notify(&self) -> bool {
-        !matches!(self, PasteResult::Success)
+        matches!(self, PasteResult::Failed(_) | PasteResult::NoAccessibility)
     }
 }
 
-pub fn set_clipboard_and_paste(text: &str) -> PasteResult {
-    // Set clipboard
-    let mut clipboard = match Clipboard::new() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!("Failed to access clipboard: {}", e);
-            return PasteResult::ClipboardOnlySent;
-        }
-    };
-
-    if let Err(e) = clipboard.set_text(text) {
-        tracing::error!("Failed to set clipboard text: {}", e);
-        return PasteResult::ClipboardOnlySent;
-    }
-
-    // Check accessibility permission on macOS
+pub fn paste_text(text: &str) -> PasteResult {
     #[cfg(target_os = "macos")]
     {
         if !platform::check_accessibility_permission() {
-            tracing::warn!("Accessibility permission not granted");
-            return PasteResult::ClipboardOnlyElevated;
+            return PasteResult::NoAccessibility;
         }
     }
 
-    // Attempt paste
-    match platform::paste_text() {
+    match platform::type_text(text) {
         Ok(()) => PasteResult::Success,
         Err(e) => {
-            tracing::warn!("Paste failed: {}", e);
-            PasteResult::ClipboardOnlySent
+            tracing::warn!("Direct text input failed: {}", e);
+            PasteResult::Failed(e)
         }
     }
 }

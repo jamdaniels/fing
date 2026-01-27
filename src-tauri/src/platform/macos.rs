@@ -38,7 +38,6 @@ extern "C" {
         virtualKey: u16,
         keyDown: bool,
     ) -> *mut c_void;
-    fn CGEventSetFlags(event: *mut c_void, flags: u64);
     fn CGEventPost(tap: i32, event: *mut c_void);
     fn CGEventTapCreate(
         tap: u32,
@@ -51,6 +50,11 @@ extern "C" {
     fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
     fn CGEventGetIntegerValueField(event: CGEventRef, field: u32) -> i64;
     fn CGEventGetFlags(event: CGEventRef) -> u64;
+    fn CGEventKeyboardSetUnicodeString(
+        event: *mut c_void,
+        stringLength: std::ffi::c_ulong,
+        unicodeString: *const u16,
+    );
 }
 
 // CGEventFlags
@@ -60,7 +64,6 @@ const K_CG_EVENT_FLAG_MASK_OPTION: u64 = 1 << 19;
 const K_CG_EVENT_FLAG_MASK_COMMAND: u64 = 1 << 20;
 
 // Virtual key codes
-const K_VK_V: u16 = 9;
 const K_VK_F8: i64 = 100;
 
 // CGEventTapLocation
@@ -442,42 +445,54 @@ pub fn check_microphone_permission() -> String {
     }
 }
 
-pub fn paste_text() -> Result<(), String> {
+/// Filter text to printable characters only (security: prevent control char injection)
+fn filter_printable(text: &str) -> String {
+    text.chars()
+        .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
+        .collect()
+}
+
+/// Type text directly using CGEventKeyboardSetUnicodeString (no clipboard)
+pub fn type_text(text: &str) -> Result<(), String> {
     if !check_accessibility_permission() {
         return Err("Accessibility permission required".to_string());
     }
 
+    let filtered = filter_printable(text);
+    let utf16: Vec<u16> = filtered.encode_utf16().collect();
+
+    if utf16.is_empty() {
+        return Ok(());
+    }
+
     unsafe {
-        // Create event source
         let source = CGEventSourceCreate(K_CG_EVENT_SOURCE_STATE_HID_SYSTEM_STATE);
         if source.is_null() {
             return Err("Failed to create event source".to_string());
         }
 
-        // Create Cmd+V key down event
-        let key_down = CGEventCreateKeyboardEvent(source, K_VK_V, true);
+        // Key down event with full text
+        let key_down = CGEventCreateKeyboardEvent(source, 0, true);
         if key_down.is_null() {
             CFRelease(source);
-            return Err("Failed to create key down event".to_string());
+            return Err("Failed to create keyboard event".to_string());
         }
-        CGEventSetFlags(key_down, K_CG_EVENT_FLAG_MASK_COMMAND);
 
-        // Create key up event
-        let key_up = CGEventCreateKeyboardEvent(source, K_VK_V, false);
-        if key_up.is_null() {
-            CFRelease(key_down);
-            CFRelease(source);
-            return Err("Failed to create key up event".to_string());
-        }
-        CGEventSetFlags(key_up, K_CG_EVENT_FLAG_MASK_COMMAND);
-
-        // Post events
+        CGEventKeyboardSetUnicodeString(
+            key_down,
+            utf16.len() as std::ffi::c_ulong,
+            utf16.as_ptr(),
+        );
         CGEventPost(K_CG_HID_EVENT_TAP, key_down);
-        CGEventPost(K_CG_HID_EVENT_TAP, key_up);
-
-        // Clean up
-        CFRelease(key_up);
         CFRelease(key_down);
+
+        // Key up event
+        let key_up = CGEventCreateKeyboardEvent(source, 0, false);
+        if !key_up.is_null() {
+            CGEventPost(K_CG_HID_EVENT_TAP, key_up);
+            CFRelease(key_up);
+        }
+
         CFRelease(source);
     }
 

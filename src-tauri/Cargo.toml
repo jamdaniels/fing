@@ -20,7 +20,6 @@ whisper-rs = "0.14"
 cpal = "0.15"
 rubato = "0.16"
 rusqlite = { version = "0.32", features = ["bundled"] }
-arboard = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "fs"] }
 once_cell = "1"
 serde = { version = "1", features = ["derive"] }

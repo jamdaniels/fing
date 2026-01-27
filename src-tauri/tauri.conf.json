@@ -49,7 +49,8 @@
         "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
-        "center": false
+        "center": false,
+        "focus": false
       }
     ]
   },
