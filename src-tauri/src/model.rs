@@ -7,10 +7,10 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-pub const MODEL_FILENAME: &str = "ggml-tiny.en.bin";
+pub const MODEL_FILENAME: &str = "ggml-base.bin";
 pub const MODEL_URL: &str =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin";
-pub const MODEL_SIZE_BYTES: u64 = 77_704_715;
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin";
+pub const MODEL_SIZE_BYTES: u64 = 147_964_211;
 // SHA256 hash verification is informational only - HuggingFace may update the file
 // Primary validation is GGML magic bytes + size check
 pub const MODEL_SHA256: &str = "";

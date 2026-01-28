@@ -316,8 +316,19 @@ pub fn on_key_up(app: &AppHandle) {
             tracing::info!("Transcriber initialized from {:?}", model_path);
         }
 
+        // Load settings for language and other options
+        let settings = load_settings().await;
+
+        // Determine language from settings
+        // 1 language = use it, 2+ = auto-detect (None)
+        let lang: Option<String> = if settings.languages.len() == 1 {
+            Some(settings.languages[0].clone())
+        } else {
+            None
+        };
+
         // Transcribe
-        let text = match transcribe_audio(&audio_buffer) {
+        let text = match transcribe_audio(&audio_buffer, lang.as_deref()) {
             Ok(t) => t,
             Err(e) => {
                 tracing::error!("Transcription failed: {}", e);
@@ -340,9 +351,6 @@ pub fn on_key_up(app: &AppHandle) {
         }
 
         tracing::info!("Transcription result: {}", text);
-
-        // Load settings
-        let settings = load_settings().await;
 
         // Paste text directly (no clipboard), with trailing space for continuation
         if settings.paste_enabled {

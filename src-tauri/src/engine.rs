@@ -24,5 +24,5 @@ impl std::fmt::Display for TranscribeError {
 impl std::error::Error for TranscribeError {}
 
 pub trait TranscriptionEngine: Send + Sync {
-    fn transcribe(&self, audio: &[f32]) -> Result<String, TranscribeError>;
+    fn transcribe(&self, audio: &[f32], language: Option<&str>) -> Result<String, TranscribeError>;
 }

@@ -32,6 +32,7 @@ export interface Settings {
   historyEnabled: boolean;
   historyLimit: HistoryLimit;
   onboardingCompleted: boolean;
+  languages: string[];
 }
 
 export interface UpdateInfo {

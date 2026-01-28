@@ -27,7 +27,7 @@ impl Transcriber {
 }
 
 impl TranscriptionEngine for Transcriber {
-    fn transcribe(&self, audio: &[f32]) -> Result<String, TranscribeError> {
+    fn transcribe(&self, audio: &[f32], language: Option<&str>) -> Result<String, TranscribeError> {
         if audio.is_empty() {
             return Err(TranscribeError::EmptyAudio);
         }
@@ -41,7 +41,7 @@ impl TranscriptionEngine for Transcriber {
             .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
 
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_language(Some("en"));
+        params.set_language(language);
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
@@ -86,9 +86,9 @@ pub fn get_transcriber() -> Option<&'static Transcriber> {
     TRANSCRIBER.get()
 }
 
-pub fn transcribe_audio(audio: &[f32]) -> Result<String, TranscribeError> {
+pub fn transcribe_audio(audio: &[f32], language: Option<&str>) -> Result<String, TranscribeError> {
     match get_transcriber() {
-        Some(t) => t.transcribe(audio),
+        Some(t) => t.transcribe(audio, language),
         None => Err(TranscribeError::ModelNotFound),
     }
 }

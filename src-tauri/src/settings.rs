@@ -18,6 +18,12 @@ pub struct Settings {
     pub history_limit: i64,
     #[serde(default)]
     pub onboarding_completed: bool,
+    #[serde(default = "default_languages")]
+    pub languages: Vec<String>,
+}
+
+fn default_languages() -> Vec<String> {
+    vec!["en".to_string()]
 }
 
 impl Default for Settings {
@@ -32,6 +38,7 @@ impl Default for Settings {
             history_enabled: true,
             history_limit: 1000,
             onboarding_completed: false,
+            languages: default_languages(),
         }
     }
 }
