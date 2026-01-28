@@ -984,7 +984,32 @@ function handleSettingsChange(e: Event): void {
     const value = select.value || null;
     handleSettingChange("selectedMicrophoneId", value);
   }
+
+  // Handle language checkbox change
+  if (target.classList.contains("lang-check")) {
+    const checkboxes = document.querySelectorAll(
+      ".lang-check"
+    ) as NodeListOf<HTMLInputElement>;
+    const selected = Array.from(checkboxes)
+      .filter((cb) => cb.checked)
+      .map((cb) => cb.dataset.lang as string);
+
+    // Require at least one language
+    if (selected.length === 0) {
+      (target as HTMLInputElement).checked = true;
+      return;
+    }
+
+    handleSettingChange("languages", selected);
+  }
 }
+
+const SUPPORTED_LANGUAGES = [
+  { code: "en", name: "English" },
+  { code: "de", name: "German" },
+  { code: "es", name: "Spanish" },
+  { code: "fr", name: "French" },
+];
 
 function renderSettingsUI(el: HTMLElement): void {
   const micOptions = audioDevices
@@ -993,6 +1018,16 @@ function renderSettingsUI(el: HTMLElement): void {
         `<option value="${escapeHtml(d.id)}" ${settings?.selectedMicrophoneId === d.id ? "selected" : ""}>${escapeHtml(d.name)}${d.isDefault ? " (Default)" : ""}</option>`
     )
     .join("");
+
+  const selectedLangs = settings?.languages ?? ["en"];
+  const langCheckboxes = SUPPORTED_LANGUAGES.map(
+    (lang) => `
+      <label class="lang-checkbox">
+        <input type="checkbox" class="lang-check" data-lang="${lang.code}" ${selectedLangs.includes(lang.code) ? "checked" : ""}>
+        <span>${lang.name}</span>
+      </label>
+    `
+  ).join("");
 
   el.innerHTML = `
     <h1>Settings</h1>
@@ -1004,6 +1039,16 @@ function renderSettingsUI(el: HTMLElement): void {
           <div class="settings-row-desc">Press and hold to record</div>
         </div>
         <button class="btn btn-outline hotkey-btn">${formatKeyForDisplay(settings?.hotkey ?? "F8")}</button>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Language</div>
+      <div class="settings-row lang-row">
+        <div>
+          <div class="settings-row-label">Languages</div>
+          <div class="settings-row-desc">Select one for best accuracy, or multiple for auto-detection</div>
+        </div>
+        <div class="lang-checkboxes">${langCheckboxes}</div>
       </div>
     </div>
     <div class="settings-section">

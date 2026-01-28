@@ -1,4 +1,12 @@
-import { Check, CheckCircle, ChevronRight, Mic, Shield, Upload } from "lucide";
+import {
+  Check,
+  CheckCircle,
+  Download,
+  Globe,
+  Mic,
+  Shield,
+  Upload,
+} from "lucide";
 import { createIcon, escapeHtml } from "../lib/icons";
 import {
   checkModelExists,
@@ -23,7 +31,7 @@ import type {
   PermissionStatus,
 } from "../lib/types";
 
-type OnboardingStep = 1 | 2 | 3 | 4 | 5;
+type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6;
 
 interface OnboardingState {
   step: OnboardingStep;
@@ -34,7 +42,15 @@ interface OnboardingState {
   selectedDeviceId: string | null;
   micTest: MicrophoneTest | null;
   audioDetected: boolean;
+  selectedLanguages: string[];
 }
+
+const SUPPORTED_LANGUAGES = [
+  { code: "en", name: "English" },
+  { code: "de", name: "German" },
+  { code: "es", name: "Spanish" },
+  { code: "fr", name: "French" },
+];
 
 let state: OnboardingState = {
   step: 1,
@@ -45,22 +61,23 @@ let state: OnboardingState = {
   selectedDeviceId: null,
   micTest: null,
   audioDetected: false,
+  selectedLanguages: ["en"],
 };
 
 let container: HTMLElement | null = null;
 let downloadPollInterval: number | null = null;
 let micTestInterval: number | null = null;
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 6;
 
 function renderStepIndicator(currentStep: OnboardingStep): string {
-  if (currentStep === 5) {
+  if (currentStep === 6) {
     return ""; // Don't show on completion
   }
 
   const dots: string[] = [];
   for (let i = 1; i <= TOTAL_STEPS - 1; i++) {
-    // 4 dots (exclude completion)
+    // 5 dots (exclude completion)
     const isActive = i === currentStep;
     const isPast = i < currentStep;
     const clickable = isPast;
@@ -184,12 +201,15 @@ function render(): void {
       renderDownloadModel();
       break;
     case 3:
-      renderPermissions();
+      renderLanguageSelection();
       break;
     case 4:
-      renderTestMicrophone();
+      renderPermissions();
       break;
     case 5:
+      renderTestMicrophone();
+      break;
+    case 6:
       renderCompletion();
       break;
     default:
@@ -204,9 +224,6 @@ function renderWelcome(): void {
 
   container.innerHTML = `
     <div class="onboarding">
-      <div class="onboarding-skip">
-        <button class="btn-link" id="skip-btn">Skip Setup</button>
-      </div>
       <div class="onboarding-content">
         <img class="onboarding-logo" src="/icon.png" alt="Fing" />
         <h1 class="onboarding-title">Welcome to Fing</h1>
@@ -218,16 +235,12 @@ function renderWelcome(): void {
         </ul>
         <button class="btn btn-primary btn-lg" id="get-started-btn">
           Get Started
-          ${createIcon(ChevronRight)}
         </button>
       </div>
       ${renderStepIndicator(1)}
     </div>
   `;
 
-  document
-    .getElementById("skip-btn")
-    ?.addEventListener("click", handleSkipSetup);
   document
     .getElementById("get-started-btn")
     ?.addEventListener("click", () => goToStep(2));
@@ -267,12 +280,12 @@ function renderDownloadModel(): void {
 
   container.innerHTML = `
     <div class="onboarding">
-      <div class="onboarding-skip">
-        <button class="btn-link" id="skip-btn">Skip Setup</button>
-      </div>
       <div class="onboarding-content">
+        <div class="onboarding-icon">
+          ${createIcon(Download)}
+        </div>
         <h1 class="onboarding-title">Download Speech Model</h1>
-        <p class="onboarding-desc">Fing needs a speech recognition model (~75 MB, one-time download)</p>
+        <p class="onboarding-desc">Fing needs a speech recognition model (~142 MB, one-time download)</p>
 
         ${state.downloadError ? `<div class="download-status error" style="margin-bottom: 16px;">${state.downloadError}</div>` : ""}
 
@@ -283,7 +296,6 @@ function renderDownloadModel(): void {
             ? `
           <button class="btn btn-primary btn-lg" id="continue-btn" style="margin-top: 16px;">
             Continue
-            ${createIcon(ChevronRight)}
           </button>
         `
             : ""
@@ -308,9 +320,6 @@ function renderDownloadModel(): void {
   `;
 
   document
-    .getElementById("skip-btn")
-    ?.addEventListener("click", handleSkipSetup);
-  document
     .getElementById("start-download-btn")
     ?.addEventListener("click", handleStartDownload);
   document
@@ -328,6 +337,87 @@ function renderDownloadModel(): void {
   attachStepIndicatorListeners();
 }
 
+function renderLanguageSelection(): void {
+  if (!container) {
+    return;
+  }
+
+  const langCheckboxes = SUPPORTED_LANGUAGES.map(
+    (lang) => `
+      <label class="lang-checkbox onboarding-lang-checkbox">
+        <input type="checkbox" class="lang-check" data-lang="${lang.code}" ${state.selectedLanguages.includes(lang.code) ? "checked" : ""}>
+        <span>${lang.name}</span>
+      </label>
+    `
+  ).join("");
+
+  container.innerHTML = `
+    <div class="onboarding">
+      <div class="onboarding-content">
+        <div class="onboarding-icon">
+          ${createIcon(Globe)}
+        </div>
+        <h1 class="onboarding-title">Select Languages</h1>
+        <p class="onboarding-desc">Which languages do you speak?</p>
+
+        <div class="lang-selection-container">
+          ${langCheckboxes}
+        </div>
+
+        <p class="onboarding-hint">Select one for best accuracy, or multiple for auto-detection</p>
+
+        <button class="btn btn-primary btn-lg" id="continue-btn">
+          Continue
+        </button>
+      </div>
+      ${renderStepIndicator(3)}
+    </div>
+  `;
+
+  // Attach language checkbox handlers
+  for (const checkbox of document.querySelectorAll(".lang-check")) {
+    checkbox.addEventListener("change", handleLanguageChange);
+  }
+
+  document
+    .getElementById("continue-btn")
+    ?.addEventListener("click", handleLanguageContinue);
+  attachStepIndicatorListeners();
+}
+
+function handleLanguageChange(e: Event): void {
+  const target = e.target as HTMLInputElement;
+  const lang = target.dataset.lang as string;
+
+  if (target.checked) {
+    if (!state.selectedLanguages.includes(lang)) {
+      state.selectedLanguages.push(lang);
+    }
+  } else {
+    // Require at least one language
+    if (state.selectedLanguages.length <= 1) {
+      target.checked = true;
+      return;
+    }
+    state.selectedLanguages = state.selectedLanguages.filter((l) => l !== lang);
+  }
+}
+
+async function handleLanguageContinue(): Promise<void> {
+  // Save language selection to settings
+  try {
+    const currentSettings = await getSettings();
+    await updateSettings({
+      ...currentSettings,
+      languages: state.selectedLanguages,
+    });
+  } catch (err) {
+    console.error("Failed to save language selection:", err);
+  }
+
+  goToStep(4);
+}
+
 function renderPermissions(): void {
   if (!container) {
     return;
@@ -337,15 +427,12 @@ function renderPermissions(): void {
   const isMac = navigator.userAgent.includes("Mac");
 
   if (!isMac) {
-    goToStep(4);
+    goToStep(5);
     return;
   }
 
   container.innerHTML = `
     <div class="onboarding">
-      <div class="onboarding-skip">
-        <button class="btn-link" id="skip-btn">Skip Setup</button>
-      </div>
       <div class="onboarding-content">
         <h1 class="onboarding-title">Permissions</h1>
         <p class="onboarding-desc">Fing needs a few permissions to work properly</p>
@@ -376,16 +463,12 @@ function renderPermissions(): void {
 
         <button class="btn btn-primary btn-lg" id="continue-btn">
           Continue
-          ${createIcon(ChevronRight)}
         </button>
       </div>
-      ${renderStepIndicator(3)}
+      ${renderStepIndicator(4)}
     </div>
   `;
 
-  document
-    .getElementById("skip-btn")
-    ?.addEventListener("click", handleSkipSetup);
   document
     .getElementById("grant-microphone-btn")
     ?.addEventListener("click", handleGrantMicrophone);
@@ -394,7 +477,7 @@ function renderPermissions(): void {
     ?.addEventListener("click", handleGrantAccessibility);
   document
     .getElementById("continue-btn")
-    ?.addEventListener("click", () => goToStep(4));
+    ?.addEventListener("click", () => goToStep(5));
   attachStepIndicatorListeners();
 }
 
@@ -409,9 +492,6 @@ function renderTestMicrophone(): void {
 
   container.innerHTML = `
     <div class="onboarding">
-      <div class="onboarding-skip">
-        <button class="btn-link" id="skip-btn">Skip Setup</button>
-      </div>
       <div class="onboarding-content">
         <h1 class="onboarding-title">Test Your Microphone</h1>
         <p class="onboarding-desc">Make sure your microphone is working properly</p>
@@ -450,22 +530,18 @@ function renderTestMicrophone(): void {
 
         <button class="btn btn-primary btn-lg" id="finish-btn">
           Finish Setup
-          ${createIcon(ChevronRight)}
         </button>
       </div>
-      ${renderStepIndicator(4)}
+      ${renderStepIndicator(5)}
     </div>
   `;
 
-  document
-    .getElementById("skip-btn")
-    ?.addEventListener("click", handleSkipSetup);
   document
     .getElementById("mic-select")
     ?.addEventListener("change", handleMicChange);
   document
     .getElementById("finish-btn")
-    ?.addEventListener("click", () => goToStep(5));
+    ?.addEventListener("click", () => goToStep(6));
   attachStepIndicatorListeners();
 }
 
@@ -509,31 +585,17 @@ async function goToStep(step: OnboardingStep): Promise<void> {
   await stopPolling();
   state.step = step;
 
-  if (step === 3) {
+  if (step === 4) {
     handleRequestPermissions();
   }
 
-  if (step === 4) {
+  if (step === 5) {
     await loadAudioDevices();
     await initMicTest();
     startMicTestPolling();
   }
 
   render();
-}
-
-async function handleSkipSetup(): Promise<void> {
-  await stopPolling();
-  try {
-    await completeSetup();
-    window.dispatchEvent(new CustomEvent("setup-complete"));
-  } catch (err) {
-    console.error("Failed to complete setup:", err);
-    state.step = 2;
-    state.downloadProgress = null;
-    state.downloadError = String(err);
-    render();
-  }
 }
 
 function handleStartDownload(): void {
@@ -742,6 +804,7 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     selectedDeviceId: null,
     micTest: null,
     audioDetected: false,
+    selectedLanguages: ["en"],
   };
 
   // Check if this is a manual reset - always start from step 1
@@ -752,19 +815,18 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     return;
   }
 
-  // Check if model already exists - skip to permissions step if so
+  // Check if model already exists - skip to language selection step if so
   try {
     const modelStatus = await checkModelExists();
     if (modelStatus.isValid) {
-      // Model exists, mark download as complete and skip to permissions
+      // Model exists, mark download as complete and skip to language selection
       state.downloadProgress = {
         bytesDownloaded: 0,
         totalBytes: 0,
         percentage: 100,
         status: "complete",
       };
-      state.step = 3; // Go to permissions step
-      handleRequestPermissions(); // Load permission status
+      state.step = 3; // Go to language selection step
     }
   } catch (e) {
     console.error("Failed to check model status:", e);
