@@ -133,12 +133,27 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
         );
     }
 
+    // Mark as running BEFORE spawning thread to avoid race condition
+    {
+        let mut state = MIC_TEST_STATE
+            .lock()
+            .map_err(|e| format!("Mic test state lock poisoned: {}", e))?;
+        state.running = true;
+    }
+
     // Start mic test thread (uses std::thread for blocking audio I/O)
     let device_id_clone = device_id.clone();
     std::thread::spawn(move || {
         let mut capture = AudioCapture::new();
         if let Some(id) = device_id_clone {
             capture.set_device(Some(id));
+        }
+
+        // Check if we should still run (stop might have been called already)
+        let should_run = MIC_TEST_STATE.lock().map(|s| s.running).unwrap_or(false);
+        if !should_run {
+            tracing::info!("Mic test cancelled before init");
+            return;
         }
 
         if let Err(e) = capture.init_capture() {
@@ -153,11 +168,6 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
 
         // Start recording
         capture.begin_recording();
-
-        // Mark as running
-        if let Ok(mut state) = MIC_TEST_STATE.lock() {
-            state.running = true;
-        }
 
         loop {
             // Check if we should stop
