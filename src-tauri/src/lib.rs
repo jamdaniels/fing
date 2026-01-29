@@ -32,6 +32,7 @@ use tauri::{
 #[derive(Default)]
 struct MicTestState {
     running: bool,
+    generation: u64,      // Incremented each time a new test starts
     level: u32,           // Fixed-point (level * 10000)
     receiving: bool,
     device_id: Option<String>,
@@ -133,13 +134,15 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
         );
     }
 
-    // Mark as running BEFORE spawning thread to avoid race condition
-    {
+    // Mark as running and get generation BEFORE spawning thread
+    let my_generation = {
         let mut state = MIC_TEST_STATE
             .lock()
             .map_err(|e| format!("Mic test state lock poisoned: {}", e))?;
+        state.generation += 1;
         state.running = true;
-    }
+        state.generation
+    };
 
     // Start mic test thread (uses std::thread for blocking audio I/O)
     let device_id_clone = device_id.clone();
@@ -149,10 +152,13 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
             capture.set_device(Some(id));
         }
 
-        // Check if we should still run (stop might have been called already)
-        let should_run = MIC_TEST_STATE.lock().map(|s| s.running).unwrap_or(false);
+        // Check if we should still run (stop or new test might have been started)
+        let should_run = MIC_TEST_STATE
+            .lock()
+            .map(|s| s.running && s.generation == my_generation)
+            .unwrap_or(false);
         if !should_run {
-            tracing::info!("Mic test cancelled before init");
+            tracing::info!("Mic test cancelled before init (gen {})", my_generation);
             return;
         }
 
@@ -170,10 +176,10 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
         capture.begin_recording();
 
         loop {
-            // Check if we should stop
+            // Check if we should stop (either stopped or a new test started)
             let should_run = MIC_TEST_STATE
                 .lock()
-                .map(|s| s.running)
+                .map(|s| s.running && s.generation == my_generation)
                 .unwrap_or(false);
             if !should_run {
                 break;
