@@ -153,3 +153,16 @@ export async function setAutoStart(enabled: boolean): Promise<void> {
 export async function getAutoStart(): Promise<boolean> {
   return await invoke<boolean>("get_auto_start");
 }
+
+export async function relaunchApp(): Promise<void> {
+  const { relaunch } = await import("@tauri-apps/plugin-process");
+  await relaunch();
+}
+
+export async function enableOnboardingTestMode(): Promise<void> {
+  return await invoke("enable_onboarding_test_mode");
+}
+
+export async function disableOnboardingTestMode(): Promise<void> {
+  return await invoke("disable_onboarding_test_mode");
+}

@@ -565,6 +565,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
@@ -674,6 +675,8 @@ pub fn run() {
             stop_mic_test,
             // Hotkey testing
             hotkey::test_transcription,
+            hotkey::enable_onboarding_test_mode,
+            hotkey::disable_onboarding_test_mode,
             // Indicator controls
             indicator::indicator_show_recording,
             indicator::indicator_show_processing,

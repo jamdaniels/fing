@@ -20,6 +20,8 @@ pub struct Settings {
     pub onboarding_completed: bool,
     #[serde(default = "default_languages")]
     pub languages: Vec<String>,
+    #[serde(default)]
+    pub onboarding_step: Option<u8>,
 }
 
 fn default_languages() -> Vec<String> {
@@ -39,6 +41,7 @@ impl Default for Settings {
             history_limit: 1000,
             onboarding_completed: false,
             languages: default_languages(),
+            onboarding_step: None,
         }
     }
 }

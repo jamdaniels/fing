@@ -1,20 +1,26 @@
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   Check,
   CheckCircle,
   Download,
   Globe,
+  Keyboard,
   Mic,
-  Shield,
+  PersonStanding,
+  RefreshCw,
   Upload,
 } from "lucide";
 import { createIcon, escapeHtml } from "../lib/icons";
 import {
   checkModelExists,
   completeSetup,
+  disableOnboardingTestMode,
+  enableOnboardingTestMode,
   getAudioDevices,
   getDownloadProgress,
   getMicTestLevel,
   getSettings,
+  relaunchApp,
   requestAccessibilityPermission,
   requestMicrophonePermission,
   requestPermissions,
@@ -29,9 +35,10 @@ import type {
   DownloadProgress,
   MicrophoneTest,
   PermissionStatus,
+  Settings,
 } from "../lib/types";
 
-type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6;
+type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 interface OnboardingState {
   step: OnboardingStep;
@@ -43,6 +50,9 @@ interface OnboardingState {
   micTest: MicrophoneTest | null;
   audioDetected: boolean;
   selectedLanguages: string[];
+  selectedHotkey: string;
+  capturedHotkey: string | null;
+  testText: string;
 }
 
 const SUPPORTED_LANGUAGES = [
@@ -62,22 +72,27 @@ let state: OnboardingState = {
   micTest: null,
   audioDetected: false,
   selectedLanguages: ["en"],
+  selectedHotkey: "F8",
+  capturedHotkey: null,
+  testText: "",
 };
 
 let container: HTMLElement | null = null;
 let downloadPollInterval: number | null = null;
 let micTestInterval: number | null = null;
+let hotkeyKeyHandler: ((e: KeyboardEvent) => void) | null = null;
+let testResultUnlisten: UnlistenFn | null = null;
 
-const TOTAL_STEPS = 6;
+const TOTAL_STEPS = 8;
 
 function renderStepIndicator(currentStep: OnboardingStep): string {
-  if (currentStep === 6) {
+  if (currentStep === 8) {
     return ""; // Don't show on completion
   }
 
   const dots: string[] = [];
   for (let i = 1; i <= TOTAL_STEPS - 1; i++) {
-    // 5 dots (exclude completion)
+    // 7 dots (exclude completion)
     const isActive = i === currentStep;
     const isPast = i < currentStep;
     const clickable = isPast;
@@ -106,8 +121,6 @@ function attachStepIndicatorListeners(): void {
   }
 }
 
-// Use shared createIcon from lib/icons.ts
-
 function formatBytes(bytes: number): string {
   if (bytes === 0) {
     return "0 B";
@@ -131,6 +144,63 @@ async function persistSelectedDevice(deviceId: string | null): Promise<void> {
   } catch (err) {
     console.error("Failed to save microphone selection:", err);
   }
+}
+
+function formatKeyForDisplay(hotkey: string): string {
+  const parts = hotkey.split("+");
+  const formatted = parts.map((part) => {
+    const keyMap: Record<string, string> = {
+      Ctrl: "Ctrl",
+      Option: "Opt",
+      Shift: "Shift",
+      Cmd: "Cmd",
+      " ": "Space",
+    };
+    return keyMap[part] || part;
+  });
+  return formatted.join(" + ");
+}
+
+const FUNCTION_KEY_REGEX = /^F\d+$/;
+
+function keyEventToHotkey(e: KeyboardEvent): string | null {
+  let key = e.key;
+
+  if (["Control", "Alt", "Shift", "Meta"].includes(key)) {
+    return null;
+  }
+
+  if (key === "Escape") {
+    return null;
+  }
+
+  if (FUNCTION_KEY_REGEX.test(key)) {
+    // Keep as-is
+  } else if (key === " ") {
+    key = "Space";
+  } else if (key.length === 1) {
+    key = key.toUpperCase();
+  }
+
+  const modifiers: string[] = [];
+  if (e.ctrlKey) {
+    modifiers.push("Ctrl");
+  }
+  if (e.altKey) {
+    modifiers.push("Option");
+  }
+  if (e.shiftKey) {
+    modifiers.push("Shift");
+  }
+  if (e.metaKey) {
+    modifiers.push("Cmd");
+  }
+
+  if (modifiers.length === 0) {
+    return key;
+  }
+
+  return [...modifiers, key].join("+");
 }
 
 function renderDownloadButton(
@@ -193,6 +263,12 @@ function render(): void {
     return;
   }
 
+  // Remove hotkey listener when leaving step 5
+  if (state.step !== 5 && hotkeyKeyHandler) {
+    document.removeEventListener("keydown", hotkeyKeyHandler);
+    hotkeyKeyHandler = null;
+  }
+
   switch (state.step) {
     case 1:
       renderWelcome();
@@ -207,9 +283,15 @@ function render(): void {
       renderPermissions();
       break;
     case 5:
-      renderTestMicrophone();
+      renderHotkeyStep();
       break;
     case 6:
+      renderMicSelection();
+      break;
+    case 7:
+      renderTestStep();
+      break;
+    case 8:
       renderCompletion();
       break;
     default:
@@ -224,20 +306,24 @@ function renderWelcome(): void {
 
   container.innerHTML = `
     <div class="onboarding">
-      <div class="onboarding-content">
+      <div class="onboarding-header">
         <img class="onboarding-logo" src="/icon.png" alt="Fing" />
         <h1 class="onboarding-title">Welcome to Fing</h1>
         <p class="onboarding-desc">Fast, private, local speech-to-text</p>
+      </div>
+      <div class="onboarding-body">
         <ul class="onboarding-features">
-          <li>${createIcon(Shield)} All processing happens locally on your device</li>
+          <li>${createIcon(PersonStanding)} All processing happens locally on your device</li>
           <li>${createIcon(Mic)} Microphone is only active while you hold the hotkey</li>
           <li>${createIcon(Check)} Your audio never leaves your computer</li>
         </ul>
+      </div>
+      <div class="onboarding-footer">
         <button class="btn btn-primary btn-lg" id="get-started-btn">
           Get Started
         </button>
+        ${renderStepIndicator(1)}
       </div>
-      ${renderStepIndicator(1)}
     </div>
   `;
 
@@ -280,27 +366,16 @@ function renderDownloadModel(): void {
 
   container.innerHTML = `
     <div class="onboarding">
-      <div class="onboarding-content">
+      <div class="onboarding-header">
         <div class="onboarding-icon">
           ${createIcon(Download)}
         </div>
         <h1 class="onboarding-title">Download Speech Model</h1>
         <p class="onboarding-desc">Fing needs a speech recognition model (~142 MB, one-time download)</p>
-
+      </div>
+      <div class="onboarding-body">
         ${state.downloadError ? `<div class="download-status error" style="margin-bottom: 16px;">${state.downloadError}</div>` : ""}
-
         ${renderDownloadButton(isDownloading, isComplete, isFailed, statusText, progress)}
-
-        ${
-          isComplete
-            ? `
-          <button class="btn btn-primary btn-lg" id="continue-btn" style="margin-top: 16px;">
-            Continue
-          </button>
-        `
-            : ""
-        }
-
         ${
           isDownloading || isComplete
             ? ""
@@ -315,7 +390,14 @@ function renderDownloadModel(): void {
         `
         }
       </div>
-      ${renderStepIndicator(2)}
+      <div class="onboarding-footer">
+        ${
+          isComplete
+            ? `<button class="btn btn-primary btn-lg" id="continue-btn">Continue</button>`
+            : ""
+        }
+        ${renderStepIndicator(2)}
+      </div>
     </div>
   `;
 
@@ -353,28 +435,28 @@ function renderLanguageSelection(): void {
 
   container.innerHTML = `
     <div class="onboarding">
-      <div class="onboarding-content">
+      <div class="onboarding-header">
         <div class="onboarding-icon">
           ${createIcon(Globe)}
         </div>
         <h1 class="onboarding-title">Select Languages</h1>
         <p class="onboarding-desc">Which languages do you speak?</p>
-
+      </div>
+      <div class="onboarding-body">
         <div class="lang-selection-container">
           ${langCheckboxes}
         </div>
-
         <p class="onboarding-hint">Select one for best accuracy, or multiple for auto-detection</p>
-
+      </div>
+      <div class="onboarding-footer">
         <button class="btn btn-primary btn-lg" id="continue-btn">
           Continue
         </button>
+        ${renderStepIndicator(3)}
       </div>
-      ${renderStepIndicator(3)}
     </div>
   `;
 
-  // Attach language checkbox handlers
   for (const checkbox of document.querySelectorAll(".lang-check")) {
     checkbox.addEventListener("change", handleLanguageChange);
   }
@@ -394,7 +476,6 @@ function handleLanguageChange(e: Event): void {
       state.selectedLanguages.push(lang);
     }
   } else {
-    // Require at least one language
     if (state.selectedLanguages.length <= 1) {
       target.checked = true;
       return;
@@ -404,7 +485,6 @@ function handleLanguageChange(e: Event): void {
 }
 
 async function handleLanguageContinue(): Promise<void> {
-  // Save language selection to settings
   try {
     const currentSettings = await getSettings();
     await updateSettings({
@@ -431,12 +511,19 @@ function renderPermissions(): void {
     return;
   }
 
+  const allGranted =
+    perms?.microphone === "granted" && perms?.accessibility === "granted";
+
   container.innerHTML = `
     <div class="onboarding">
-      <div class="onboarding-content">
+      <div class="onboarding-header">
+        <div class="onboarding-icon">
+          ${createIcon(PersonStanding)}
+        </div>
         <h1 class="onboarding-title">Permissions</h1>
         <p class="onboarding-desc">Fing needs a few permissions to work properly</p>
-
+      </div>
+      <div class="onboarding-body">
         <div class="permissions-list">
           <div class="permission-row">
             <div class="permission-info">
@@ -451,7 +538,7 @@ function renderPermissions(): void {
 
           <div class="permission-row">
             <div class="permission-info">
-              ${createIcon(Shield)}
+              ${createIcon(PersonStanding)}
               <div>
                 <div class="permission-label">Accessibility Access</div>
                 <div class="permission-desc">Required for global hotkey and text pasting</div>
@@ -461,11 +548,22 @@ function renderPermissions(): void {
           </div>
         </div>
 
-        <button class="btn btn-primary btn-lg" id="continue-btn">
-          Continue
-        </button>
+        ${
+          allGranted
+            ? ""
+            : `
+          <p class="onboarding-hint">After granting permissions in System Settings, click Restart to apply changes</p>
+        `
+        }
       </div>
-      ${renderStepIndicator(4)}
+      <div class="onboarding-footer">
+        ${
+          allGranted
+            ? `<button class="btn btn-primary btn-lg" id="continue-btn">Continue</button>`
+            : `<button class="btn btn-primary btn-lg" id="restart-btn">${createIcon(RefreshCw)} Restart to Apply</button>`
+        }
+        ${renderStepIndicator(4)}
+      </div>
     </div>
   `;
 
@@ -477,11 +575,134 @@ function renderPermissions(): void {
     ?.addEventListener("click", handleGrantAccessibility);
   document
     .getElementById("continue-btn")
-    ?.addEventListener("click", () => goToStep(5));
+    ?.addEventListener("click", handlePermissionsContinue);
+  document
+    .getElementById("restart-btn")
+    ?.addEventListener("click", handleRestartForPermissions);
   attachStepIndicatorListeners();
 }
 
-function renderTestMicrophone(): void {
+async function handlePermissionsContinue(): Promise<void> {
+  try {
+    const currentSettings = await getSettings();
+    if (currentSettings.onboardingStep !== null) {
+      await updateSettings({
+        ...currentSettings,
+        onboardingStep: null,
+      });
+    }
+  } catch (err) {
+    console.error("Failed to clear onboarding step:", err);
+  }
+  goToStep(5);
+}
+
+async function handleRestartForPermissions(): Promise<void> {
+  try {
+    const currentSettings = await getSettings();
+    await updateSettings({
+      ...currentSettings,
+      onboardingStep: 4,
+    });
+  } catch (err) {
+    console.error("Failed to save onboarding step:", err);
+  }
+
+  await relaunchApp();
+}
+
+function renderHotkeyStep(): void {
+  if (!container) {
+    return;
+  }
+
+  const displayKey = state.capturedHotkey ?? state.selectedHotkey;
+  const hasNewKey =
+    state.capturedHotkey && state.capturedHotkey !== state.selectedHotkey;
+
+  container.innerHTML = `
+    <div class="onboarding">
+      <div class="onboarding-header">
+        <div class="onboarding-icon">
+          ${createIcon(Keyboard)}
+        </div>
+        <h1 class="onboarding-title">Set Recording Hotkey</h1>
+        <p class="onboarding-desc">Press a key to set your recording hotkey</p>
+      </div>
+      <div class="onboarding-body">
+        <div class="hotkey-capture-area">
+          <div class="hotkey-preview">
+            <span class="hotkey-key ${hasNewKey ? "captured" : ""}">${formatKeyForDisplay(displayKey)}</span>
+            ${hasNewKey ? '<span class="hotkey-new-badge">New</span>' : ""}
+          </div>
+          <p class="hotkey-hint">Press any key or key combination</p>
+          <button class="hotkey-fn-link" id="use-fn-btn">Use Fn key instead</button>
+        </div>
+      </div>
+      <div class="onboarding-footer">
+        <button class="btn btn-primary btn-lg" id="continue-btn">
+          Continue
+        </button>
+        ${renderStepIndicator(5)}
+      </div>
+    </div>
+  `;
+
+  // Set up hotkey capture
+  if (!hotkeyKeyHandler) {
+    hotkeyKeyHandler = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === "Escape") {
+        state.capturedHotkey = null;
+        render();
+        return;
+      }
+
+      const hotkey = keyEventToHotkey(e);
+      if (hotkey) {
+        state.capturedHotkey = hotkey;
+        render();
+      }
+    };
+    document.addEventListener("keydown", hotkeyKeyHandler);
+  }
+
+  document.getElementById("use-fn-btn")?.addEventListener("click", () => {
+    state.capturedHotkey = "Fn";
+    render();
+  });
+
+  document
+    .getElementById("continue-btn")
+    ?.addEventListener("click", handleHotkeyContinue);
+  attachStepIndicatorListeners();
+}
+
+async function handleHotkeyContinue(): Promise<void> {
+  const finalHotkey = state.capturedHotkey ?? state.selectedHotkey;
+
+  try {
+    const currentSettings = await getSettings();
+    await updateSettings({
+      ...currentSettings,
+      hotkey: finalHotkey,
+    });
+    state.selectedHotkey = finalHotkey;
+  } catch (err) {
+    console.error("Failed to save hotkey:", err);
+  }
+
+  if (hotkeyKeyHandler) {
+    document.removeEventListener("keydown", hotkeyKeyHandler);
+    hotkeyKeyHandler = null;
+  }
+
+  goToStep(6);
+}
+
+function renderMicSelection(): void {
   if (!container) {
     return;
   }
@@ -492,10 +713,14 @@ function renderTestMicrophone(): void {
 
   container.innerHTML = `
     <div class="onboarding">
-      <div class="onboarding-content">
-        <h1 class="onboarding-title">Test Your Microphone</h1>
-        <p class="onboarding-desc">Make sure your microphone is working properly</p>
-
+      <div class="onboarding-header">
+        <div class="onboarding-icon">
+          ${createIcon(Mic)}
+        </div>
+        <h1 class="onboarding-title">Select Microphone</h1>
+        <p class="onboarding-desc">Choose which microphone to use for recording</p>
+      </div>
+      <div class="onboarding-body">
         <div class="mic-test-container">
           <div class="mic-select-row">
             <label for="mic-select">Microphone:</label>
@@ -527,12 +752,13 @@ function renderTestMicrophone(): void {
             }
           </div>
         </div>
-
-        <button class="btn btn-primary btn-lg" id="finish-btn">
-          Finish Setup
-        </button>
       </div>
-      ${renderStepIndicator(5)}
+      <div class="onboarding-footer">
+        <button class="btn btn-primary btn-lg" id="continue-btn">
+          Continue
+        </button>
+        ${renderStepIndicator(6)}
+      </div>
     </div>
   `;
 
@@ -540,8 +766,67 @@ function renderTestMicrophone(): void {
     .getElementById("mic-select")
     ?.addEventListener("change", handleMicChange);
   document
+    .getElementById("continue-btn")
+    ?.addEventListener("click", () => goToStep(7));
+  attachStepIndicatorListeners();
+}
+
+function renderTestStep(): void {
+  if (!container) {
+    return;
+  }
+
+  const hotkey = state.selectedHotkey;
+  const hasText = state.testText.trim().length > 0;
+
+  container.innerHTML = `
+    <div class="onboarding">
+      <div class="onboarding-header">
+        <div class="onboarding-icon">
+          ${createIcon(Mic)}
+        </div>
+        <h1 class="onboarding-title">Test Transcription</h1>
+        <p class="onboarding-desc">Hold <span class="hotkey-key-inline">${formatKeyForDisplay(hotkey)}</span> and speak</p>
+      </div>
+      <div class="onboarding-body">
+        <input
+          type="text"
+          id="test-input"
+          class="test-input"
+          placeholder="Your transcription will appear here..."
+          value="${escapeHtml(state.testText)}"
+        />
+      </div>
+      <div class="onboarding-footer">
+        <button class="btn btn-primary btn-lg" id="finish-btn" ${hasText ? "" : "disabled"}>
+          Finish Setup
+        </button>
+        ${hasText ? "" : '<p class="onboarding-hint">Complete a test transcription to continue</p>'}
+        ${renderStepIndicator(7)}
+      </div>
+    </div>
+  `;
+
+  // Auto-focus the input
+  const input = document.getElementById("test-input") as HTMLInputElement;
+  input?.focus();
+
+  // Watch for input changes (text gets pasted by the hotkey)
+  input?.addEventListener("input", (e) => {
+    state.testText = (e.target as HTMLInputElement).value;
+    const finishBtn = document.getElementById(
+      "finish-btn"
+    ) as HTMLButtonElement;
+    const hint = document.querySelector(".onboarding-hint");
+    if (state.testText.trim().length > 0) {
+      finishBtn?.removeAttribute("disabled");
+      hint?.remove();
+    }
+  });
+
+  document
     .getElementById("finish-btn")
-    ?.addEventListener("click", () => goToStep(6));
+    ?.addEventListener("click", () => goToStep(8));
   attachStepIndicatorListeners();
 }
 
@@ -550,17 +835,21 @@ function renderCompletion(): void {
     return;
   }
 
+  const hotkey = state.selectedHotkey;
+
   container.innerHTML = `
     <div class="onboarding">
-      <div class="onboarding-content">
+      <div class="onboarding-header">
         <div class="onboarding-icon success">
           ${createIcon(CheckCircle)}
         </div>
         <h1 class="onboarding-title">You're all set!</h1>
-
+        <p class="onboarding-desc">Start using Fing to transcribe your speech</p>
+      </div>
+      <div class="onboarding-body">
         <div class="completion-instructions">
           <div class="instruction-item">
-            <span class="instruction-key">F8</span>
+            <span class="instruction-key">${formatKeyForDisplay(hotkey)}</span>
             <span>Press and hold to start recording</span>
           </div>
           <div class="instruction-item">
@@ -568,7 +857,8 @@ function renderCompletion(): void {
             <span>Release to transcribe and paste</span>
           </div>
         </div>
-
+      </div>
+      <div class="onboarding-footer">
         <button class="btn btn-primary btn-lg" id="start-btn">
           Start Using Fing
         </button>
@@ -590,9 +880,38 @@ async function goToStep(step: OnboardingStep): Promise<void> {
   }
 
   if (step === 5) {
+    state.capturedHotkey = null;
+  }
+
+  if (step === 6) {
     await loadAudioDevices();
     await initMicTest();
     startMicTestPolling();
+  }
+
+  if (step === 7) {
+    state.testText = "";
+    // Ensure mic test from step 6 is stopped (extra safety)
+    try {
+      await stopMicTest();
+    } catch {
+      // Ignore - might not be running
+    }
+    // Enable test mode so the hotkey works during onboarding
+    try {
+      await enableOnboardingTestMode();
+      console.log("[onboarding] Test mode enabled");
+    } catch (err) {
+      console.error("Failed to enable test mode:", err);
+    }
+    // Listen for transcription results
+    testResultUnlisten = await listen<string>(
+      "test-transcription-result",
+      (event) => {
+        state.testText = event.payload;
+        render();
+      }
+    );
   }
 
   render();
@@ -608,12 +927,10 @@ function handleStartDownload(): void {
   };
   render();
 
-  // Start download in background (don't await - let polling handle progress)
   startModelDownload().catch((err) => {
     console.error("Download error:", err);
   });
 
-  // Start polling immediately to track progress
   startDownloadPolling();
 }
 
@@ -642,9 +959,7 @@ async function handleRequestPermissions(): Promise<void> {
 }
 
 async function handleGrantAccessibility(): Promise<void> {
-  // This opens System Preferences
   await requestAccessibilityPermission();
-  // Wait a moment then refresh status
   setTimeout(async () => {
     state.permissions = await requestPermissions();
     render();
@@ -652,9 +967,7 @@ async function handleGrantAccessibility(): Promise<void> {
 }
 
 async function handleGrantMicrophone(): Promise<void> {
-  // This opens System Preferences to Microphone
   await requestMicrophonePermission();
-  // Wait a moment then refresh status
   setTimeout(async () => {
     state.permissions = await requestPermissions();
     render();
@@ -682,7 +995,6 @@ async function handleMicChange(e: Event): Promise<void> {
   state.selectedDeviceId = select.value || null;
   state.audioDetected = false;
 
-  // Restart mic test with new device
   try {
     await stopMicTest();
     await startMicTest(state.selectedDeviceId);
@@ -732,7 +1044,6 @@ function startMicTestPolling(): void {
         state.audioDetected = true;
       }
 
-      // Update only the audio level elements, not the whole page
       updateAudioLevel();
     } catch (e) {
       console.error("Mic test error:", e);
@@ -769,12 +1080,21 @@ async function stopPolling(): Promise<void> {
   if (micTestInterval) {
     clearInterval(micTestInterval);
     micTestInterval = null;
-    // Stop the backend mic test
     try {
       await stopMicTest();
     } catch (e) {
       console.error("Error stopping mic test:", e);
     }
+  }
+  if (testResultUnlisten) {
+    testResultUnlisten();
+    testResultUnlisten = null;
+  }
+  // Disable test mode when leaving test step
+  try {
+    await disableOnboardingTestMode();
+  } catch {
+    // Ignore errors - test mode might not have been enabled
   }
 }
 
@@ -785,7 +1105,6 @@ async function handleComplete(): Promise<void> {
     window.dispatchEvent(new CustomEvent("setup-complete"));
   } catch (err) {
     console.error("Failed to complete setup:", err);
-    // Show error to user - go back to step 2 (download) if model issue
     state.step = 2;
     state.downloadProgress = null;
     state.downloadError = String(err);
@@ -795,6 +1114,15 @@ async function handleComplete(): Promise<void> {
 
 export async function renderOnboarding(el: HTMLElement): Promise<void> {
   container = el;
+
+  // Load saved settings first
+  let savedSettings: Settings | null = null;
+  try {
+    savedSettings = await getSettings();
+  } catch (e) {
+    console.error("Failed to load settings:", e);
+  }
+
   state = {
     step: 1,
     downloadProgress: null,
@@ -804,10 +1132,13 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     selectedDeviceId: null,
     micTest: null,
     audioDetected: false,
-    selectedLanguages: ["en"],
+    selectedLanguages: savedSettings?.languages ?? ["en"],
+    selectedHotkey: savedSettings?.hotkey ?? "F8",
+    capturedHotkey: null,
+    testText: "",
   };
 
-  // Check if this is a manual reset - always start from step 1
+  // Check if this is a manual reset
   const isReset = sessionStorage.getItem("onboarding-reset") === "true";
   if (isReset) {
     sessionStorage.removeItem("onboarding-reset");
@@ -815,18 +1146,35 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     return;
   }
 
-  // Check if model already exists - skip to language selection step if so
+  // Check if resuming from a saved step (after restart)
+  if (savedSettings?.onboardingStep) {
+    const savedStep = savedSettings.onboardingStep as OnboardingStep;
+    console.log("[onboarding] Resuming at step:", savedStep);
+
+    // If resuming at permissions step, refresh permissions
+    if (savedStep === 4) {
+      state.step = savedStep;
+      state.permissions = await requestPermissions();
+      render();
+      return;
+    }
+
+    state.step = savedStep;
+    render();
+    return;
+  }
+
+  // Check if model already exists
   try {
     const modelStatus = await checkModelExists();
     if (modelStatus.isValid) {
-      // Model exists, mark download as complete and skip to language selection
       state.downloadProgress = {
         bytesDownloaded: 0,
         totalBytes: 0,
         percentage: 100,
         status: "complete",
       };
-      state.step = 3; // Go to language selection step
+      state.step = 3;
     }
   } catch (e) {
     console.error("Failed to check model status:", e);
@@ -837,5 +1185,9 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
 
 export function cleanupOnboarding(): void {
   stopPolling();
+  if (hotkeyKeyHandler) {
+    document.removeEventListener("keydown", hotkeyKeyHandler);
+    hotkeyKeyHandler = null;
+  }
   container = null;
 }

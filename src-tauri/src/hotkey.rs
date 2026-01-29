@@ -23,6 +23,9 @@ static KEY_HELD: AtomicBool = AtomicBool::new(false);
 // Recording session ID to track auto-stop timer validity
 static RECORDING_SESSION_ID: AtomicU64 = AtomicU64::new(0);
 
+// Onboarding test mode - when enabled, hotkey works even during NeedsSetup state
+static ONBOARDING_TEST_MODE: AtomicBool = AtomicBool::new(false);
+
 // Commands sent to the audio thread
 enum AudioCommand {
     StartRecording(Option<String>),
@@ -102,19 +105,23 @@ fn ensure_audio_thread() {
 
 /// Called when F8 is pressed down
 pub fn on_key_down(app: &AppHandle) {
-    // Check current state - only proceed if Ready
-    let state = crate::state::APP_STATE.read().unwrap();
-    if !state.can_record() {
-        return;
+    let is_test_mode = ONBOARDING_TEST_MODE.load(Ordering::SeqCst);
+
+    // Check current state - only proceed if Ready (or in test mode)
+    if !is_test_mode {
+        let state = crate::state::APP_STATE.read().unwrap();
+        if !state.can_record() {
+            return;
+        }
+        drop(state);
     }
-    drop(state);
 
-    // Transition to Recording
-    crate::state::transition_to(crate::state::AppState::Recording).ok();
+    // Transition to Recording (skip state transition in test mode to avoid triggering main.ts)
+    if !is_test_mode {
+        crate::state::transition_to(crate::state::AppState::Recording).ok();
+        app.emit("app-state-changed", "recording").ok();
+    }
     KEY_HELD.store(true, Ordering::SeqCst);
-
-    // Emit state change event
-    app.emit("app-state-changed", "recording").ok();
 
     // Show recording indicator
     crate::indicator::show_recording(app).ok();
@@ -171,17 +178,21 @@ pub fn on_key_down(app: &AppHandle) {
 
 /// Called when F8 is released
 pub fn on_key_up(app: &AppHandle) {
+    let is_test_mode = ONBOARDING_TEST_MODE.load(Ordering::SeqCst);
+
     if !KEY_HELD.load(Ordering::SeqCst) {
         return;
     }
     KEY_HELD.store(false, Ordering::SeqCst);
 
-    // Check we're in Recording state
-    let state = crate::state::APP_STATE.read().unwrap();
-    if !matches!(*state, crate::state::AppState::Recording) {
-        return;
+    // Check we're in Recording state (skip in test mode)
+    if !is_test_mode {
+        let state = crate::state::APP_STATE.read().unwrap();
+        if !matches!(*state, crate::state::AppState::Recording) {
+            return;
+        }
+        drop(state);
     }
-    drop(state);
 
     // Calculate recording duration
     let duration_ms = {
@@ -197,8 +208,10 @@ pub fn on_key_up(app: &AppHandle) {
         crate::notifications::show_info(app, "Fing", "Recording too short");
         // Hide indicator and return to Ready
         crate::indicator::hide(app).ok();
-        crate::state::transition_to(crate::state::AppState::Ready).ok();
-        app.emit("app-state-changed", "ready").ok();
+        if !is_test_mode {
+            crate::state::transition_to(crate::state::AppState::Ready).ok();
+            app.emit("app-state-changed", "ready").ok();
+        }
         // Still need to stop recording to reset audio state and drain response
         {
             let thread_guard = AUDIO_THREAD
@@ -220,9 +233,11 @@ pub fn on_key_up(app: &AppHandle) {
         return;
     }
 
-    // Transition to Processing
-    crate::state::transition_to(crate::state::AppState::Processing).ok();
-    app.emit("app-state-changed", "processing").ok();
+    // Transition to Processing (skip state events in test mode)
+    if !is_test_mode {
+        crate::state::transition_to(crate::state::AppState::Processing).ok();
+        app.emit("app-state-changed", "processing").ok();
+    }
 
     // Show processing indicator
     crate::indicator::show_processing(app).ok();
@@ -244,6 +259,7 @@ pub fn on_key_up(app: &AppHandle) {
 
     // Spawn async task for transcription
     let app_handle = app.clone();
+    let test_mode = is_test_mode;
     tauri::async_runtime::spawn(async move {
         // Wait for audio response (blocking recv in async context via spawn_blocking)
         let audio_buffer = if cmd_sent {
@@ -269,14 +285,14 @@ pub fn on_key_up(app: &AppHandle) {
             Some(buf) => buf,
             None => {
                 tracing::error!("No audio buffer received");
-                finish_transcription(&app_handle, None, duration_ms).await;
+                finish_transcription(&app_handle, None, duration_ms, test_mode).await;
                 return;
             }
         };
 
         if audio_buffer.is_empty() {
             tracing::warn!("Empty audio buffer");
-            finish_transcription(&app_handle, None, duration_ms).await;
+            finish_transcription(&app_handle, None, duration_ms, test_mode).await;
             return;
         }
 
@@ -299,7 +315,7 @@ pub fn on_key_up(app: &AppHandle) {
                     "Model Not Found",
                     "Please download the model in settings",
                 );
-                finish_transcription(&app_handle, None, duration_ms).await;
+                finish_transcription(&app_handle, None, duration_ms, test_mode).await;
                 return;
             }
 
@@ -310,7 +326,7 @@ pub fn on_key_up(app: &AppHandle) {
                     "Model Error",
                     &format!("Failed to load model: {}", e),
                 );
-                finish_transcription(&app_handle, None, duration_ms).await;
+                finish_transcription(&app_handle, None, duration_ms, test_mode).await;
                 return;
             }
             tracing::info!("Transcriber initialized from {:?}", model_path);
@@ -337,7 +353,7 @@ pub fn on_key_up(app: &AppHandle) {
                     "Transcription Error",
                     &format!("{}", e),
                 );
-                finish_transcription(&app_handle, None, duration_ms).await;
+                finish_transcription(&app_handle, None, duration_ms, test_mode).await;
                 return;
             }
         };
@@ -346,29 +362,34 @@ pub fn on_key_up(app: &AppHandle) {
         let text = text.trim().to_string();
         if text.is_empty() {
             tracing::warn!("Transcription returned empty text");
-            finish_transcription(&app_handle, None, duration_ms).await;
+            finish_transcription(&app_handle, None, duration_ms, test_mode).await;
             return;
         }
 
         tracing::info!("Transcription result: {}", text);
 
-        // Paste text directly (no clipboard), with trailing space for continuation
-        if settings.paste_enabled {
-            let paste_result = paste_text(&format!("{} ", text));
-            if paste_result.should_notify() {
-                crate::notifications::show_clipboard_fallback(&app_handle);
+        if test_mode {
+            // In test mode, emit event instead of pasting (indicator steals focus)
+            app_handle.emit("test-transcription-result", text.clone()).ok();
+        } else {
+            // Paste text directly (no clipboard), with trailing space for continuation
+            if settings.paste_enabled {
+                let paste_result = paste_text(&format!("{} ", text));
+                if paste_result.should_notify() {
+                    crate::notifications::show_clipboard_fallback(&app_handle);
+                }
             }
-        }
 
-        // Save to history if enabled
-        if settings.history_enabled {
-            let transcript = NewTranscript {
-                text: text.clone(),
-                duration_ms,
-                app_context: None, // TODO: Get focused app context
-            };
-            if let Err(e) = save_transcript(&transcript) {
-                tracing::error!("Failed to save transcript: {}", e);
+            // Save to history if enabled
+            if settings.history_enabled {
+                let transcript = NewTranscript {
+                    text: text.clone(),
+                    duration_ms,
+                    app_context: None, // TODO: Get focused app context
+                };
+                if let Err(e) = save_transcript(&transcript) {
+                    tracing::error!("Failed to save transcript: {}", e);
+                }
             }
         }
 
@@ -377,17 +398,24 @@ pub fn on_key_up(app: &AppHandle) {
             sounds::play_done();
         }
 
-        finish_transcription(&app_handle, Some(text), duration_ms).await;
+        finish_transcription(&app_handle, Some(text), duration_ms, test_mode).await;
     });
 }
 
-async fn finish_transcription(app: &AppHandle, text: Option<String>, _duration_ms: i64) {
+async fn finish_transcription(
+    app: &AppHandle,
+    text: Option<String>,
+    _duration_ms: i64,
+    is_test_mode: bool,
+) {
     // Hide indicator
     crate::indicator::hide(app).ok();
 
-    // Return to Ready
-    crate::state::transition_to(crate::state::AppState::Ready).ok();
-    app.emit("app-state-changed", "ready").ok();
+    // Return to Ready (skip state events in test mode)
+    if !is_test_mode {
+        crate::state::transition_to(crate::state::AppState::Ready).ok();
+        app.emit("app-state-changed", "ready").ok();
+    }
 
     if let Some(t) = text {
         app.emit("transcript-added", t).ok();
@@ -430,5 +458,27 @@ pub fn test_transcription(app: AppHandle) -> Result<(), String> {
         on_key_up(&app_clone);
     });
 
+    Ok(())
+}
+
+#[tauri::command]
+pub fn enable_onboarding_test_mode(app: AppHandle) -> Result<(), String> {
+    tracing::info!("Enabling onboarding test mode");
+    ONBOARDING_TEST_MODE.store(true, Ordering::SeqCst);
+
+    // Set the hotkey from settings
+    let settings = load_settings_sync();
+    crate::platform::set_hotkey(&settings.hotkey)?;
+
+    // Register the hotkey
+    register_hotkey(&app)?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn disable_onboarding_test_mode() -> Result<(), String> {
+    tracing::info!("Disabling onboarding test mode");
+    ONBOARDING_TEST_MODE.store(false, Ordering::SeqCst);
     Ok(())
 }

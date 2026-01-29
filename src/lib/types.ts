@@ -33,6 +33,7 @@ export interface Settings {
   historyLimit: HistoryLimit;
   onboardingCompleted: boolean;
   languages: string[];
+  onboardingStep: number | null;
 }
 
 export interface UpdateInfo {
