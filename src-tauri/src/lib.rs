@@ -5,6 +5,8 @@ mod audio;
 mod db;
 mod engine;
 mod hotkey;
+mod hotkey_config;
+mod hotkey_listener;
 mod indicator;
 mod model;
 mod notifications;
@@ -354,7 +356,7 @@ fn try_register_hotkey(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn update_hotkey(hotkey: String) -> Result<(), String> {
-    platform::set_hotkey(&hotkey)
+    hotkey_config::set_hotkey_from_string(&hotkey)
 }
 
 #[tauri::command]
@@ -383,14 +385,11 @@ async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
     current_settings.onboarding_completed = true;
     settings::save_settings(&current_settings).await?;
 
-    // Set hotkey from settings
-    if let Err(e) = platform::set_hotkey(&current_settings.hotkey) {
-        tracing::warn!("Failed to set hotkey: {}", e);
-    }
-
-    // Register the hotkey (creates the event tap)
-    // Don't fail setup if this fails - user can fix permissions and restart
-    if let Err(e) = hotkey::register_hotkey(&app) {
+    // Set hotkey from settings and register listener.
+    if let Err(e) = hotkey_config::set_hotkey_from_string(&current_settings.hotkey) {
+        tracing::warn!("Failed to parse hotkey from settings: {}", e);
+    } else if let Err(e) = hotkey::register_hotkey(&app) {
+        // Don't fail setup if this fails - user can fix permissions and restart
         tracing::warn!("Failed to register hotkey: {} - hotkey will work after app restart with proper permissions", e);
     }
 
@@ -636,11 +635,10 @@ pub fn run() {
                         tracing::error!("Failed to init transcriber: {:?}", e);
                     } else {
                         // Set hotkey from settings before registering
-                        if let Err(e) = platform::set_hotkey(&saved_settings.hotkey) {
-                            tracing::warn!("Failed to set hotkey from settings: {}", e);
-                        }
-                        // Register hotkey (don't block Ready state if this fails)
-                        if let Err(e) = hotkey::register_hotkey(&app_handle) {
+                        if let Err(e) = hotkey_config::set_hotkey_from_string(&saved_settings.hotkey) {
+                            tracing::warn!("Failed to parse hotkey from settings: {}", e);
+                        } else if let Err(e) = hotkey::register_hotkey(&app_handle) {
+                            // Don't block Ready state if this fails
                             tracing::warn!("Failed to register hotkey: {} - will work after restart with permissions", e);
                         }
                         // Transition to Ready and rebuild tray menu

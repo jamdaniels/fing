@@ -413,16 +413,11 @@ async fn finish_transcription(
     }
 }
 
-/// Register the global hotkey (F8)
+/// Register the global hotkey listener
 pub fn register_hotkey(app: &AppHandle) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
-        crate::platform::register_global_hotkey(app.clone())
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        crate::platform::register_global_hotkey(app.clone())
+        crate::hotkey_listener::start_hotkey_listener(app.clone())
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -459,9 +454,9 @@ pub fn enable_onboarding_test_mode(app: AppHandle) -> Result<(), String> {
 
     // Set the hotkey from settings
     let settings = load_settings_sync();
-    crate::platform::set_hotkey(&settings.hotkey)?;
+    crate::hotkey_config::set_hotkey_from_string(&settings.hotkey)?;
 
-    // Register the hotkey
+    // Register the hotkey listener (idempotent)
     register_hotkey(&app)?;
 
     Ok(())
