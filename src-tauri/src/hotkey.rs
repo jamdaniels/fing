@@ -48,6 +48,10 @@ static AUDIO_THREAD: Mutex<Option<AudioThread>> = Mutex::new(None);
 // Recording start time for duration tracking
 static RECORDING_START: Mutex<Option<Instant>> = Mutex::new(None);
 
+// Frontmost app when recording started (to restore focus before paste)
+#[cfg(target_os = "macos")]
+static FRONTMOST_APP: Mutex<Option<String>> = Mutex::new(None);
+
 /// Initialize the audio thread (call once at startup or before first recording)
 fn ensure_audio_thread() {
     let mut thread_guard = AUDIO_THREAD
@@ -114,6 +118,14 @@ pub fn on_key_down(app: &AppHandle) {
             return;
         }
         drop(state);
+    }
+
+    // Capture frontmost app BEFORE showing indicator (which may steal focus)
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(bundle_id) = crate::platform::get_frontmost_app() {
+            *FRONTMOST_APP.lock().expect("Frontmost app mutex poisoned") = Some(bundle_id);
+        }
     }
 
     // Transition to Recording (skip state transition in test mode to avoid triggering main.ts)
@@ -372,6 +384,18 @@ pub fn on_key_up(app: &AppHandle) {
             // In test mode, emit event instead of pasting (indicator steals focus)
             app_handle.emit("test-transcription-result", text.clone()).ok();
         } else {
+            // Restore focus to the app that was active when recording started
+            #[cfg(target_os = "macos")]
+            {
+                let frontmost_app = FRONTMOST_APP.lock().expect("Frontmost app mutex poisoned").take();
+                if let Some(bundle_id) = frontmost_app {
+                    // Small delay for macOS to settle
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    crate::platform::activate_app(&bundle_id).ok();
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            }
+
             // Paste text directly (no clipboard), with trailing space for continuation
             if settings.paste_enabled {
                 let paste_result = paste_text(&format!("{} ", text));

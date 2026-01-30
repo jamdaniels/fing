@@ -596,6 +596,56 @@ pub fn is_auto_start_enabled() -> bool {
     result.trim() == "true"
 }
 
+/// Get the bundle identifier of the frontmost application
+pub fn get_frontmost_app() -> Option<String> {
+    let script = r#"tell application "System Events"
+        set frontApp to first application process whose frontmost is true
+        return bundle identifier of frontApp
+    end tell"#;
+
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        tracing::warn!("Failed to get frontmost app");
+        return None;
+    }
+
+    let bundle_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if bundle_id.is_empty() {
+        None
+    } else {
+        tracing::debug!("Captured frontmost app: {}", bundle_id);
+        Some(bundle_id)
+    }
+}
+
+/// Activate an application by bundle identifier
+pub fn activate_app(bundle_id: &str) -> Result<(), String> {
+    let escaped_id = escape_applescript_string(bundle_id);
+    let script = format!(
+        r#"tell application id "{}" to activate"#,
+        escaped_id
+    );
+
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to run osascript: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to activate app {}: {}", bundle_id, stderr));
+    }
+
+    tracing::debug!("Activated app: {}", bundle_id);
+    Ok(())
+}
+
 /// Register global hotkey using CGEventTap
 /// Note: Does NOT open System Preferences if permission is missing.
 /// Use request_accessibility_permission() to prompt the user explicitly.
