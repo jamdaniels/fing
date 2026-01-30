@@ -68,13 +68,9 @@ const K_VK_F8: i64 = 100;
 
 // CGEventTapLocation
 const K_CG_HID_EVENT_TAP: i32 = 0;
-const K_CG_SESSION_EVENT_TAP: u32 = 1;
 
 // CGEventTapPlacement
 const K_CG_HEAD_INSERT_EVENT_TAP: u32 = 0;
-
-// CGEventTapOptions
-const K_CG_EVENT_TAP_OPTION_LISTEN_ONLY: u32 = 1;
 
 // CGEventType
 const K_CG_EVENT_KEY_DOWN: u32 = 10;
@@ -106,12 +102,44 @@ const K_CG_EVENT_SOURCE_STATE_HID_SYSTEM_STATE: i32 = 1;
 // Global app handle storage
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 
+// Remember the app that was frontmost when the hotkey was pressed, so we can
+// restore focus after OS-level shortcuts (e.g. Dock, Mission Control) fire.
+static HOTKEY_FRONT_APP: OnceLock<RwLock<Option<String>>> = OnceLock::new();
+
+fn get_hotkey_front_app_slot() -> &'static RwLock<Option<String>> {
+    HOTKEY_FRONT_APP.get_or_init(|| RwLock::new(None))
+}
+
+fn remember_front_app_for_hotkey() {
+    if let Some(id) = get_frontmost_app() {
+        if let Ok(mut slot) = get_hotkey_front_app_slot().write() {
+            *slot = Some(id);
+        }
+    }
+}
+
+fn restore_front_app_for_hotkey() {
+    let bundle_id = {
+        if let Ok(slot) = get_hotkey_front_app_slot().read() {
+            slot.clone()
+        } else {
+            None
+        }
+    };
+
+    if let Some(id) = bundle_id {
+        if let Err(e) = activate_app(&id) {
+            tracing::warn!("Failed to restore frontmost app {}: {}", id, e);
+        }
+    }
+}
+
 /// Parsed hotkey configuration
 #[derive(Clone)]
 struct ParsedHotkey {
-    keycode: Option<i64>,     // None for Fn-only
-    required_modifiers: u64,  // CGEventFlags mask (Ctrl, Option, Shift, Cmd)
-    uses_fn: bool,            // Whether Fn key is part of the combination
+    keycode: Option<i64>,    // None for Fn-only
+    required_modifiers: u64, // CGEventFlags mask (Ctrl, Option, Shift, Cmd)
+    uses_fn: bool,           // Whether Fn key is part of the combination
 }
 
 impl Default for ParsedHotkey {
@@ -222,7 +250,10 @@ pub fn set_hotkey(key: &str) -> Result<(), String> {
     }
 
     // Validate characters - only allow alphanumeric, +, and space
-    if !key.chars().all(|c| c.is_alphanumeric() || c == '+' || c == ' ') {
+    if !key
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '+' || c == ' ')
+    {
         return Err("Hotkey contains invalid characters".to_string());
     }
 
@@ -230,7 +261,10 @@ pub fn set_hotkey(key: &str) -> Result<(), String> {
 
     // Validate part count
     if parts.len() > MAX_HOTKEY_PARTS {
-        return Err(format!("Too many keys in combination (max {})", MAX_HOTKEY_PARTS));
+        return Err(format!(
+            "Too many keys in combination (max {})",
+            MAX_HOTKEY_PARTS
+        ));
     }
 
     let mut required_modifiers: u64 = 0;
@@ -277,15 +311,22 @@ pub fn set_hotkey(key: &str) -> Result<(), String> {
 
     // Store the config
     let hotkey_lock = get_hotkey_config();
-    let mut hotkey = hotkey_lock.write().map_err(|e| format!("Lock error: {}", e))?;
+    let mut hotkey = hotkey_lock
+        .write()
+        .map_err(|e| format!("Lock error: {}", e))?;
     *hotkey = config;
 
     // Reset state
     HOTKEY_ACTIVE.store(false, Ordering::SeqCst);
     FN_KEY_DOWN.store(false, Ordering::SeqCst);
 
-    tracing::info!("Hotkey updated to: {} (keycode: {:?}, modifiers: 0x{:x}, fn: {})",
-        key, keycode, required_modifiers, uses_fn);
+    tracing::info!(
+        "Hotkey updated to: {} (keycode: {:?}, modifiers: 0x{:x}, fn: {})",
+        key,
+        keycode,
+        required_modifiers,
+        uses_fn
+    );
     Ok(())
 }
 
@@ -322,11 +363,14 @@ extern "C" fn event_tap_callback(
 
     // Handle Fn-only mode (no base key, just Fn)
     if config.keycode.is_none() && config.uses_fn && config.required_modifiers == 0 {
+        // We treat Fn as the hotkey itself. While it is held, we swallow
+        // all related keyboard events so system features bound to Fn do not fire.
         if event_type == K_CG_EVENT_FLAGS_CHANGED {
             let was_pressed = FN_KEY_DOWN.load(Ordering::SeqCst);
 
             if fn_pressed && !was_pressed {
                 FN_KEY_DOWN.store(true, Ordering::SeqCst);
+                remember_front_app_for_hotkey();
                 if let Some(app) = APP_HANDLE.get() {
                     crate::hotkey::on_key_down(app);
                 }
@@ -335,8 +379,20 @@ extern "C" fn event_tap_callback(
                 if let Some(app) = APP_HANDLE.get() {
                     crate::hotkey::on_key_up(app);
                 }
+                // Restore the app that was frontmost when Fn was pressed
+                restore_front_app_for_hotkey();
             }
+
+            // Swallow all Fn-related flags changes in Fn-only mode
+            return std::ptr::null_mut();
         }
+
+        // While Fn is held as the hotkey, swallow all other key events too
+        if FN_KEY_DOWN.load(Ordering::SeqCst) {
+            return std::ptr::null_mut();
+        }
+
+        // Otherwise (Fn not involved), pass event through
         return event;
     }
 
@@ -357,10 +413,13 @@ extern "C" fn event_tap_callback(
                     K_CG_EVENT_KEY_DOWN => {
                         if !was_active {
                             HOTKEY_ACTIVE.store(true, Ordering::SeqCst);
+                            remember_front_app_for_hotkey();
                             if let Some(app) = APP_HANDLE.get() {
                                 crate::hotkey::on_key_down(app);
                             }
                         }
+                        // Swallow the hotkey key-down event
+                        return std::ptr::null_mut();
                     }
                     K_CG_EVENT_KEY_UP => {
                         if was_active {
@@ -368,7 +427,11 @@ extern "C" fn event_tap_callback(
                             if let Some(app) = APP_HANDLE.get() {
                                 crate::hotkey::on_key_up(app);
                             }
+                            // Restore the app that was frontmost when the hotkey was pressed
+                            restore_front_app_for_hotkey();
                         }
+                        // Swallow the hotkey key-up event
+                        return std::ptr::null_mut();
                     }
                     _ => {}
                 }
@@ -478,11 +541,7 @@ pub fn type_text(text: &str) -> Result<(), String> {
             return Err("Failed to create keyboard event".to_string());
         }
 
-        CGEventKeyboardSetUnicodeString(
-            key_down,
-            utf16.len() as std::ffi::c_ulong,
-            utf16.as_ptr(),
-        );
+        CGEventKeyboardSetUnicodeString(key_down, utf16.len() as std::ffi::c_ulong, utf16.as_ptr());
         CGEventPost(K_CG_HID_EVENT_TAP, key_down);
         CFRelease(key_down);
 
@@ -626,10 +685,7 @@ pub fn get_frontmost_app() -> Option<String> {
 /// Activate an application by bundle identifier
 pub fn activate_app(bundle_id: &str) -> Result<(), String> {
     let escaped_id = escape_applescript_string(bundle_id);
-    let script = format!(
-        r#"tell application id "{}" to activate"#,
-        escaped_id
-    );
+    let script = format!(r#"tell application id "{}" to activate"#, escaped_id);
 
     let output = std::process::Command::new("osascript")
         .arg("-e")
@@ -665,19 +721,23 @@ pub fn register_global_hotkey(app: AppHandle) -> Result<(), String> {
     std::thread::spawn(|| {
         unsafe {
             // Create event tap for key events and flags changed (for Fn key)
-            let event_mask = K_CG_EVENT_MASK_FOR_KEY_DOWN | K_CG_EVENT_MASK_FOR_KEY_UP | K_CG_EVENT_MASK_FOR_FLAGS_CHANGED;
+            let event_mask = K_CG_EVENT_MASK_FOR_KEY_DOWN
+                | K_CG_EVENT_MASK_FOR_KEY_UP
+                | K_CG_EVENT_MASK_FOR_FLAGS_CHANGED;
 
             let event_tap = CGEventTapCreate(
-                K_CG_SESSION_EVENT_TAP,
+                K_CG_HID_EVENT_TAP as u32,
                 K_CG_HEAD_INSERT_EVENT_TAP,
-                K_CG_EVENT_TAP_OPTION_LISTEN_ONLY,
+                0,
                 event_mask,
                 event_tap_callback,
                 std::ptr::null_mut(),
             );
 
             if event_tap.is_null() {
-                tracing::error!("Failed to create event tap - accessibility permission may be required");
+                tracing::error!(
+                    "Failed to create event tap - accessibility permission may be required"
+                );
                 return;
             }
 

@@ -698,7 +698,6 @@ pub fn run() {
             indicator::indicator_show_processing,
             indicator::indicator_hide,
             // Notifications
-            notifications::notify_clipboard_fallback,
             notifications::notify_error,
             // Window management
             open_main_window,

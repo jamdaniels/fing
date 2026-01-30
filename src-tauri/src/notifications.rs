@@ -11,50 +11,7 @@ fn escape_applescript(s: &str) -> String {
 fn escape_powershell(s: &str) -> String {
     // In PowerShell single-quoted strings, only ' needs escaping (doubled)
     // Also escape backticks and dollar signs for extra safety
-    s.replace('\'', "''")
-        .replace('`', "``")
-        .replace('$', "`$")
-}
-
-/// Show notification that text was copied to clipboard
-pub fn show_clipboard_fallback(app: &AppHandle) {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = std::process::Command::new("osascript")
-            .args([
-                "-e",
-                "display notification \"Text copied to clipboard\" with title \"Fing\"",
-            ])
-            .spawn();
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        // Windows toast notification via PowerShell
-        let _ = std::process::Command::new("powershell")
-            .args([
-                "-Command",
-                "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null; \
-                 $template = [Windows.UI.Notifications.ToastTemplateType]::ToastText02; \
-                 $xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent($template); \
-                 $text = $xml.GetElementsByTagName('text'); \
-                 $text[0].AppendChild($xml.CreateTextNode('Fing')) | Out-Null; \
-                 $text[1].AppendChild($xml.CreateTextNode('Text copied to clipboard')) | Out-Null; \
-                 $toast = [Windows.UI.Notifications.ToastNotification]::new($xml); \
-                 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Fing').Show($toast);"
-            ])
-            .spawn();
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let _ = std::process::Command::new("notify-send")
-            .args(["Fing", "Text copied to clipboard"])
-            .spawn();
-    }
-
-    let _ = app; // Suppress unused warning when not needed
-    tracing::info!("Clipboard fallback notification shown");
+    s.replace('\'', "''").replace('`', "``").replace('$', "`$")
 }
 
 /// Show error notification
@@ -65,8 +22,7 @@ pub fn show_error(app: &AppHandle, title: &str, message: &str) {
         let escaped_message = escape_applescript(message);
         let script = format!(
             "display notification \"{}\" with title \"{}\"",
-            escaped_message,
-            escaped_title
+            escaped_message, escaped_title
         );
         let _ = std::process::Command::new("osascript")
             .args(["-e", &script])
@@ -113,8 +69,7 @@ pub fn show_info(app: &AppHandle, title: &str, message: &str) {
         let escaped_message = escape_applescript(message);
         let script = format!(
             "display notification \"{}\" with title \"{}\"",
-            escaped_message,
-            escaped_title
+            escaped_message, escaped_title
         );
         let _ = std::process::Command::new("osascript")
             .args(["-e", &script])
@@ -151,12 +106,6 @@ pub fn show_info(app: &AppHandle, title: &str, message: &str) {
 
     let _ = app;
     tracing::info!("Info notification: {} - {}", title, message);
-}
-
-// Tauri commands for notifications
-#[tauri::command]
-pub fn notify_clipboard_fallback(app: AppHandle) {
-    show_clipboard_fallback(&app);
 }
 
 #[tauri::command]

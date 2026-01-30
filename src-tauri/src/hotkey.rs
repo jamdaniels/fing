@@ -12,8 +12,6 @@ use crate::settings::{load_settings, load_settings_sync};
 use crate::sounds;
 use crate::transcribe::{get_transcriber, init_transcriber, transcribe_audio};
 
-// Minimum recording duration in milliseconds
-const MIN_RECORDING_DURATION_MS: u64 = 200;
 // Maximum recording duration (2 minutes) in milliseconds
 const MAX_RECORDING_DURATION_MS: u64 = 2 * 60 * 1000;
 
@@ -214,37 +212,6 @@ pub fn on_key_up(app: &AppHandle) {
         start.map(|s| s.elapsed().as_millis() as u64).unwrap_or(0)
     };
 
-    // Minimum recording duration guard (200ms)
-    if duration_ms < MIN_RECORDING_DURATION_MS {
-        tracing::info!("Recording too short ({}ms), ignoring", duration_ms);
-        crate::notifications::show_info(app, "Fing", "Recording too short");
-        // Hide indicator and return to Ready
-        crate::indicator::hide(app).ok();
-        if !is_test_mode {
-            crate::state::transition_to(crate::state::AppState::Ready).ok();
-            app.emit("app-state-changed", "ready").ok();
-        }
-        // Still need to stop recording to reset audio state and drain response
-        {
-            let thread_guard = AUDIO_THREAD
-                .lock()
-                .expect("Audio thread mutex poisoned");
-            if let Some(ref thread) = *thread_guard {
-                let _ = thread.cmd_tx.send(AudioCommand::StopRecording);
-            }
-        }
-        // Drain the response in a background thread to avoid blocking
-        std::thread::spawn(|| {
-            let thread_guard = AUDIO_THREAD
-                .lock()
-                .expect("Audio thread mutex poisoned in drain thread");
-            if let Some(ref thread) = *thread_guard {
-                let _ = thread.resp_rx.recv();
-            }
-        });
-        return;
-    }
-
     // Transition to Processing (skip state events in test mode)
     if !is_test_mode {
         crate::state::transition_to(crate::state::AppState::Processing).ok();
@@ -396,13 +363,13 @@ pub fn on_key_up(app: &AppHandle) {
                 }
             }
 
-            // Paste text directly (no clipboard), with trailing space for continuation
-            if settings.paste_enabled {
-                let paste_result = paste_text(&format!("{} ", text));
-                if paste_result.should_notify() {
-                    crate::notifications::show_clipboard_fallback(&app_handle);
-                }
+        // Paste text directly (no clipboard), with trailing space for continuation
+        if settings.paste_enabled {
+            let paste_result = paste_text(&format!("{} ", text));
+            if paste_result.should_notify() {
+                tracing::warn!("Direct text input failed after transcription");
             }
+        }
 
             // Save to history if enabled
             if settings.history_enabled {
