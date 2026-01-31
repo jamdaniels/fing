@@ -391,11 +391,6 @@ pub fn on_key_up(app: &AppHandle) {
             }
         }
 
-        // Play done sound if enabled
-        if settings.sound_enabled {
-            sounds::play_done();
-        }
-
         finish_transcription(&app_handle, Some(text), duration_ms, test_mode).await;
     });
 }

@@ -3,7 +3,6 @@ use std::io::Cursor;
 
 // Embed sound files at compile time
 const START_SOUND: &[u8] = include_bytes!("../sounds/recording-start.wav");
-const DONE_SOUND: &[u8] = include_bytes!("../sounds/recording-done.wav");
 
 fn play_sound(data: &'static [u8]) {
     std::thread::spawn(move || {
@@ -31,9 +30,4 @@ fn play_sound(data: &'static [u8]) {
 /// Play the recording start sound on a background thread
 pub fn play_start() {
     play_sound(START_SOUND);
-}
-
-/// Play the recording done sound on a background thread
-pub fn play_done() {
-    play_sound(DONE_SOUND);
 }
