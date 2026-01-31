@@ -70,7 +70,7 @@ pub fn position_indicator(window: &WebviewWindow) -> Result<(), String> {
     // Window dimensions from config
     let window_width = 70.0;
     let window_height = 30.0;
-    let margin_bottom = 50.0;
+    let margin_bottom = 100.0;
 
     // Calculate position (convert physical pixels to logical)
     let screen_width = screen_size.width as f64 / scale_factor;
