@@ -716,6 +716,7 @@ pub fn run() {
             if show_setup_window {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
+                    let _ = window.set_focus();
                 }
             }
 
