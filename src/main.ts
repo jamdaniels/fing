@@ -703,7 +703,7 @@ function closeHotkeyModal(): void {
 }
 
 async function showMicTestModal(): Promise<void> {
-  closeMicTestModal();
+  await closeMicTestModal();
 
   let micTestInterval: number | null = null;
   let currentMicTest: MicrophoneTest | null = null;
@@ -902,9 +902,9 @@ async function showMicTestModal(): Promise<void> {
   };
 }
 
-function closeMicTestModal(): void {
+async function closeMicTestModal(): Promise<void> {
   if (micTestModalCleanup) {
-    micTestModalCleanup();
+    await micTestModalCleanup();
   }
 }
 

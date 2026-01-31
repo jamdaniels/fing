@@ -367,8 +367,13 @@ impl AudioCapture {
     }
 
     pub fn close_capture(&mut self) {
+        // Pause stream before dropping to ensure audio callbacks stop
+        if let Some(ref stream) = self.stream {
+            let _ = stream.pause();
+        }
         self.stream = None;
         self.is_recording = false;
+        tracing::debug!("Audio capture closed");
     }
 
     pub fn resample_to_16k(&self, buffer: Vec<f32>) -> Vec<f32> {
@@ -539,5 +544,15 @@ impl AudioCapture {
         }
         self.close_capture();
         self.is_recording = false;
+    }
+}
+
+impl Drop for AudioCapture {
+    fn drop(&mut self) {
+        // Ensure stream is properly stopped when AudioCapture is dropped
+        if self.stream.is_some() {
+            tracing::debug!("AudioCapture dropped with active stream, closing");
+            self.close_capture();
+        }
     }
 }
