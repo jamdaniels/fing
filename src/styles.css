@@ -549,11 +549,10 @@ body {
 /* Onboarding */
 #onboarding-container {
   width: 100%;
-  flex: 1;
+  height: 100%;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  overflow: hidden;
 }
 
 .onboarding {
@@ -564,7 +563,6 @@ body {
   height: 100%;
   padding: 32px;
   position: relative;
-  overflow: hidden;
 }
 
 .onboarding-skip {
@@ -602,46 +600,46 @@ body {
 }
 
 .onboarding-icon {
-  width: 72px;
-  height: 72px;
+  width: 64px;
+  height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   color: var(--accent);
   background: linear-gradient(
     135deg,
     var(--accent-10) 0%,
     var(--accent-5) 100%
   );
-  border-radius: 18px;
+  border-radius: 16px;
 }
 
 .onboarding-icon svg {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
 }
 
 .onboarding-logo {
-  width: 88px;
-  height: 88px;
-  margin-bottom: 20px;
-  border-radius: 18px;
+  width: 72px;
+  height: 72px;
+  margin-bottom: 16px;
+  border-radius: 16px;
 }
 
 .onboarding-title {
   font-size: 28px;
   font-weight: 700;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   letter-spacing: -0.5px;
 }
 
 .onboarding-desc {
   font-size: 15px;
   color: var(--text-secondary);
-  margin-bottom: 28px;
   line-height: 1.5;
   max-width: 360px;
+  margin: 0;
 }
 
 .onboarding-features {
@@ -712,7 +710,6 @@ body {
 
 .download-progress-container {
   width: 100%;
-  margin-bottom: 16px;
   padding: 16px;
   background-color: var(--bg-secondary);
   border-radius: 10px;
@@ -764,8 +761,13 @@ body {
   font-weight: 500;
 }
 
-.download-status.success {
+.download-status.centered-status {
   text-align: center;
+  margin-bottom: 0;
+  padding-top: 8px;
+}
+
+.download-status.success {
   color: var(--success);
 }
 
@@ -959,7 +961,6 @@ body {
   background-color: var(--bg-primary);
   border: 1px solid var(--border);
   color: var(--text-secondary);
-  cursor: pointer;
 }
 
 .btn-icon:hover {
@@ -1250,7 +1251,6 @@ body {
   color: var(--text-secondary);
   font-size: 13px;
   text-decoration: underline;
-  cursor: pointer;
   padding: 4px 8px;
 }
 
@@ -1269,7 +1269,6 @@ body {
   border-radius: 8px;
   font-size: 13px;
   color: var(--text-secondary);
-  cursor: pointer;
 }
 
 .hotkey-fn-option:hover {
@@ -1297,15 +1296,10 @@ body {
   display: flex;
   justify-content: center;
   gap: 8px;
-  padding: 20px 0 28px;
 }
 
 .step-indicator-placeholder {
-  height: calc(
-    8px +
-    20px +
-    28px
-  ); /* dot height + top padding + bottom padding */
+  height: 8px;
 }
 
 .step-dot {
@@ -1364,7 +1358,6 @@ body {
   background-color: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 6px;
-  cursor: pointer;
   font-size: 13px;
 }
 
@@ -1394,7 +1387,6 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  margin: 12px 0 16px;
   width: 100%;
   max-width: 260px;
 }
@@ -1423,14 +1415,15 @@ body {
   visibility: hidden;
 }
 
-/* Onboarding unified layout */
+/* Onboarding unified layout - fixed values for 800x600 window */
 .onboarding-header {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-end;
   text-align: center;
+  height: 160px;
   flex-shrink: 0;
-  margin-bottom: 24px;
 }
 
 .onboarding-body {
@@ -1438,21 +1431,21 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-start;
-  gap: 20px;
+  justify-content: center;
+  gap: 16px;
   width: 100%;
-  padding: 0;
+  padding: 24px 0;
   min-height: 0;
-  overflow: hidden;
 }
 
 .onboarding-footer {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  justify-content: flex-end;
+  gap: 32px;
+  height: 110px;
   flex-shrink: 0;
-  margin-top: 24px;
 }
 
 /* Hotkey capture area */

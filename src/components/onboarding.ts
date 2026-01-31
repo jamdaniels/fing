@@ -8,8 +8,6 @@ import {
   Keyboard,
   Mic,
   PersonStanding,
-  RefreshCw,
-  Upload,
 } from "lucide";
 import { createIcon, escapeHtml } from "../lib/icons";
 import {
@@ -24,7 +22,6 @@ import {
   requestAccessibilityPermission,
   requestMicrophonePermission,
   requestPermissions,
-  selectModelFile,
   startModelDownload,
   updateSettings,
 } from "../lib/ipc";
@@ -41,6 +38,8 @@ interface OnboardingState {
   step: OnboardingStep;
   downloadProgress: DownloadProgress | null;
   downloadError: string | null;
+  completeError: string | null;
+  isCompleting: boolean;
   permissions: PermissionStatus | null;
   audioDevices: AudioDevice[];
   selectedDeviceId: string | null;
@@ -61,6 +60,8 @@ let state: OnboardingState = {
   step: 1,
   downloadProgress: null,
   downloadError: null,
+  completeError: null,
+  isCompleting: false,
   permissions: null,
   audioDevices: [],
   selectedDeviceId: null,
@@ -199,17 +200,24 @@ function renderDownloadBody(
   isDownloading: boolean,
   isComplete: boolean,
   isFailed: boolean,
-  statusText: string,
   progress: DownloadProgress | null
 ): string {
   if (isDownloading || isComplete || isFailed) {
+    let statusText = "";
+    if (isDownloading) {
+      statusText = `${formatBytes(progress?.bytesDownloaded ?? 0)} / ${formatBytes(progress?.totalBytes ?? 0)}`;
+    } else if (isComplete) {
+      statusText = "Download complete!";
+    } else if (isFailed) {
+      statusText = progress?.errorMessage || "Download failed";
+    }
+
     return `
       <div class="download-progress-container">
         <div class="progress-bar">
           <div class="progress-bar-fill" style="width: ${progress?.percentage ?? 0}%"></div>
         </div>
-        <div class="download-status ${isFailed ? "error" : ""}${isComplete ? "success" : ""}">${statusText}</div>
-        ${isDownloading ? `<button class="btn btn-secondary" id="cancel-download-btn">Cancel</button>` : ""}
+        <div class="download-status ${isFailed ? "error" : ""}${isComplete ? "success centered-status" : ""}${isDownloading ? "centered-status" : ""}">${statusText}</div>
         ${isFailed ? `<button class="btn btn-primary" id="retry-download-btn">Retry Download</button>` : ""}
       </div>
     `;
@@ -217,18 +225,11 @@ function renderDownloadBody(
   return "";
 }
 
-function renderDownloadFooterButton(
-  isDownloading: boolean,
-  isComplete: boolean,
-  isFailed: boolean
-): string {
+function renderDownloadFooterButton(isComplete: boolean): string {
   if (isComplete) {
     return `<button class="btn btn-primary btn-lg" id="continue-btn">Continue</button>`;
   }
-  if (isDownloading || isFailed) {
-    return "";
-  }
-  return `<button class="btn btn-primary btn-lg" id="start-download-btn">Download Model</button>`;
+  return `<button class="btn btn-primary btn-lg" id="continue-btn" disabled>Continue</button>`;
 }
 
 function renderMicPermissionStatus(status: string | undefined): string {
@@ -339,26 +340,6 @@ function renderDownloadModel(): void {
   const isComplete = progress?.status === "complete";
   const isFailed = progress?.status === "failed";
 
-  let statusText = "";
-  if (progress) {
-    switch (progress.status) {
-      case "downloading":
-        statusText = `Downloading... ${formatBytes(progress.bytesDownloaded)} / ${formatBytes(progress.totalBytes)}`;
-        break;
-      case "verifying":
-        statusText = "Verifying download...";
-        break;
-      case "complete":
-        statusText = "Download complete!";
-        break;
-      case "failed":
-        statusText = progress.errorMessage || "Download failed";
-        break;
-      default:
-        statusText = "";
-    }
-  }
-
   container.innerHTML = `
     <div class="onboarding">
       <div class="onboarding-header">
@@ -366,24 +347,21 @@ function renderDownloadModel(): void {
           ${createIcon(Download)}
         </div>
         <h1 class="onboarding-title">Download Speech Model</h1>
-        <p class="onboarding-desc">Fing needs a speech recognition model (~142 MB, one-time download)</p>
+        <p class="onboarding-desc">Fing needs a speech recognition model</p>
       </div>
       <div class="onboarding-body">
         ${state.downloadError ? `<div class="download-status error" style="margin-bottom: 16px;">${state.downloadError}</div>` : ""}
-        ${renderDownloadBody(isDownloading, isComplete, isFailed, statusText, progress)}
+        ${renderDownloadBody(isDownloading, isComplete, isFailed, progress)}
         ${
           isDownloading || isComplete || isFailed
             ? ""
             : `
-          <button class="btn btn-outline" id="select-file-btn">
-            ${createIcon(Upload)}
-            Already have the model file? Choose File...
-          </button>
+          <button class="btn btn-primary btn-lg" id="start-download-btn">Download Model</button>
         `
         }
       </div>
       <div class="onboarding-footer">
-        ${renderDownloadFooterButton(isDownloading, isComplete, isFailed)}
+        ${renderDownloadFooterButton(isComplete)}
         ${renderStepIndicator(2)}
       </div>
     </div>
@@ -395,12 +373,6 @@ function renderDownloadModel(): void {
   document
     .getElementById("retry-download-btn")
     ?.addEventListener("click", handleStartDownload);
-  document
-    .getElementById("cancel-download-btn")
-    ?.addEventListener("click", handleCancelDownload);
-  document
-    .getElementById("select-file-btn")
-    ?.addEventListener("click", handleSelectFile);
   document
     .getElementById("continue-btn")
     ?.addEventListener("click", () => goToStep(3));
@@ -548,7 +520,7 @@ function renderPermissions(): void {
         ${
           allGranted
             ? `<button class="btn btn-primary btn-lg" id="continue-btn">Continue</button>`
-            : `<button class="btn btn-primary btn-lg" id="restart-btn">${createIcon(RefreshCw)} Restart to Apply</button>`
+            : `<button class="btn btn-primary btn-lg" id="restart-btn">Restart to Apply</button>`
         }
         ${renderStepIndicator(4)}
       </div>
@@ -615,7 +587,7 @@ function renderHotkeyStep(): void {
           ${createIcon(Keyboard)}
         </div>
         <h1 class="onboarding-title">Set Recording Hotkey</h1>
-        <p class="onboarding-desc">Press a key to set your recording hotkey</p>
+        <p class="onboarding-desc">Press a key or key combination to set your hotkey</p>
       </div>
       <div class="onboarding-body">
         <div class="hotkey-capture-area">
@@ -623,7 +595,6 @@ function renderHotkeyStep(): void {
             <span class="hotkey-key ${hasNewKey ? "captured" : ""}">${formatKeyForDisplay(displayKey)}</span>
             ${hasNewKey ? '<span class="hotkey-new-badge">New</span>' : ""}
           </div>
-          <p class="hotkey-hint">Press any key or key combination</p>
           <button class="hotkey-fn-option" id="use-fn-btn">
             <span class="hotkey-fn-key">fn</span>
             <span>Use Fn key instead</span>
@@ -763,9 +734,9 @@ function renderTestStep(): void {
           placeholder="Your transcription will appear here..."
           value="${escapeHtml(state.testText)}"
         />
+        <p class="onboarding-hint ${hasText ? "invisible" : ""}">Complete a test transcription to continue</p>
       </div>
       <div class="onboarding-footer">
-        <p class="onboarding-hint ${hasText ? "invisible" : ""}">Complete a test transcription to continue</p>
         <button class="btn btn-primary btn-lg" id="finish-btn" ${hasText ? "" : "disabled"}>
           Finish Setup
         </button>
@@ -803,6 +774,8 @@ function renderCompletion(): void {
   }
 
   const hotkey = state.selectedHotkey;
+  const completeError = state.completeError;
+  const isCompleting = state.isCompleting;
 
   container.innerHTML = `
     <div class="onboarding">
@@ -814,6 +787,11 @@ function renderCompletion(): void {
         <p class="onboarding-desc">Start using Fing to transcribe your speech</p>
       </div>
       <div class="onboarding-body">
+        ${
+          completeError
+            ? `<div class="download-status error">${escapeHtml(completeError)}</div>`
+            : ""
+        }
         <div class="completion-instructions">
           <div class="instruction-item">
             <span class="instruction-key">${formatKeyForDisplay(hotkey)}</span>
@@ -826,8 +804,10 @@ function renderCompletion(): void {
         </div>
       </div>
       <div class="onboarding-footer">
-        <button class="btn btn-primary btn-lg" id="start-btn">
-          Start Using Fing
+        <button class="btn btn-primary btn-lg" id="start-btn" type="button" ${
+          isCompleting ? "disabled" : ""
+        }>
+          ${isCompleting ? "Finishing setup..." : "Start Using Fing"}
         </button>
         <div class="step-indicator-placeholder"></div>
       </div>
@@ -892,25 +872,6 @@ function handleStartDownload(): void {
   });
 
   startDownloadPolling();
-}
-
-function handleCancelDownload(): void {
-  stopPolling();
-  state.downloadProgress = null;
-  render();
-}
-
-async function handleSelectFile(): Promise<void> {
-  const path = await selectModelFile();
-  if (path) {
-    state.downloadProgress = {
-      bytesDownloaded: 0,
-      totalBytes: 0,
-      percentage: 100,
-      status: "complete",
-    };
-    render();
-  }
 }
 
 async function handleRequestPermissions(): Promise<void> {
@@ -993,16 +954,24 @@ async function stopPolling(): Promise<void> {
 }
 
 async function handleComplete(): Promise<void> {
-  await stopPolling();
+  if (state.isCompleting) {
+    return;
+  }
+
+  state.isCompleting = true;
+  state.completeError = null;
+  render();
+
+  stopPolling().catch(() => undefined);
+
   try {
     await completeSetup();
     window.dispatchEvent(new CustomEvent("setup-complete"));
     await getCurrentWindow().hide();
-  } catch (err) {
-    console.error("Failed to complete setup:", err);
-    state.step = 2;
-    state.downloadProgress = null;
-    state.downloadError = String(err);
+  } catch {
+    state.isCompleting = false;
+    state.completeError =
+      "Setup did not finish. Please confirm the model download and try again.";
     render();
   }
 }
@@ -1022,6 +991,8 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     step: 1,
     downloadProgress: null,
     downloadError: null,
+    completeError: null,
+    isCompleting: false,
     permissions: null,
     audioDevices: [],
     selectedDeviceId: null,
@@ -1047,7 +1018,11 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     // If resuming at permissions step, refresh permissions
     if (savedStep === 4) {
       state.step = savedStep;
-      state.permissions = await requestPermissions();
+      try {
+        state.permissions = await requestPermissions();
+      } catch (e) {
+        console.error("Failed to get permissions:", e);
+      }
       render();
       return;
     }

@@ -1361,15 +1361,15 @@ async function init(): Promise<void> {
   window.addEventListener("setup-complete", () => {
     cleanupOnboarding();
     currentAppState = "ready";
-    // Don't show main UI - window is hidden after onboarding completion
-    // User will access the app via tray menu
+    showMainUI(); // Rebuild DOM to main UI structure before hiding
+    getCurrentWindow().hide();
   });
 
   listen("app-state-changed", (event) => {
     const newState = event.payload as AppState;
     if (newState !== "needs-setup" && currentAppState === "needs-setup") {
       cleanupOnboarding();
-      showMainUI();
+      showMainUI(); // Rebuild DOM so tray menu can navigate properly
     }
     currentAppState = newState;
     renderContent();
