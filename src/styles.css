@@ -627,7 +627,11 @@ body {
 
 @media (prefers-color-scheme: light) {
   .onboarding-icon {
-    background: linear-gradient(135deg, var(--accent-15) 0%, var(--accent-10) 100%);
+    background: linear-gradient(
+      135deg,
+      var(--accent-15) 0%,
+      var(--accent-10) 100%
+    );
   }
 }
 

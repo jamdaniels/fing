@@ -684,7 +684,7 @@ function renderMicSelection(): void {
             .map(
               (d) => `
             <option value="${escapeHtml(d.id)}" ${d.id === state.selectedDeviceId || (state.selectedDeviceId === null && d.isDefault) ? "selected" : ""}>
-              ${escapeHtml(d.name)}${d.isDefault ? " (Default)" : ""}
+              ${escapeHtml(d.name)}
             </option>
           `
             )

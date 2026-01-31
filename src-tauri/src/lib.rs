@@ -488,28 +488,17 @@ fn build_mic_submenu_for_handle(app: &impl tauri::Manager<tauri::Wry>) -> Result
 
     let mut mic_entries: Vec<MicMenuEntry> = Vec::new();
 
-    // Add system default option (selected when selected_microphone_id is None)
-    let default_checked = selected_id.is_none() || !has_selected_device;
-    let default_item = CheckMenuItem::with_id(
-        app,
-        "mic_default",
-        "System Default",
-        true,
-        default_checked,
-        None::<&str>,
-    )?;
-    mic_entries.push(MicMenuEntry {
-        device_id: None,
-        item: default_item,
-    });
-
-    // Add each device
-    for device in devices {
+    // Add each device - auto-select default device when no selection exists
+    for device in &devices {
         let item_id = format!("mic_{}", encode_menu_id(&device.id));
-        let is_checked = selected_id.as_ref() == Some(&device.id);
+        let is_checked = if has_selected_device {
+            selected_id.as_ref() == Some(&device.id)
+        } else {
+            device.is_default
+        };
         let item = CheckMenuItem::with_id(app, &item_id, &device.name, true, is_checked, None::<&str>)?;
         mic_entries.push(MicMenuEntry {
-            device_id: Some(device.id),
+            device_id: Some(device.id.clone()),
             item,
         });
     }
@@ -545,7 +534,7 @@ fn decode_menu_id(value: &str) -> Option<String> {
 }
 
 fn update_mic_menu_checks(selected_id: Option<String>) {
-    let mut stored = match MIC_MENU_ITEMS.lock() {
+    let stored = match MIC_MENU_ITEMS.lock() {
         Ok(items) => items,
         Err(_) => return,
     };
@@ -555,14 +544,15 @@ fn update_mic_menu_checks(selected_id: Option<String>) {
         .map(|id| stored.iter().any(|entry| entry.device_id.as_ref() == Some(id)))
         .unwrap_or(false);
 
-    for entry in stored.iter_mut() {
+    for entry in stored.iter() {
         let checked = match (&entry.device_id, &selected_id) {
-            (None, None) => true,
-            (None, Some(_)) => !has_selected_device,
             (Some(device_id), Some(selected)) => device_id == selected,
+            (Some(_), None) => false, // Will need to check is_default, but we don't have that info here
             _ => false,
         };
-        let _ = entry.item.set_checked(checked);
+        // When no selection, we can't easily determine default here, so just uncheck all
+        // The menu will be rebuilt with correct state on next app launch
+        let _ = entry.item.set_checked(if has_selected_device { checked } else { false });
     }
 }
 
@@ -608,16 +598,12 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
         }
         id if id.starts_with("mic_") => {
             tracing::debug!("Mic menu event: {}", id);
-            let device_id = if id == "mic_default" {
-                None
-            } else {
-                let encoded = id.strip_prefix("mic_").unwrap_or("");
-                match decode_menu_id(encoded) {
-                    Some(decoded) => Some(decoded),
-                    None => {
-                        tracing::warn!("Invalid microphone menu id: {}", id);
-                        return;
-                    }
+            let encoded = id.strip_prefix("mic_").unwrap_or("");
+            let device_id = match decode_menu_id(encoded) {
+                Some(decoded) => Some(decoded),
+                None => {
+                    tracing::warn!("Invalid microphone menu id: {}", id);
+                    return;
                 }
             };
             let current_selected = settings::load_settings_sync().selected_microphone_id;

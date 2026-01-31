@@ -719,7 +719,7 @@ async function showMicTestModal(): Promise<void> {
     localDevices
       .map(
         (d) =>
-          `<option value="${escapeHtml(d.id)}" ${selectedDeviceId === d.id || (selectedDeviceId === null && d.isDefault) ? "selected" : ""}>${escapeHtml(d.name)}${d.isDefault ? " (Default)" : ""}</option>`
+          `<option value="${escapeHtml(d.id)}" ${selectedDeviceId === d.id || (selectedDeviceId === null && d.isDefault) ? "selected" : ""}>${escapeHtml(d.name)}</option>`
       )
       .join("");
 
@@ -741,7 +741,6 @@ async function showMicTestModal(): Promise<void> {
             <label for="modal-mic-select">Device:</label>
             <div class="mic-select-wrapper">
               <select id="modal-mic-select" class="settings-select">
-                <option value="" ${selectedDeviceId === null ? "selected" : ""}>System Default</option>
                 ${getMicOptions()}
               </select>
               <button class="btn btn-icon mic-refresh-btn" title="Refresh devices">${createIcon(RefreshCw)}</button>
@@ -1035,7 +1034,7 @@ function renderSettingsUI(el: HTMLElement): void {
   const micOptions = audioDevices
     .map(
       (d) =>
-        `<option value="${escapeHtml(d.id)}" ${settings?.selectedMicrophoneId === d.id ? "selected" : ""}>${escapeHtml(d.name)}${d.isDefault ? " (Default)" : ""}</option>`
+        `<option value="${escapeHtml(d.id)}" ${settings?.selectedMicrophoneId === d.id || (settings?.selectedMicrophoneId == null && d.isDefault) ? "selected" : ""}>${escapeHtml(d.name)}</option>`
     )
     .join("");
 
@@ -1079,7 +1078,6 @@ function renderSettingsUI(el: HTMLElement): void {
           <div class="settings-row-desc">Select audio input device</div>
         </div>
         <select class="settings-select mic-select">
-          <option value="" ${settings?.selectedMicrophoneId ? "" : "selected"}>System Default</option>
           ${micOptions}
         </select>
       </div>
