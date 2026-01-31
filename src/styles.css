@@ -228,6 +228,11 @@ body {
   opacity: 0.9;
 }
 
+.btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 .card {
   background-color: var(--bg-secondary);
   border-radius: 8px;
@@ -618,6 +623,12 @@ body {
 .onboarding-icon svg {
   width: 32px;
   height: 32px;
+}
+
+@media (prefers-color-scheme: light) {
+  .onboarding-icon {
+    background: linear-gradient(135deg, var(--accent-15) 0%, var(--accent-10) 100%);
+  }
 }
 
 .onboarding-logo {
