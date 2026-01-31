@@ -24,7 +24,7 @@ use audio::{AudioCapture, AudioDevice, MicrophoneTest};
 use state::AppState;
 use std::sync::Mutex;
 use tauri::{
-    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     ActivationPolicy, Emitter, Manager,
 };
@@ -436,19 +436,24 @@ fn build_tray_menu_for_state(app: &impl tauri::Manager<tauri::Wry>, current_stat
         let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
         let separator1 = PredefinedMenuItem::separator(app)?;
 
-        // Build microphone submenu
-        let mic_submenu = build_mic_submenu_for_handle(app)?;
+        // Build microphone items (flattened into main menu)
+        let mic_items = build_mic_menu_items(app)?;
 
         let separator2 = PredefinedMenuItem::separator(app)?;
         let updates = MenuItem::with_id(app, "check_updates", "Check for Updates", true, None::<&str>)?;
-        let about = MenuItem::with_id(app, "about", "About", true, None::<&str>)?;
         let separator3 = PredefinedMenuItem::separator(app)?;
         let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
-        Ok(Menu::with_items(
-            app,
-            &[&open, &history, &settings, &separator1, &mic_submenu, &separator2, &updates, &about, &separator3, &quit],
-        )?)
+        // Build menu with mic items spread inline
+        let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
+            &open, &history, &settings, &separator1,
+        ];
+        for item in &mic_items {
+            items.push(item.as_ref());
+        }
+        items.extend([&separator2 as &dyn tauri::menu::IsMenuItem<tauri::Wry>, &updates, &separator3, &quit]);
+
+        Ok(Menu::with_items(app, &items)?)
     }
 }
 
@@ -471,12 +476,12 @@ fn rebuild_tray_menu(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
-fn build_mic_submenu_for_handle(app: &impl tauri::Manager<tauri::Wry>) -> Result<Submenu<tauri::Wry>, Box<dyn std::error::Error>> {
+fn build_mic_menu_items(app: &impl tauri::Manager<tauri::Wry>) -> Result<Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>>, Box<dyn std::error::Error>> {
     let devices = AudioCapture::list_devices();
     let current_settings = settings::load_settings_sync();
     let selected_id = current_settings.selected_microphone_id;
     tracing::debug!(
-        "Building mic submenu: devices={}, has_selected_id={}",
+        "Building mic menu items: devices={}, has_selected_id={}",
         devices.len(),
         selected_id.is_some()
     );
@@ -487,6 +492,11 @@ fn build_mic_submenu_for_handle(app: &impl tauri::Manager<tauri::Wry>) -> Result
         .unwrap_or(false);
 
     let mut mic_entries: Vec<MicMenuEntry> = Vec::new();
+    let mut result: Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>> = Vec::new();
+
+    // Add disabled "Microphone" label as section title
+    let mic_label = MenuItem::with_id(app, "mic_label", "Microphone", false, None::<&str>)?;
+    result.push(Box::new(mic_label));
 
     // Add each device - auto-select default device when no selection exists
     for device in &devices {
@@ -499,18 +509,15 @@ fn build_mic_submenu_for_handle(app: &impl tauri::Manager<tauri::Wry>) -> Result
         let item = CheckMenuItem::with_id(app, &item_id, &device.name, true, is_checked, None::<&str>)?;
         mic_entries.push(MicMenuEntry {
             device_id: Some(device.id.clone()),
-            item,
+            item: item.clone(),
         });
+        result.push(Box::new(item));
     }
 
     let mut stored = MIC_MENU_ITEMS.lock().unwrap();
     *stored = mic_entries;
-    let mic_refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = stored
-        .iter()
-        .map(|entry| &entry.item as &dyn tauri::menu::IsMenuItem<tauri::Wry>)
-        .collect();
 
-    Ok(Submenu::with_items(app, "Microphone", true, &mic_refs)?)
+    Ok(result)
 }
 
 fn encode_menu_id(value: &str) -> String {
@@ -591,10 +598,6 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
         "check_updates" => {
             // Open main window and navigate to settings/updates
             show_window_for_tab(app, "settings");
-        }
-        "about" => {
-            // Open main window and navigate to about tab
-            show_window_for_tab(app, "about");
         }
         id if id.starts_with("mic_") => {
             tracing::debug!("Mic menu event: {}", id);
