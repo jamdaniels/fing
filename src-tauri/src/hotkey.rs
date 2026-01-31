@@ -354,7 +354,10 @@ pub fn on_key_up(app: &AppHandle) {
             // Restore focus to the app that was active when recording started
             #[cfg(target_os = "macos")]
             {
-                let frontmost_app = FRONTMOST_APP.lock().expect("Frontmost app mutex poisoned").take();
+                let frontmost_app = FRONTMOST_APP
+                    .lock()
+                    .expect("Frontmost app mutex poisoned")
+                    .take();
                 if let Some(bundle_id) = frontmost_app {
                     // Small delay for macOS to settle
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -363,16 +366,16 @@ pub fn on_key_up(app: &AppHandle) {
                 }
             }
 
-        // Paste text directly (no clipboard), with trailing space for continuation
-        if settings.paste_enabled {
-            let paste_result = paste_text(&format!("{} ", text));
-            if paste_result.should_notify() {
-                tracing::warn!("Direct text input failed after transcription");
+            // Paste text directly (no clipboard), with trailing space for continuation
+            if settings.paste_enabled {
+                let paste_result = paste_text(&format!("{} ", text));
+                if paste_result.should_notify() {
+                    tracing::warn!("Direct text input failed after transcription");
+                }
             }
-        }
 
             // Save to history if enabled
-            if settings.history_enabled {
+             if settings.history_enabled {
                 let transcript = NewTranscript {
                     text: text.clone(),
                     duration_ms,

@@ -44,6 +44,12 @@ fn start_hotkey_listener_impl(app: AppHandle) -> Result<(), String> {
             LISTENER_STARTED.store(false, Ordering::SeqCst);
             return Err("Accessibility permission required for global hotkey".to_string());
         }
+
+        // rdev's keyboard layout handling needs to run TIS APIs on the
+        // AppKit main thread. Our grab loop runs on a background thread,
+        // so tell rdev to dispatch Unicode lookup work onto the main queue
+        // instead of doing it inline on the grab thread.
+        rdev::set_is_main_thread(false);
     }
 
     APP_HANDLE
@@ -85,6 +91,10 @@ fn grab_callback(event: Event) -> Option<Event> {
                 }
                 // Swallow base key when used as hotkey
                 None
+            } else if state.hotkey_active {
+                // While the hotkey is held, swallow all other key presses so
+                // system shortcuts (Mission Control, etc.) don't interfere.
+                None
             } else {
                 Some(event)
             }
@@ -109,8 +119,16 @@ fn grab_callback(event: Event) -> Option<Event> {
                     if let Some(app) = APP_HANDLE.get() {
                         crate::hotkey::on_key_up(app);
                     }
+                    // Swallow this modifier release as part of the hotkey
+                    return None;
                 }
-                Some(event)
+
+                if state.hotkey_active {
+                    // Swallow all other key releases while the hotkey is held.
+                    None
+                } else {
+                    Some(event)
+                }
             }
         }
         _ => Some(event),

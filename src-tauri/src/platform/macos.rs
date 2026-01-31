@@ -1,38 +1,9 @@
 // macOS-specific platform code
 
-use std::ffi::c_void;
-
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
     fn AXIsProcessTrusted() -> bool;
 }
-
-#[link(name = "CoreFoundation", kind = "framework")]
-extern "C" {
-    fn CFRelease(cf: *mut c_void);
-}
-
-#[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
-    fn CGEventSourceCreate(stateID: i32) -> *mut c_void;
-    fn CGEventCreateKeyboardEvent(
-        source: *mut c_void,
-        virtualKey: u16,
-        keyDown: bool,
-    ) -> *mut c_void;
-    fn CGEventPost(tap: i32, event: *mut c_void);
-    fn CGEventKeyboardSetUnicodeString(
-        event: *mut c_void,
-        stringLength: std::ffi::c_ulong,
-        unicodeString: *const u16,
-    );
-}
-
-// CGEventTapLocation
-const K_CG_HID_EVENT_TAP: i32 = 0;
-
-// CGEventSourceStateID
-const K_CG_EVENT_SOURCE_STATE_HID_SYSTEM_STATE: i32 = 1;
 
 pub fn check_accessibility_permission() -> bool {
     unsafe { AXIsProcessTrusted() }
@@ -94,44 +65,32 @@ fn filter_printable(text: &str) -> String {
         .collect()
 }
 
-/// Type text directly using CGEventKeyboardSetUnicodeString (no clipboard)
+/// Type text directly using System Events keystroke (no clipboard)
 pub fn type_text(text: &str) -> Result<(), String> {
     if !check_accessibility_permission() {
         return Err("Accessibility permission required".to_string());
     }
 
     let filtered = filter_printable(text);
-    let utf16: Vec<u16> = filtered.encode_utf16().collect();
-
-    if utf16.is_empty() {
+    if filtered.is_empty() {
         return Ok(());
     }
 
-    unsafe {
-        let source = CGEventSourceCreate(K_CG_EVENT_SOURCE_STATE_HID_SYSTEM_STATE);
-        if source.is_null() {
-            return Err("Failed to create event source".to_string());
-        }
+    let escaped = escape_applescript_string(&filtered);
+    let script = format!(
+        "tell application \"System Events\" to keystroke \"{}\"",
+        escaped
+    );
 
-        // Key down event with full text
-        let key_down = CGEventCreateKeyboardEvent(source, 0, true);
-        if key_down.is_null() {
-            CFRelease(source);
-            return Err("Failed to create keyboard event".to_string());
-        }
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("Failed to run osascript for keystroke: {}", e))?;
 
-        CGEventKeyboardSetUnicodeString(key_down, utf16.len() as std::ffi::c_ulong, utf16.as_ptr());
-        CGEventPost(K_CG_HID_EVENT_TAP, key_down);
-        CFRelease(key_down);
-
-        // Key up event
-        let key_up = CGEventCreateKeyboardEvent(source, 0, false);
-        if !key_up.is_null() {
-            CGEventPost(K_CG_HID_EVENT_TAP, key_up);
-            CFRelease(key_up);
-        }
-
-        CFRelease(source);
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to send keystroke: {}", stderr));
     }
 
     Ok(())
