@@ -70,16 +70,13 @@ impl TranscriptionEngine for Transcriber {
 static TRANSCRIBER: once_cell::sync::OnceCell<Transcriber> = once_cell::sync::OnceCell::new();
 
 pub fn init_transcriber(model_path: &str) -> Result<(), TranscribeError> {
-    // If already initialized, just return Ok
-    if TRANSCRIBER.get().is_some() {
-        tracing::info!("Transcriber already initialized, skipping");
-        return Ok(());
-    }
-
-    let transcriber = Transcriber::new(model_path)?;
-    TRANSCRIBER
-        .set(transcriber)
-        .map_err(|_| TranscribeError::ModelLoadFailed("Transcriber already initialized".to_string()))
+    // Use get_or_try_init for atomic initialization - prevents race condition
+    // where multiple threads try to load the model simultaneously
+    TRANSCRIBER.get_or_try_init(|| {
+        tracing::info!("Initializing transcriber from {}", model_path);
+        Transcriber::new(model_path)
+    })?;
+    Ok(())
 }
 
 pub fn get_transcriber() -> Option<&'static Transcriber> {

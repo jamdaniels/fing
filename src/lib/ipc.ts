@@ -166,3 +166,20 @@ export async function enableOnboardingTestMode(): Promise<void> {
 export async function disableOnboardingTestMode(): Promise<void> {
   return await invoke("disable_onboarding_test_mode");
 }
+
+// Frontend hotkey handling for Windows WebView2 workaround
+export async function hotkeyPress(): Promise<void> {
+  return await invoke("hotkey_press");
+}
+
+export async function hotkeyRelease(): Promise<void> {
+  return await invoke("hotkey_release");
+}
+
+export async function getCurrentHotkey(): Promise<string> {
+  return await invoke<string>("get_current_hotkey");
+}
+
+export async function updateHotkey(hotkey: string): Promise<void> {
+  return await invoke("update_hotkey", { hotkey });
+}

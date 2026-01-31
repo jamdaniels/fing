@@ -26,8 +26,10 @@ use std::sync::Mutex;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    ActivationPolicy, Emitter, Manager,
+    Emitter, Manager,
 };
+#[cfg(target_os = "macos")]
+use tauri::ActivationPolicy;
 
 /// Consolidated mic test state to prevent race conditions
 /// All state changes go through a single lock acquisition
@@ -364,6 +366,24 @@ fn try_register_hotkey(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn update_hotkey(hotkey: String) -> Result<(), String> {
     hotkey_config::set_hotkey_from_string(&hotkey)
+}
+
+// Frontend hotkey handling for Windows WebView2 workaround
+// WebView2 doesn't properly propagate keyboard events to WH_KEYBOARD_LL hooks
+// so we need to handle hotkeys from JavaScript when the window is focused
+#[tauri::command]
+fn hotkey_press(app: tauri::AppHandle) {
+    hotkey::on_key_down(&app);
+}
+
+#[tauri::command]
+fn hotkey_release(app: tauri::AppHandle) {
+    hotkey::on_key_up(&app);
+}
+
+#[tauri::command]
+fn get_current_hotkey() -> String {
+    hotkey_config::get_hotkey_string()
 }
 
 #[tauri::command]
@@ -778,6 +798,10 @@ pub fn run() {
             request_permissions,
             try_register_hotkey,
             update_hotkey,
+            // Frontend hotkey handling (WebView2 workaround)
+            hotkey_press,
+            hotkey_release,
+            get_current_hotkey,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

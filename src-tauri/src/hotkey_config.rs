@@ -190,3 +190,39 @@ pub fn get_hotkey_config() -> Option<HotkeyConfig> {
         .ok()
         .and_then(|cfg| cfg.as_ref().cloned())
 }
+
+/// Get the current hotkey as a string for frontend use
+pub fn get_hotkey_string() -> String {
+    let config = match get_hotkey_config() {
+        Some(c) => c,
+        None => return "F8".to_string(), // Default
+    };
+
+    let mut parts = Vec::new();
+
+    if config.require_ctrl {
+        parts.push("Ctrl");
+    }
+    if config.require_alt {
+        parts.push("Alt");
+    }
+    if config.require_shift {
+        parts.push("Shift");
+    }
+    if config.require_meta {
+        parts.push("Meta");
+    }
+    if config.require_fn {
+        parts.push("Fn");
+    }
+
+    let key_str = match config.key {
+        HotkeyKey::Function => "Fn".to_string(),
+        HotkeyKey::F(n) => format!("F{}", n),
+        HotkeyKey::Space => "Space".to_string(),
+        HotkeyKey::Char(c) => c.to_string(),
+    };
+    parts.push(&key_str);
+
+    parts.join("+")
+}

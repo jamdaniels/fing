@@ -7,7 +7,9 @@ use crate::hotkey_config::{get_hotkey_config, HotkeyKey};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use once_cell::sync::Lazy;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-use rdev::{grab, Event, EventType, Key};
+use rdev::{Event, EventType, Key};
+#[cfg(target_os = "windows")]
+use rdev::listen;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::sync::{Mutex, OnceLock};
 
@@ -31,6 +33,9 @@ pub fn start_hotkey_listener(app: AppHandle) -> Result<(), String> {
         Ok(())
     }
 }
+
+#[cfg(target_os = "macos")]
+use rdev::grab;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn start_hotkey_listener_impl(app: AppHandle) -> Result<(), String> {
@@ -57,15 +62,28 @@ fn start_hotkey_listener_impl(app: AppHandle) -> Result<(), String> {
         .map_err(|_| "Hotkey listener already initialized".to_string())?;
 
     std::thread::spawn(|| {
-        if let Err(error) = grab(grab_callback) {
-            tracing::error!("Global hotkey listener failed: {:?}", error);
+        #[cfg(target_os = "macos")]
+        {
+            if let Err(error) = grab(grab_callback) {
+                tracing::error!("Global hotkey listener failed: {:?}", error);
+            }
+        }
+        #[cfg(target_os = "windows")]
+        {
+            // Use listen instead of grab on Windows - WebView2 doesn't properly
+            // propagate keyboard events to WH_KEYBOARD_LL hooks when focused.
+            // See: https://github.com/tauri-apps/tauri/issues/13919
+            if let Err(error) = listen(listen_callback) {
+                tracing::error!("Global hotkey listener failed: {:?}", error);
+            }
         }
     });
 
     Ok(())
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+// macOS uses grab() which can intercept and block key events
+#[cfg(target_os = "macos")]
 fn grab_callback(event: Event) -> Option<Event> {
     let config = match get_hotkey_config() {
         Some(c) => c,
@@ -132,6 +150,58 @@ fn grab_callback(event: Event) -> Option<Event> {
             }
         }
         _ => Some(event),
+    }
+}
+
+// Windows uses listen() instead of grab() because WebView2 doesn't properly
+// propagate keyboard events to WH_KEYBOARD_LL hooks when the window is focused.
+// See: https://github.com/tauri-apps/tauri/issues/13919
+#[cfg(target_os = "windows")]
+fn listen_callback(event: Event) {
+    let config = match get_hotkey_config() {
+        Some(c) => c,
+        None => return,
+    };
+
+    let mut state_guard = match HOTKEY_STATE.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let state = &mut *state_guard;
+
+    match event.event_type {
+        EventType::KeyPress(key) => {
+            update_mod_state(&key, true, &mut state.mod_state);
+
+            if is_base_key(&key, &config.key) && modifiers_match(&state.mod_state, &config) {
+                if !state.hotkey_active {
+                    state.hotkey_active = true;
+                    if let Some(app) = APP_HANDLE.get() {
+                        crate::hotkey::on_key_down(app);
+                    }
+                }
+            }
+        }
+        EventType::KeyRelease(key) => {
+            update_mod_state(&key, false, &mut state.mod_state);
+
+            if is_base_key(&key, &config.key) {
+                if state.hotkey_active {
+                    state.hotkey_active = false;
+                    if let Some(app) = APP_HANDLE.get() {
+                        crate::hotkey::on_key_up(app);
+                    }
+                }
+            } else if state.hotkey_active && !modifiers_match(&state.mod_state, &config) {
+                // If a required modifier is released while the base key is still held,
+                // treat it as hotkey release.
+                state.hotkey_active = false;
+                if let Some(app) = APP_HANDLE.get() {
+                    crate::hotkey::on_key_up(app);
+                }
+            }
+        }
+        _ => {}
     }
 }
 
