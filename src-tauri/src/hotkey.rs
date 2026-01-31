@@ -118,12 +118,16 @@ pub fn on_key_down(app: &AppHandle) {
         drop(state);
     }
 
-    // Capture frontmost app BEFORE showing indicator (which may steal focus)
+    // Capture frontmost app on a background thread to avoid delaying the UI.
     #[cfg(target_os = "macos")]
     {
-        if let Some(bundle_id) = crate::platform::get_frontmost_app() {
-            *FRONTMOST_APP.lock().expect("Frontmost app mutex poisoned") = Some(bundle_id);
-        }
+        std::thread::spawn(|| {
+            if let Some(bundle_id) = crate::platform::get_frontmost_app() {
+                *FRONTMOST_APP
+                    .lock()
+                    .expect("Frontmost app mutex poisoned") = Some(bundle_id);
+            }
+        });
     }
 
     // Transition to Recording (skip state transition in test mode to avoid triggering main.ts)
