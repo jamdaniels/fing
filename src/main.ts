@@ -1361,7 +1361,8 @@ async function init(): Promise<void> {
   window.addEventListener("setup-complete", () => {
     cleanupOnboarding();
     currentAppState = "ready";
-    showMainUI();
+    // Don't show main UI - window is hidden after onboarding completion
+    // User will access the app via tray menu
   });
 
   listen("app-state-changed", (event) => {

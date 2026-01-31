@@ -1,4 +1,5 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Check,
   CheckCircle,
@@ -18,22 +19,18 @@ import {
   enableOnboardingTestMode,
   getAudioDevices,
   getDownloadProgress,
-  getMicTestLevel,
   getSettings,
   relaunchApp,
   requestAccessibilityPermission,
   requestMicrophonePermission,
   requestPermissions,
   selectModelFile,
-  startMicTest,
   startModelDownload,
-  stopMicTest,
   updateSettings,
 } from "../lib/ipc";
 import type {
   AudioDevice,
   DownloadProgress,
-  MicrophoneTest,
   PermissionStatus,
   Settings,
 } from "../lib/types";
@@ -47,8 +44,6 @@ interface OnboardingState {
   permissions: PermissionStatus | null;
   audioDevices: AudioDevice[];
   selectedDeviceId: string | null;
-  micTest: MicrophoneTest | null;
-  audioDetected: boolean;
   selectedLanguages: string[];
   selectedHotkey: string;
   capturedHotkey: string | null;
@@ -69,8 +64,6 @@ let state: OnboardingState = {
   permissions: null,
   audioDevices: [],
   selectedDeviceId: null,
-  micTest: null,
-  audioDetected: false,
   selectedLanguages: ["en"],
   selectedHotkey: "F8",
   capturedHotkey: null,
@@ -79,7 +72,6 @@ let state: OnboardingState = {
 
 let container: HTMLElement | null = null;
 let downloadPollInterval: number | null = null;
-let micTestInterval: number | null = null;
 let hotkeyKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 let testResultUnlisten: UnlistenFn | null = null;
 
@@ -203,37 +195,40 @@ function keyEventToHotkey(e: KeyboardEvent): string | null {
   return [...modifiers, key].join("+");
 }
 
-function renderDownloadButton(
+function renderDownloadBody(
   isDownloading: boolean,
   isComplete: boolean,
   isFailed: boolean,
   statusText: string,
   progress: DownloadProgress | null
 ): string {
-  if (isDownloading || isComplete) {
+  if (isDownloading || isComplete || isFailed) {
     return `
       <div class="download-progress-container">
         <div class="progress-bar">
           <div class="progress-bar-fill" style="width: ${progress?.percentage ?? 0}%"></div>
         </div>
-        <div class="download-status ${isFailed ? "error" : ""}">${statusText}</div>
+        <div class="download-status ${isFailed ? "error" : ""}${isComplete ? "success" : ""}">${statusText}</div>
         ${isDownloading ? `<button class="btn btn-secondary" id="cancel-download-btn">Cancel</button>` : ""}
+        ${isFailed ? `<button class="btn btn-primary" id="retry-download-btn">Retry Download</button>` : ""}
       </div>
     `;
   }
-  if (isFailed) {
-    return `
-      <div class="download-progress-container">
-        <div class="download-status error">${statusText}</div>
-        <button class="btn btn-primary" id="retry-download-btn">Retry Download</button>
-      </div>
-    `;
+  return "";
+}
+
+function renderDownloadFooterButton(
+  isDownloading: boolean,
+  isComplete: boolean,
+  isFailed: boolean
+): string {
+  if (isComplete) {
+    return `<button class="btn btn-primary btn-lg" id="continue-btn">Continue</button>`;
   }
-  return `
-    <button class="btn btn-primary btn-lg" id="start-download-btn">
-      Download Model
-    </button>
-  `;
+  if (isDownloading || isFailed) {
+    return "";
+  }
+  return `<button class="btn btn-primary btn-lg" id="start-download-btn">Download Model</button>`;
 }
 
 function renderMicPermissionStatus(status: string | undefined): string {
@@ -375,14 +370,11 @@ function renderDownloadModel(): void {
       </div>
       <div class="onboarding-body">
         ${state.downloadError ? `<div class="download-status error" style="margin-bottom: 16px;">${state.downloadError}</div>` : ""}
-        ${renderDownloadButton(isDownloading, isComplete, isFailed, statusText, progress)}
+        ${renderDownloadBody(isDownloading, isComplete, isFailed, statusText, progress)}
         ${
-          isDownloading || isComplete
+          isDownloading || isComplete || isFailed
             ? ""
             : `
-          <div class="onboarding-divider">
-            <span>OR</span>
-          </div>
           <button class="btn btn-outline" id="select-file-btn">
             ${createIcon(Upload)}
             Already have the model file? Choose File...
@@ -391,11 +383,7 @@ function renderDownloadModel(): void {
         }
       </div>
       <div class="onboarding-footer">
-        ${
-          isComplete
-            ? `<button class="btn btn-primary btn-lg" id="continue-btn">Continue</button>`
-            : ""
-        }
+        ${renderDownloadFooterButton(isDownloading, isComplete, isFailed)}
         ${renderStepIndicator(2)}
       </div>
     </div>
@@ -636,7 +624,10 @@ function renderHotkeyStep(): void {
             ${hasNewKey ? '<span class="hotkey-new-badge">New</span>' : ""}
           </div>
           <p class="hotkey-hint">Press any key or key combination</p>
-          <button class="hotkey-fn-link" id="use-fn-btn">Use Fn key instead</button>
+          <button class="hotkey-fn-option" id="use-fn-btn">
+            <span class="hotkey-fn-key">fn</span>
+            <span>Use Fn key instead</span>
+          </button>
         </div>
       </div>
       <div class="onboarding-footer">
@@ -707,10 +698,6 @@ function renderMicSelection(): void {
     return;
   }
 
-  const micTest = state.micTest;
-  const level = micTest?.peakLevel ?? 0;
-  const levelPercent = Math.min(level * 100, 100);
-
   container.innerHTML = `
     <div class="onboarding">
       <div class="onboarding-header">
@@ -721,37 +708,17 @@ function renderMicSelection(): void {
         <p class="onboarding-desc">Choose which microphone to use for recording</p>
       </div>
       <div class="onboarding-body">
-        <div class="mic-test-container">
-          <div class="mic-select-row">
-            <label for="mic-select">Microphone:</label>
-            <select id="mic-select" class="settings-select">
-              ${state.audioDevices
-                .map(
-                  (d) => `
-                <option value="${escapeHtml(d.id)}" ${d.id === state.selectedDeviceId || (state.selectedDeviceId === null && d.isDefault) ? "selected" : ""}>
-                  ${escapeHtml(d.name)}${d.isDefault ? " (Default)" : ""}
-                </option>
-              `
-                )
-                .join("")}
-            </select>
-          </div>
-
-          <div class="audio-level-container">
-            <div class="audio-level-label">Audio Level</div>
-            <div class="audio-level-bar">
-              <div class="audio-level-fill ${levelPercent > 10 ? "active" : ""}" style="width: ${levelPercent}%"></div>
-            </div>
-          </div>
-
-          <div class="mic-test-prompt ${state.audioDetected ? "success" : ""}">
-            ${
-              state.audioDetected
-                ? `${createIcon(CheckCircle)} Audio detected! Your microphone is working.`
-                : `${createIcon(Mic)} Say something to test...`
-            }
-          </div>
-        </div>
+        <select id="mic-select" class="settings-select mic-select-full">
+          ${state.audioDevices
+            .map(
+              (d) => `
+            <option value="${escapeHtml(d.id)}" ${d.id === state.selectedDeviceId || (state.selectedDeviceId === null && d.isDefault) ? "selected" : ""}>
+              ${escapeHtml(d.name)}${d.isDefault ? " (Default)" : ""}
+            </option>
+          `
+            )
+            .join("")}
+        </select>
       </div>
       <div class="onboarding-footer">
         <button class="btn btn-primary btn-lg" id="continue-btn">
@@ -798,10 +765,10 @@ function renderTestStep(): void {
         />
       </div>
       <div class="onboarding-footer">
+        <p class="onboarding-hint ${hasText ? "invisible" : ""}">Complete a test transcription to continue</p>
         <button class="btn btn-primary btn-lg" id="finish-btn" ${hasText ? "" : "disabled"}>
           Finish Setup
         </button>
-        ${hasText ? "" : '<p class="onboarding-hint">Complete a test transcription to continue</p>'}
         ${renderStepIndicator(7)}
       </div>
     </div>
@@ -820,7 +787,7 @@ function renderTestStep(): void {
     const hint = document.querySelector(".onboarding-hint");
     if (state.testText.trim().length > 0) {
       finishBtn?.removeAttribute("disabled");
-      hint?.remove();
+      hint?.classList.add("invisible");
     }
   });
 
@@ -840,7 +807,7 @@ function renderCompletion(): void {
   container.innerHTML = `
     <div class="onboarding">
       <div class="onboarding-header">
-        <div class="onboarding-icon success">
+        <div class="onboarding-icon">
           ${createIcon(CheckCircle)}
         </div>
         <h1 class="onboarding-title">You're all set!</h1>
@@ -862,6 +829,7 @@ function renderCompletion(): void {
         <button class="btn btn-primary btn-lg" id="start-btn">
           Start Using Fing
         </button>
+        <div class="step-indicator-placeholder"></div>
       </div>
     </div>
   `;
@@ -876,7 +844,7 @@ async function goToStep(step: OnboardingStep): Promise<void> {
   state.step = step;
 
   if (step === 4) {
-    handleRequestPermissions();
+    await handleRequestPermissions();
   }
 
   if (step === 5) {
@@ -885,18 +853,10 @@ async function goToStep(step: OnboardingStep): Promise<void> {
 
   if (step === 6) {
     await loadAudioDevices();
-    await initMicTest();
-    startMicTestPolling();
   }
 
   if (step === 7) {
     state.testText = "";
-    // Ensure mic test from step 6 is stopped (extra safety)
-    try {
-      await stopMicTest();
-    } catch {
-      // Ignore - might not be running
-    }
     // Enable test mode so the hotkey works during onboarding
     try {
       await enableOnboardingTestMode();
@@ -993,16 +953,6 @@ async function loadAudioDevices(): Promise<void> {
 async function handleMicChange(e: Event): Promise<void> {
   const select = e.target as HTMLSelectElement;
   state.selectedDeviceId = select.value || null;
-  state.audioDetected = false;
-
-  try {
-    await stopMicTest();
-    await startMicTest(state.selectedDeviceId);
-    console.log("[onboarding] Switched to device:", state.selectedDeviceId);
-  } catch (err) {
-    console.error("Failed to switch mic:", err);
-  }
-
   await persistSelectedDevice(state.selectedDeviceId);
 }
 
@@ -1025,66 +975,10 @@ function startDownloadPolling(): void {
   }, 500);
 }
 
-async function initMicTest(): Promise<void> {
-  try {
-    await startMicTest(state.selectedDeviceId);
-    console.log("[onboarding] Mic test started");
-  } catch (e) {
-    console.error("Failed to start mic test:", e);
-  }
-}
-
-function startMicTestPolling(): void {
-  micTestInterval = window.setInterval(async () => {
-    try {
-      const test = await getMicTestLevel();
-      state.micTest = test;
-
-      if (test.isReceivingAudio && test.peakLevel > 0.1) {
-        state.audioDetected = true;
-      }
-
-      updateAudioLevel();
-    } catch (e) {
-      console.error("Mic test error:", e);
-    }
-  }, 100);
-}
-
-function updateAudioLevel(): void {
-  const level = state.micTest?.peakLevel ?? 0;
-  const levelPercent = Math.min(level * 100, 100);
-
-  const levelFill = document.querySelector(".audio-level-fill") as HTMLElement;
-  if (levelFill) {
-    levelFill.style.width = `${levelPercent}%`;
-    if (levelPercent > 10) {
-      levelFill.classList.add("active");
-    } else {
-      levelFill.classList.remove("active");
-    }
-  }
-
-  const prompt = document.querySelector(".mic-test-prompt") as HTMLElement;
-  if (prompt && state.audioDetected) {
-    prompt.classList.add("success");
-    prompt.innerHTML = `${createIcon(CheckCircle)} Audio detected! Your microphone is working.`;
-  }
-}
-
 async function stopPolling(): Promise<void> {
   if (downloadPollInterval) {
     clearInterval(downloadPollInterval);
     downloadPollInterval = null;
-  }
-  if (micTestInterval) {
-    clearInterval(micTestInterval);
-    micTestInterval = null;
-    try {
-      await stopMicTest();
-    } catch (e) {
-      console.error("Error stopping mic test:", e);
-    }
   }
   if (testResultUnlisten) {
     testResultUnlisten();
@@ -1103,6 +997,7 @@ async function handleComplete(): Promise<void> {
   try {
     await completeSetup();
     window.dispatchEvent(new CustomEvent("setup-complete"));
+    await getCurrentWindow().hide();
   } catch (err) {
     console.error("Failed to complete setup:", err);
     state.step = 2;
@@ -1130,8 +1025,6 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     permissions: null,
     audioDevices: [],
     selectedDeviceId: null,
-    micTest: null,
-    audioDetected: false,
     selectedLanguages: savedSettings?.languages ?? ["en"],
     selectedHotkey: savedSettings?.hotkey ?? "F8",
     capturedHotkey: null,
