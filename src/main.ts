@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
-  AlertTriangle,
   ArrowUpRight,
   Check,
   CheckCircle,
@@ -69,7 +68,7 @@ let transcripts: Transcript[] = [];
 let searchQuery = "";
 let transcriptOffset = 0;
 let hasMoreTranscripts = true;
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 25;
 let settings: SettingsType | null = null;
 let settingsLoadedAt = 0;
 let audioDevices: AudioDevice[] = [];
@@ -330,8 +329,16 @@ function handleHistoryClick(e: MouseEvent, el: HTMLElement): void {
 
   // Handle load more button
   if (target.closest(".load-more-btn")) {
+    const scrollable = el.querySelector(".history-scrollable");
+    const scrollTop = scrollable?.scrollTop ?? 0;
     transcriptOffset += PAGE_SIZE;
-    loadTranscripts(true).then(() => renderHistory(el, { skipLoad: true }));
+    loadTranscripts(true).then(() => {
+      renderHistory(el, { skipLoad: true });
+      const newScrollable = el.querySelector(".history-scrollable");
+      if (newScrollable) {
+        newScrollable.scrollTop = scrollTop;
+      }
+    });
     return;
   }
 
@@ -725,7 +732,7 @@ async function showMicTestModal(): Promise<void> {
 
   const renderModalContent = () => {
     const level = currentMicTest?.peakLevel ?? 0;
-    const levelPercent = Math.min(level * 100, 100);
+    const levelPercent = Math.min(Math.sqrt(level) * 150, 100);
     const showMismatchWarning =
       deviceMatchResult && !deviceMatchResult.deviceMatched;
 
@@ -746,15 +753,6 @@ async function showMicTestModal(): Promise<void> {
               <button class="btn btn-icon mic-refresh-btn" title="Refresh devices">${createIcon(RefreshCw)}</button>
             </div>
           </div>
-
-          ${
-            deviceMatchResult
-              ? `<div class="mic-using-device ${showMismatchWarning ? "warning" : ""}">
-              ${showMismatchWarning ? createIcon(AlertTriangle) : ""}
-              <span>Using: ${escapeHtml(deviceMatchResult.actualDevice)}</span>
-            </div>`
-              : ""
-          }
 
           ${
             showMismatchWarning
@@ -797,8 +795,13 @@ async function showMicTestModal(): Promise<void> {
       const btn = refreshBtn as HTMLButtonElement;
       btn.disabled = true;
       btn.classList.add("spinning");
+      const minSpinTime = new Promise((r) => setTimeout(r, 1000));
       try {
-        localDevices = await refreshAudioDevices();
+        const [devices] = await Promise.all([
+          refreshAudioDevices(),
+          minSpinTime,
+        ]);
+        localDevices = devices;
         audioDevices = localDevices;
         renderModalContent();
       } catch (err) {
@@ -827,7 +830,7 @@ async function showMicTestModal(): Promise<void> {
 
   const updateAudioLevel = () => {
     const level = currentMicTest?.peakLevel ?? 0;
-    const levelPercent = Math.min(level * 100, 100);
+    const levelPercent = Math.min(Math.sqrt(level) * 150, 100);
 
     const levelFill = modal.querySelector(".audio-level-fill") as HTMLElement;
     if (levelFill) {
@@ -982,6 +985,25 @@ function handleSettingsClick(e: MouseEvent): void {
     return;
   }
 
+  // Handle mic refresh button in settings
+  const refreshBtn = target.closest(".mic-refresh-btn") as HTMLButtonElement;
+  if (refreshBtn && !refreshBtn.closest(".mic-test-modal")) {
+    refreshBtn.disabled = true;
+    refreshBtn.classList.add("spinning");
+    const minSpinTime = new Promise((r) => setTimeout(r, 1000));
+    Promise.all([refreshAudioDevices(), minSpinTime])
+      .then(([devices]) => {
+        audioDevices = devices;
+        renderContent();
+      })
+      .catch((err) => console.error("Failed to refresh devices:", err))
+      .finally(() => {
+        refreshBtn.disabled = false;
+        refreshBtn.classList.remove("spinning");
+      });
+    return;
+  }
+
   // Handle reset onboarding button
   if (target.closest(".reset-onboarding-btn")) {
     if (!settings) {
@@ -1077,9 +1099,12 @@ function renderSettingsUI(el: HTMLElement): void {
           <div class="settings-row-label">Microphone</div>
           <div class="settings-row-desc">Select audio input device</div>
         </div>
-        <select class="settings-select mic-select">
-          ${micOptions}
-        </select>
+        <div class="mic-select-wrapper">
+          <select class="settings-select mic-select">
+            ${micOptions}
+          </select>
+          <button class="btn btn-icon mic-refresh-btn" title="Refresh devices">${createIcon(RefreshCw)}</button>
+        </div>
       </div>
       <div class="settings-row">
         <div>

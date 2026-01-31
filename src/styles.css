@@ -950,6 +950,10 @@ body {
   align-items: center;
 }
 
+.settings-row .mic-select-wrapper {
+  flex: none;
+}
+
 .mic-select-wrapper .settings-select {
   flex: 1;
   min-width: 240px;
@@ -1107,8 +1111,7 @@ body {
 }
 
 .history-scrollable .transcript-list,
-.history-scrollable .empty-state,
-.history-scrollable .load-more-btn {
+.history-scrollable .empty-state {
   margin-right: 24px;
 }
 
@@ -1355,7 +1358,7 @@ body {
 
 .mic-test-modal .mic-test-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
 }
 
 /* Language Selection */
