@@ -464,8 +464,9 @@ function renderHistory(
                ${hasMoreTranscripts ? `<button class="btn btn-secondary load-more-btn">Load more</button>` : ""}`
             : `
           <div class="empty-state">
+            ${searchQuery ? "" : `<div class="empty-state-icon">${createIcon(Mic)}</div>`}
             <div class="empty-state-title">${searchQuery ? "No results found" : "No transcripts yet"}</div>
-            <p>${searchQuery ? "Try a different search term" : "Press and hold F8 to start recording"}</p>
+            ${searchQuery ? "<p>Try a different search term</p>" : ""}
           </div>
         `
         }
