@@ -356,7 +356,7 @@ function renderDownloadModel(): void {
           isDownloading || isComplete || isFailed
             ? ""
             : `
-          <button class="btn btn-primary btn-lg" id="start-download-btn">Download Model</button>
+          <button class="btn btn-outline btn-lg" id="start-download-btn">Download Model</button>
         `
         }
       </div>
