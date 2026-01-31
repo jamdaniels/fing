@@ -55,6 +55,12 @@ import type {
   Transcript,
 } from "./lib/types";
 
+declare global {
+  interface Window {
+    __navigateTo?: (tab: SidebarItem) => void;
+  }
+}
+
 let currentView: SidebarItem = "home";
 let appInfo: AppInfo | null = null;
 let stats: Stats | null = null;
@@ -76,6 +82,22 @@ let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 let sidebarListenerAttached = false;
 let contentListenerAttached = false;
 
+function navigateToTab(tab: SidebarItem): void {
+  if (!["home", "history", "settings", "about"].includes(tab)) {
+    return;
+  }
+
+  // Clear content immediately to prevent flash of old view
+  const content = document.getElementById("content");
+  if (content) {
+    content.innerHTML = "";
+  }
+
+  currentView = tab;
+  renderSidebar();
+  renderContent();
+}
+
 function setupSidebarListener(): void {
   const sidebar = document.getElementById("sidebar");
   if (!sidebar || sidebarListenerAttached) {
@@ -91,9 +113,7 @@ function setupSidebarListener(): void {
     const view = target.getAttribute("data-view") as SidebarItem | null;
     const action = target.getAttribute("data-action");
     if (view) {
-      currentView = view;
-      renderSidebar();
-      renderContent();
+      navigateToTab(view);
     } else if (action === "quit") {
       invoke("quit_app");
     }
@@ -1131,11 +1151,14 @@ function renderSettingsUI(el: HTMLElement): void {
 }
 
 function renderSettings(el: HTMLElement): void {
-  if (settings && Date.now() - settingsLoadedAt < SETTINGS_CACHE_TTL) {
-    // Cache is fresh, render once
-    renderSettingsUI(el);
-  } else {
-    // Cache is stale, fetch then render
+  const cacheFresh =
+    settings && Date.now() - settingsLoadedAt < SETTINGS_CACHE_TTL;
+
+  // Render immediately to keep navigation snappy.
+  renderSettingsUI(el);
+
+  if (!cacheFresh) {
+    // Refresh in the background and re-render when ready.
     loadSettings().then(() => {
       if (currentView === "settings") {
         renderSettingsUI(el);
@@ -1330,6 +1353,9 @@ async function init(): Promise<void> {
     await showOnboarding();
   } else {
     showMainUI();
+    loadSettings().catch(() => {
+      // Ignore settings warmup failures
+    });
   }
 
   window.addEventListener("setup-complete", () => {
@@ -1361,18 +1387,13 @@ async function init(): Promise<void> {
 
   // Listen for navigation events from tray menu
   listen<string>("navigate-to-tab", (event) => {
-    const tab = event.payload as SidebarItem;
-    if (["home", "history", "settings", "about"].includes(tab)) {
-      // Clear content immediately to prevent flash of old view
-      const content = document.getElementById("content");
-      if (content) {
-        content.innerHTML = "";
-      }
-      currentView = tab;
-      renderSidebar();
-      renderContent();
-    }
+    navigateToTab(event.payload as SidebarItem);
   });
 }
+
+// Allow backend to navigate before showing the window.
+window.__navigateTo = (tab: SidebarItem) => {
+  navigateToTab(tab);
+};
 
 init();

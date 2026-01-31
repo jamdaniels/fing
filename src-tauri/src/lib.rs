@@ -494,31 +494,29 @@ fn build_mic_submenu_for_handle(app: &impl tauri::Manager<tauri::Wry>) -> Result
 }
 
 fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
+    fn show_window_for_tab(app: &tauri::AppHandle, tab: &str) {
+        if let Some(window) = app.get_webview_window("main") {
+            let tab_json = serde_json::to_string(tab).unwrap_or_else(|_| "\"home\"".to_string());
+            let script = format!("window.__navigateTo && window.__navigateTo({});", tab_json);
+            let _ = window.eval(&script);
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }
+
     match event_id {
         "quit" => {
             tracing::info!("Quit requested from tray");
             app.exit(0);
         }
         "open" => {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = app.emit("navigate-to-tab", "home");
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            show_window_for_tab(app, "home");
         }
         "history" => {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = app.emit("navigate-to-tab", "history");
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            show_window_for_tab(app, "history");
         }
         "settings" => {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = app.emit("navigate-to-tab", "settings");
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            show_window_for_tab(app, "settings");
         }
         "setup" => {
             // Open main window for onboarding
@@ -529,19 +527,11 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
         }
         "check_updates" => {
             // Open main window and navigate to settings/updates
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = app.emit("navigate-to-tab", "settings");
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            show_window_for_tab(app, "settings");
         }
         "about" => {
             // Open main window and navigate to about tab
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = app.emit("navigate-to-tab", "about");
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            show_window_for_tab(app, "about");
         }
         id if id.starts_with("mic_") => {
             let device_id = if id == "mic_default" {
