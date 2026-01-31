@@ -261,6 +261,8 @@ pub struct DbStats {
     pub total_words: i64,
     pub transcriptions_today: i64,
     pub words_today: i64,
+    pub average_wpm: f64,
+    pub top_words: Vec<(String, i64)>,
 }
 
 pub fn get_db_stats() -> Result<DbStats, String> {
@@ -285,13 +287,86 @@ pub fn get_db_stats() -> Result<DbStats, String> {
                 |row| row.get(0),
             )?;
 
+        // Average WPM: total words / total duration in minutes
+        let average_wpm: f64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(word_count), 0), COALESCE(SUM(duration_ms), 0) FROM transcripts",
+                [],
+                |row| {
+                    let words: i64 = row.get(0)?;
+                    let duration_ms: i64 = row.get(1)?;
+                    if duration_ms > 0 {
+                        Ok(words as f64 / (duration_ms as f64 / 60000.0))
+                    } else {
+                        Ok(0.0)
+                    }
+                },
+            )?;
+
+        // Top words from last 30 days
+        let top_words = get_top_words(conn, 5)?;
+
         Ok(DbStats {
             total_transcriptions,
             total_words,
             transcriptions_today,
             words_today,
+            average_wpm,
+            top_words,
         })
     })
+}
+
+fn get_top_words(conn: &rusqlite::Connection, limit: usize) -> Result<Vec<(String, i64)>, rusqlite::Error> {
+    use std::collections::HashMap;
+
+    // Stop words to filter out
+    const STOP_WORDS: &[&str] = &[
+        "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with",
+        "by", "from", "is", "it", "that", "this", "be", "are", "was", "were", "been", "have",
+        "has", "had", "do", "does", "did", "will", "would", "could", "should", "may", "might",
+        "can", "just", "so", "like", "if", "then", "than", "when", "what", "which", "who",
+        "how", "all", "each", "every", "both", "few", "more", "most", "other", "some", "such",
+        "no", "not", "only", "same", "too", "very", "as", "into", "through", "during", "before",
+        "after", "above", "below", "up", "down", "out", "off", "over", "under", "again", "further",
+        "once", "here", "there", "where", "why", "any", "about", "because", "also", "get", "got",
+        "going", "go", "know", "think", "want", "need", "make", "see", "look", "come", "back",
+        "now", "way", "well", "even", "new", "take", "use", "your", "our", "their", "my", "its",
+        "you", "we", "they", "he", "she", "him", "her", "his", "them", "i", "me", "us",
+        "yeah", "yes", "okay", "ok", "um", "uh", "ah", "oh", "hmm", "actually", "really",
+    ];
+
+    let mut stmt = conn.prepare(
+        "SELECT text FROM transcripts WHERE created_at >= datetime('now', '-30 days')"
+    )?;
+
+    let mut word_counts: HashMap<String, i64> = HashMap::new();
+
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+
+    for text_result in rows {
+        let text = text_result?;
+        for word in text.split_whitespace() {
+            // Clean and lowercase
+            let clean: String = word
+                .chars()
+                .filter(|c| c.is_alphabetic())
+                .collect::<String>()
+                .to_lowercase();
+
+            // Skip short words and stop words
+            if clean.len() >= 3 && !STOP_WORDS.contains(&clean.as_str()) {
+                *word_counts.entry(clean).or_insert(0) += 1;
+            }
+        }
+    }
+
+    // Sort by count and take top N
+    let mut sorted: Vec<_> = word_counts.into_iter().collect();
+    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted.truncate(limit);
+
+    Ok(sorted)
 }
 
 // Tauri commands

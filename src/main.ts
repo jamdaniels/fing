@@ -179,29 +179,49 @@ function renderContent(): void {
 }
 
 function renderHome(el: HTMLElement): void {
+  const topWords = stats?.topWords ?? [];
+  const maxCount = topWords.length > 0 ? topWords[0].count : 1;
+
+  const wordListHtml =
+    topWords.length > 0
+      ? topWords
+          .map(
+            (w, i) => `
+      <div class="word-item">
+        <span class="word-rank">${i + 1}</span>
+        <span class="word-text">${w.word}</span>
+        <div class="word-bar-container"><div class="word-bar" style="width: ${(w.count / maxCount) * 100}%"></div></div>
+        <span class="word-count">${w.count}</span>
+      </div>`
+          )
+          .join("")
+      : '<div class="stat-empty">No data yet</div>';
+
   el.innerHTML = `
     <h1>Dashboard</h1>
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-label">Total Transcriptions</div>
-        <div class="stat-value">${stats?.totalTranscriptions ?? 0}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Today</div>
+        <div class="stat-label">Transcriptions Today</div>
         <div class="stat-value">${stats?.transcriptionsToday ?? 0}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Total Words</div>
-        <div class="stat-value">${stats?.totalWords ?? 0}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Words Today</div>
         <div class="stat-value">${stats?.wordsToday ?? 0}</div>
       </div>
     </div>
-    <div class="card">
-      <div class="stat-label">Average words per transcription</div>
-      <div class="stat-value">${stats?.averageWordsPerTranscription?.toFixed(0) ?? 0}</div>
+    <div class="stat-card" style="margin-bottom: 24px;">
+      <div class="stat-label">Most Used Words</div>
+      <div class="word-list">${wordListHtml}</div>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Average words per transcription</div>
+        <div class="stat-value">${stats?.averageWordsPerTranscription?.toFixed(0) ?? 0}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Average speaking speed</div>
+        <div class="stat-value">${stats?.averageWpm?.toFixed(0) ?? 0} <span class="stat-unit">wpm</span></div>
+      </div>
     </div>
   `;
 }
@@ -1402,11 +1422,11 @@ async function init(): Promise<void> {
     getStats()
       .then((s) => {
         stats = s;
+        renderContent();
       })
       .catch(() => {
         // Ignore stats fetch errors
       });
-    renderContent();
   });
 
   // Listen for navigation events from tray menu

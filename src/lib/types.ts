@@ -53,12 +53,19 @@ export interface AppInfo {
   inferenceBackend: "Metal" | "Vulkan" | "CPU";
 }
 
+export interface WordCount {
+  word: string;
+  count: number;
+}
+
 export interface Stats {
   totalTranscriptions: number;
   totalWords: number;
   transcriptionsToday: number;
   wordsToday: number;
   averageWordsPerTranscription: number;
+  averageWpm: number;
+  topWords: WordCount[];
 }
 
 export type SidebarItem = "home" | "history" | "settings" | "about";
