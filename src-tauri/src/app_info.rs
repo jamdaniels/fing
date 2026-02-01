@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+/// Application metadata for the about/settings UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppInfo {
@@ -11,6 +12,7 @@ pub struct AppInfo {
     pub inference_backend: String,
 }
 
+/// Build application info from compile-time environment variables.
 pub fn build_app_info() -> AppInfo {
     let inference_backend = if cfg!(target_os = "macos") {
         "Metal"

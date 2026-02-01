@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
 
+/// Global database connection (SQLite with FTS5).
 static DB: Lazy<Mutex<Option<Connection>>> = Lazy::new(|| Mutex::new(None));
 
 /// Maximum allowed FTS5 query length
@@ -19,9 +20,9 @@ fn sanitize_fts5_query(query: &str) -> String {
 
     // Remove FTS5 special operators and escape quotes
     let mut result = String::with_capacity(truncated.len());
-    let mut chars = truncated.chars().peekable();
+    let chars = truncated.chars();
 
-    while let Some(c) = chars.next() {
+    for c in chars {
         match c {
             // Skip FTS5 operators and special characters
             '*' | '^' | ':' | '(' | ')' | '{' | '}' | '[' | ']' => continue,
@@ -52,6 +53,7 @@ fn sanitize_fts5_query(query: &str) -> String {
     }
 }
 
+/// Initialize the database, creating tables and FTS5 index if needed.
 pub fn init_db() -> Result<(), String> {
     let path = crate::paths::db_path();
 
@@ -136,6 +138,7 @@ where
     f(conn).map_err(|e| e.to_string())
 }
 
+/// A saved transcription record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transcript {
@@ -147,6 +150,7 @@ pub struct Transcript {
     pub word_count: i64,
 }
 
+/// Data for creating a new transcription record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewTranscript {
@@ -155,6 +159,7 @@ pub struct NewTranscript {
     pub app_context: Option<String>,
 }
 
+/// Save a new transcription to the database.
 pub fn save_transcript(transcript: &NewTranscript) -> Result<Transcript, String> {
     let word_count = transcript.text.split_whitespace().count() as i64;
 
@@ -180,6 +185,7 @@ pub fn save_transcript(transcript: &NewTranscript) -> Result<Transcript, String>
     })
 }
 
+/// Get recent transcripts ordered by date descending.
 pub fn get_recent_transcripts(limit: i64, offset: i64) -> Result<Vec<Transcript>, String> {
     with_db(|conn| {
         let mut stmt = conn.prepare(
@@ -204,6 +210,7 @@ pub fn get_recent_transcripts(limit: i64, offset: i64) -> Result<Vec<Transcript>
     })
 }
 
+/// Full-text search transcripts using FTS5.
 pub fn search_transcripts(query: &str, limit: i64, offset: i64) -> Result<Vec<Transcript>, String> {
     // Validate and clamp limit/offset
     let limit = limit.clamp(1, 1000);
@@ -240,6 +247,7 @@ pub fn search_transcripts(query: &str, limit: i64, offset: i64) -> Result<Vec<Tr
     })
 }
 
+/// Delete a single transcript by ID.
 pub fn delete_transcript(id: i64) -> Result<(), String> {
     with_db(|conn| {
         conn.execute("DELETE FROM transcripts WHERE id = ?1", [id])?;
@@ -247,6 +255,7 @@ pub fn delete_transcript(id: i64) -> Result<(), String> {
     })
 }
 
+/// Delete all transcripts (clear history).
 pub fn delete_all_transcripts() -> Result<(), String> {
     with_db(|conn| {
         conn.execute("DELETE FROM transcripts", [])?;
@@ -254,6 +263,7 @@ pub fn delete_all_transcripts() -> Result<(), String> {
     })
 }
 
+/// Aggregate statistics from the transcript database.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DbStats {

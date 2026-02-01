@@ -496,6 +496,7 @@ fn rebuild_tray_menu(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
+#[allow(clippy::type_complexity)]
 fn build_mic_menu_items(app: &impl tauri::Manager<tauri::Wry>) -> Result<Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>>, Box<dyn std::error::Error>> {
     let devices = AudioCapture::list_devices();
     let current_settings = settings::load_settings_sync();
@@ -545,13 +546,12 @@ fn encode_menu_id(value: &str) -> String {
 }
 
 fn decode_menu_id(value: &str) -> Option<String> {
-    if value.len() % 2 != 0 {
+    if !value.len().is_multiple_of(2) {
         return None;
     }
 
     let mut bytes = Vec::with_capacity(value.len() / 2);
-    let mut iter = value.as_bytes().chunks(2);
-    while let Some(pair) = iter.next() {
+    for pair in value.as_bytes().chunks(2) {
         let hex = std::str::from_utf8(pair).ok()?;
         let byte = u8::from_str_radix(hex, 16).ok()?;
         bytes.push(byte);

@@ -2,11 +2,15 @@
 
 use crate::platform;
 
+/// Result of a paste/type operation.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum PasteResult {
+    /// Text was successfully typed into the active application.
     Success,
+    /// Platform-specific typing failed.
     Failed(String),
+    /// macOS accessibility permission not granted.
     NoAccessibility,
 }
 
@@ -16,6 +20,9 @@ impl PasteResult {
     }
 }
 
+/// Type text directly into the active application (no clipboard).
+///
+/// Uses platform-specific APIs (CGEventPost on macOS, SendInput on Windows).
 pub fn paste_text(text: &str) -> PasteResult {
     #[cfg(target_os = "macos")]
     {

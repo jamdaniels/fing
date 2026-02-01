@@ -19,6 +19,7 @@ pub const MODEL_SHA256: &str = "";
 const GGML_MAGIC_GGML: u32 = 0x67676d6c;
 const GGML_MAGIC_GGJT: u32 = 0x67676a74;
 
+/// Result of model file verification (size + GGML magic bytes).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelVerification {
@@ -108,10 +109,12 @@ lazy_static::lazy_static! {
         Mutex::new(InternalDownloadState::default());
 }
 
+/// Get the default model file path in app data directory.
 pub fn default_model_path() -> PathBuf {
     crate::paths::models_dir().join(MODEL_FILENAME)
 }
 
+/// Verify a model file exists and has valid size/magic bytes.
 pub fn verify(path: &std::path::Path) -> ModelVerification {
     let exists = path.exists();
     let mut size_valid = false;
@@ -312,6 +315,7 @@ pub async fn download() -> Result<PathBuf, String> {
     }
 }
 
+/// Get current download progress.
 pub fn get_progress() -> DownloadProgress {
     let state = DOWNLOAD_STATE.lock().unwrap();
     DownloadProgress::from(&*state)
@@ -341,7 +345,7 @@ pub fn select_file(app: &tauri::AppHandle) -> Option<PathBuf> {
     };
 
     // Validate size (1MB tolerance)
-    if file_size < MODEL_SIZE_BYTES - 1_000_000 || file_size > MODEL_SIZE_BYTES + 1_000_000 {
+    if !(MODEL_SIZE_BYTES - 1_000_000..=MODEL_SIZE_BYTES + 1_000_000).contains(&file_size) {
         tracing::error!(
             "Selected file has invalid size: {} bytes (expected ~{} bytes)",
             file_size,

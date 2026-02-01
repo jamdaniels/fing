@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
+/// Whisper-based transcription engine using whisper-rs.
 pub struct Transcriber {
     ctx: Mutex<WhisperContext>,
 }
@@ -69,6 +70,8 @@ impl TranscriptionEngine for Transcriber {
 // Global transcriber instance (loaded once on startup)
 static TRANSCRIBER: once_cell::sync::OnceCell<Transcriber> = once_cell::sync::OnceCell::new();
 
+/// Initialize the global transcriber with the given model file.
+/// Safe to call multiple times - only the first call loads the model.
 pub fn init_transcriber(model_path: &str) -> Result<(), TranscribeError> {
     // Use get_or_try_init for atomic initialization - prevents race condition
     // where multiple threads try to load the model simultaneously
@@ -79,10 +82,12 @@ pub fn init_transcriber(model_path: &str) -> Result<(), TranscribeError> {
     Ok(())
 }
 
+/// Get the global transcriber instance (None if not initialized).
 pub fn get_transcriber() -> Option<&'static Transcriber> {
     TRANSCRIBER.get()
 }
 
+/// Transcribe audio using the global transcriber.
 pub fn transcribe_audio(audio: &[f32], language: Option<&str>) -> Result<String, TranscribeError> {
     match get_transcriber() {
         Some(t) => t.transcribe(audio, language),

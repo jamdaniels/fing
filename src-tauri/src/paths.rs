@@ -24,14 +24,17 @@ pub fn app_data_dir() -> &'static PathBuf {
         .expect("App data dir not initialized - call paths::init() first")
 }
 
+/// Path to the SQLite database file.
 pub fn db_path() -> PathBuf {
     app_data_dir().join("transcripts.db")
 }
 
+/// Path to the settings JSON file.
 pub fn settings_path() -> PathBuf {
     app_data_dir().join("settings.json")
 }
 
+/// Directory containing downloaded model files.
 pub fn models_dir() -> PathBuf {
     app_data_dir().join("models")
 }

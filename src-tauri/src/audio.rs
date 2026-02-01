@@ -9,10 +9,14 @@ use std::sync::{Arc, Mutex};
 
 static OVERFLOW_LOGGED: AtomicBool = AtomicBool::new(false);
 
+/// Maximum recording duration in seconds (2 minutes).
 pub const MAX_RECORDING_DURATION_SECS: u32 = 120;
+/// Whisper model input sample rate.
 pub const WHISPER_SAMPLE_RATE: u32 = 16000;
+/// Maximum audio buffer size in samples.
 pub const MAX_BUFFER_SIZE: usize = (MAX_RECORDING_DURATION_SECS * WHISPER_SAMPLE_RATE) as usize;
 
+/// Audio input device info for frontend display.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioDevice {
@@ -21,6 +25,7 @@ pub struct AudioDevice {
     pub is_default: bool,
 }
 
+/// Result of a microphone test (audio level check).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MicrophoneTest {
@@ -29,6 +34,7 @@ pub struct MicrophoneTest {
     pub is_receiving_audio: bool,
 }
 
+/// Result of device lookup (whether requested device was found).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceMatchResult {
@@ -37,10 +43,14 @@ pub struct DeviceMatchResult {
     pub matched: bool,
 }
 
+/// Errors that can occur during audio capture.
 #[derive(Debug, Clone, Serialize)]
 pub enum AudioError {
+    /// No audio input devices available.
     NoDevicesFound,
+    /// Failed to initialize the selected device.
     DeviceInitFailed(String),
+    /// Error during audio stream operation.
     StreamError(String),
 }
 
@@ -56,6 +66,7 @@ impl std::fmt::Display for AudioError {
 
 impl std::error::Error for AudioError {}
 
+/// Manages microphone capture, buffering, and resampling to 16kHz.
 pub struct AudioCapture {
     selected_device_id: Option<String>,
     stream: Option<Stream>,
@@ -91,7 +102,7 @@ impl AudioCapture {
         if let Ok(input_devices) = host.input_devices() {
             for device in input_devices {
                 if let Ok(name) = device.name() {
-                    let is_default = default_name.as_ref().map_or(false, |dn| dn == &name);
+                    let is_default = default_name.as_ref() == Some(&name);
                     devices.push(AudioDevice {
                         id: name.clone(),
                         name,
@@ -260,7 +271,7 @@ impl AudioCapture {
                 &stream_config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     let count = CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
-                    if count % 100 == 0 {
+                    if count.is_multiple_of(100) {
                         let peak: f32 = data.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
                         tracing::info!("Audio callback #{}: {} samples, peak={:.4}", count, data.len(), peak);
                     }
@@ -284,7 +295,7 @@ impl AudioCapture {
                     &stream_config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
                         let count = CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
-                        if count % 100 == 0 {
+                        if count.is_multiple_of(100) {
                             let peak: f32 = data.iter().map(|&s| (s as f32 / 32768.0).abs()).fold(0.0f32, f32::max);
                             tracing::info!("Audio callback #{}: {} samples, peak={:.4}", count, data.len(), peak);
                         }

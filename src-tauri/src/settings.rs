@@ -5,6 +5,7 @@ use tokio::fs;
 /// Cached settings to reduce disk I/O
 static SETTINGS_CACHE: RwLock<Option<Settings>> = RwLock::new(None);
 
+/// User-configurable application settings (persisted to JSON).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -46,6 +47,7 @@ impl Default for Settings {
     }
 }
 
+/// Load settings from cache or disk (async).
 pub async fn load_settings() -> Settings {
     // Check cache first
     if let Ok(cache) = SETTINGS_CACHE.read() {
