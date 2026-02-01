@@ -111,7 +111,9 @@ lazy_static::lazy_static! {
 
 /// Get the default model file path in app data directory.
 pub fn default_model_path() -> PathBuf {
-    crate::paths::models_dir().join(MODEL_FILENAME)
+    crate::paths::models_dir()
+        .map(|p| p.join(MODEL_FILENAME))
+        .unwrap_or_else(|| PathBuf::from(MODEL_FILENAME))
 }
 
 /// Verify a model file exists and has valid size/magic bytes.

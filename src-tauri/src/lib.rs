@@ -654,7 +654,8 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt::init();
+    // Use try_init to avoid panic if stderr isn't available (Windows without console)
+    let _ = tracing_subscriber::fmt::try_init();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())

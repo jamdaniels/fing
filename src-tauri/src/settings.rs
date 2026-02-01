@@ -68,7 +68,9 @@ pub async fn load_settings() -> Settings {
 }
 
 async fn load_settings_from_disk() -> Settings {
-    let path = crate::paths::settings_path();
+    let Some(path) = crate::paths::settings_path() else {
+        return Settings::default();
+    };
 
     if let Ok(contents) = fs::read_to_string(&path).await {
         serde_json::from_str(&contents).unwrap_or_default()
@@ -87,7 +89,9 @@ pub fn load_settings_sync() -> Settings {
     }
 
     // Load from disk
-    let path = crate::paths::settings_path();
+    let Some(path) = crate::paths::settings_path() else {
+        return Settings::default();
+    };
     let settings = if let Ok(contents) = std::fs::read_to_string(&path) {
         serde_json::from_str(&contents).unwrap_or_default()
     } else {
@@ -103,7 +107,8 @@ pub fn load_settings_sync() -> Settings {
 }
 
 pub async fn save_settings(settings: &Settings) -> Result<(), String> {
-    let path = crate::paths::settings_path();
+    let path = crate::paths::settings_path()
+        .ok_or_else(|| "App paths not initialized".to_string())?;
 
     // Ensure directory exists
     if let Some(parent) = path.parent() {

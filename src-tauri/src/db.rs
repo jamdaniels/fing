@@ -55,7 +55,8 @@ fn sanitize_fts5_query(query: &str) -> String {
 
 /// Initialize the database, creating tables and FTS5 index if needed.
 pub fn init_db() -> Result<(), String> {
-    let path = crate::paths::db_path();
+    let path = crate::paths::db_path()
+        .ok_or_else(|| "App paths not initialized".to_string())?;
 
     // Ensure directory exists
     if let Some(parent) = path.parent() {
