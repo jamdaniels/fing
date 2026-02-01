@@ -74,18 +74,17 @@ fn get_platform_asset_name() -> &'static str {
 
 pub async fn check_for_updates() -> Result<UpdateInfo, String> {
     let url = format!(
-        "https://api.github.com/repos/{}/{}/releases/latest",
-        GITHUB_OWNER, GITHUB_REPO
+        "https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
     );
 
     let client = reqwest::Client::new();
     let response = client
         .get(&url)
-        .header("User-Agent", format!("fing/{}", CURRENT_VERSION))
+        .header("User-Agent", format!("fing/{CURRENT_VERSION}"))
         .header("Accept", "application/vnd.github.v3+json")
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch releases: {}", e))?;
+        .map_err(|e| format!("Failed to fetch releases: {e}"))?;
 
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         // No releases yet or repo not found
@@ -105,7 +104,7 @@ pub async fn check_for_updates() -> Result<UpdateInfo, String> {
     let release: GitHubRelease = response
         .json()
         .await
-        .map_err(|e| format!("Failed to parse release: {}", e))?;
+        .map_err(|e| format!("Failed to parse release: {e}"))?;
 
     let latest_version = release.tag_name.trim_start_matches('v').to_string();
     let available = is_newer(&latest_version, CURRENT_VERSION);

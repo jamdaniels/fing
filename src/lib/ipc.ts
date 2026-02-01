@@ -6,6 +6,8 @@ import type {
   DownloadProgress,
   MicrophoneTest,
   MicTestStartResult,
+  ModelInfo,
+  ModelVariant,
   ModelVerification,
   PermissionStatus,
   Settings,
@@ -73,24 +75,36 @@ export async function checkForUpdates(): Promise<UpdateInfo> {
   return await invoke<UpdateInfo>("check_for_updates");
 }
 
-export async function startModelDownload(): Promise<void> {
-  return await invoke("start_model_download");
+export async function downloadModel(variant: ModelVariant): Promise<void> {
+  return await invoke("download_model", { variant });
 }
 
 export async function getDownloadProgress(): Promise<DownloadProgress> {
   return await invoke<DownloadProgress>("get_download_progress");
 }
 
-export async function selectModelFile(): Promise<string | null> {
-  return await invoke<string | null>("select_model_file");
-}
-
 export async function verifyModel(path: string): Promise<ModelVerification> {
   return await invoke<ModelVerification>("verify_model", { path });
 }
 
-export async function checkModelExists(): Promise<ModelVerification> {
-  return await invoke<ModelVerification>("check_model_exists");
+export async function checkModelExistsForVariant(
+  variant: ModelVariant
+): Promise<ModelVerification> {
+  return await invoke<ModelVerification>("check_model_exists_for_variant", {
+    variant,
+  });
+}
+
+export async function getModels(): Promise<ModelInfo[]> {
+  return await invoke<ModelInfo[]>("get_models");
+}
+
+export async function deleteModel(variant: ModelVariant): Promise<void> {
+  return await invoke("delete_model", { variant });
+}
+
+export async function setActiveModel(variant: ModelVariant): Promise<boolean> {
+  return await invoke<boolean>("set_active_model", { variant });
 }
 
 export async function completeSetup(): Promise<void> {

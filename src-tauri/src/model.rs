@@ -1,19 +1,84 @@
 // Model download and verification
 
 use reqwest::Client;
-use serde::Serialize;
-use sha2::{Digest, Sha256};
+use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-pub const MODEL_FILENAME: &str = "ggml-base.bin";
-pub const MODEL_URL: &str =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin";
-pub const MODEL_SIZE_BYTES: u64 = 147_964_211;
-// SHA256 hash verification is informational only - HuggingFace may update the file
-// Primary validation is GGML magic bytes + size check
-pub const MODEL_SHA256: &str = "";
+/// Model variant representing different quality/size tradeoffs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelVariant {
+    #[default]
+    SmallQ5,
+    Small,
+    LargeTurboQ5,
+}
+
+/// Definition of a model variant with all metadata
+pub struct ModelDefinition {
+    pub variant: ModelVariant,
+    pub filename: &'static str,
+    pub url: &'static str,
+    pub size_bytes: u64,
+    pub display_name: &'static str,
+    pub description: &'static str,
+    pub memory_estimate_mb: u32,
+}
+
+/// Registry of all available models
+pub const MODEL_REGISTRY: &[ModelDefinition] = &[
+    ModelDefinition {
+        variant: ModelVariant::SmallQ5,
+        filename: "ggml-small-q5_1.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
+        size_bytes: 190_000_000, // ~190 MB
+        display_name: "Small Q5",
+        description: "Fastest",
+        memory_estimate_mb: 300,
+    },
+    ModelDefinition {
+        variant: ModelVariant::Small,
+        filename: "ggml-small.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+        size_bytes: 488_000_000, // ~488 MB
+        display_name: "Small",
+        description: "More accurate",
+        memory_estimate_mb: 600,
+    },
+    ModelDefinition {
+        variant: ModelVariant::LargeTurboQ5,
+        filename: "ggml-large-v3-turbo-q5_0.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+        size_bytes: 574_000_000, // ~574 MB
+        display_name: "Large Turbo Q5",
+        description: "Most accurate",
+        memory_estimate_mb: 750,
+    },
+];
+
+/// Get the model definition for a variant
+pub fn get_definition(variant: ModelVariant) -> &'static ModelDefinition {
+    MODEL_REGISTRY
+        .iter()
+        .find(|m| m.variant == variant)
+        .expect("All variants should have definitions")
+}
+
+/// Get the file path for a model variant
+pub fn model_path_for_variant(variant: ModelVariant) -> PathBuf {
+    let def = get_definition(variant);
+    crate::paths::models_dir()
+        .map(|p| p.join(def.filename))
+        .unwrap_or_else(|| PathBuf::from(def.filename))
+}
+
+/// Check if a model variant is downloaded and valid
+pub fn is_variant_downloaded(variant: ModelVariant) -> bool {
+    let path = model_path_for_variant(variant);
+    verify_for_variant(&path, variant).is_valid
+}
 
 // GGML file magic bytes (little-endian): "ggml" = 0x6c6d6767 or "ggjt" = 0x746a6767
 const GGML_MAGIC_GGML: u32 = 0x67676d6c;
@@ -26,8 +91,39 @@ pub struct ModelVerification {
     pub path: String,
     pub exists: bool,
     pub size_valid: bool,
-    pub hash_valid: bool,
+    pub format_valid: bool,
     pub is_valid: bool,
+}
+
+/// Runtime info about a model (for frontend display)
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    pub variant: ModelVariant,
+    pub filename: String,
+    pub display_name: String,
+    pub description: String,
+    pub size_bytes: u64,
+    pub memory_estimate_mb: u32,
+    pub is_downloaded: bool,
+    pub is_active: bool,
+}
+
+/// Get info about all models with current status
+pub fn get_all_models(active_variant: ModelVariant) -> Vec<ModelInfo> {
+    MODEL_REGISTRY
+        .iter()
+        .map(|def| ModelInfo {
+            variant: def.variant,
+            filename: def.filename.to_string(),
+            display_name: def.display_name.to_string(),
+            description: def.description.to_string(),
+            size_bytes: def.size_bytes,
+            memory_estimate_mb: def.memory_estimate_mb,
+            is_downloaded: is_variant_downloaded(def.variant),
+            is_active: def.variant == active_variant,
+        })
+        .collect()
 }
 
 /// Internal download status enum
@@ -62,6 +158,7 @@ impl DownloadStatus {
 /// Internal state for tracking download progress
 #[derive(Debug, Clone)]
 struct InternalDownloadState {
+    variant: Option<ModelVariant>,
     bytes_downloaded: u64,
     total_bytes: u64,
     percentage: f32,
@@ -71,8 +168,9 @@ struct InternalDownloadState {
 impl Default for InternalDownloadState {
     fn default() -> Self {
         Self {
+            variant: None,
             bytes_downloaded: 0,
-            total_bytes: MODEL_SIZE_BYTES,
+            total_bytes: 0,
             percentage: 0.0,
             status: DownloadStatus::NotStarted,
         }
@@ -83,6 +181,7 @@ impl Default for InternalDownloadState {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadProgress {
+    pub variant: Option<ModelVariant>,
     pub bytes_downloaded: u64,
     pub total_bytes: u64,
     pub percentage: f32,
@@ -94,6 +193,7 @@ pub struct DownloadProgress {
 impl From<&InternalDownloadState> for DownloadProgress {
     fn from(state: &InternalDownloadState) -> Self {
         Self {
+            variant: state.variant,
             bytes_downloaded: state.bytes_downloaded,
             total_bytes: state.total_bytes,
             percentage: state.percentage,
@@ -109,26 +209,41 @@ lazy_static::lazy_static! {
         Mutex::new(InternalDownloadState::default());
 }
 
-/// Get the default model file path in app data directory.
-pub fn default_model_path() -> PathBuf {
-    crate::paths::models_dir()
-        .map(|p| p.join(MODEL_FILENAME))
-        .unwrap_or_else(|| PathBuf::from(MODEL_FILENAME))
+/// Verify a model file exists and has valid magic bytes.
+/// Uses a general size check (minimum 50MB for any whisper model).
+pub fn verify(path: &std::path::Path) -> ModelVerification {
+    verify_with_expected_size(path, None)
 }
 
-/// Verify a model file exists and has valid size/magic bytes.
-pub fn verify(path: &std::path::Path) -> ModelVerification {
+/// Verify a model file for a specific variant.
+pub fn verify_for_variant(path: &std::path::Path, variant: ModelVariant) -> ModelVerification {
+    let def = get_definition(variant);
+    verify_with_expected_size(path, Some(def.size_bytes))
+}
+
+/// Internal verify function with optional expected size.
+fn verify_with_expected_size(path: &std::path::Path, expected_size: Option<u64>) -> ModelVerification {
     let exists = path.exists();
     let mut size_valid = false;
-    let mut hash_valid = false;
+    let mut format_valid = false;
 
     if exists {
-        // Check file size (1MB tolerance)
+        // Check file size
         if let Ok(metadata) = std::fs::metadata(path) {
             let size = metadata.len();
-            size_valid = size > MODEL_SIZE_BYTES - 1_000_000 && size < MODEL_SIZE_BYTES + 1_000_000;
-            if !size_valid {
-                tracing::warn!("Model file size invalid: {} bytes (expected ~{} bytes)", size, MODEL_SIZE_BYTES);
+            if let Some(expected) = expected_size {
+                // Tier-specific: 20% tolerance
+                let tolerance = expected / 5;
+                size_valid = size > expected.saturating_sub(tolerance) && size < expected + tolerance;
+                if !size_valid {
+                    tracing::warn!("Model file size invalid: {} bytes (expected ~{} bytes)", size, expected);
+                }
+            } else {
+                // General check: any whisper model should be at least 50MB
+                size_valid = size > 50_000_000;
+                if !size_valid {
+                    tracing::warn!("Model file too small: {} bytes", size);
+                }
             }
         }
 
@@ -138,22 +253,9 @@ pub fn verify(path: &std::path::Path) -> ModelVerification {
             size_valid = false;
         }
 
-        // Hash verification is informational only (HuggingFace may update files)
         // Model is valid if size and magic bytes check pass
         if size_valid {
-            hash_valid = true; // Accept based on size and magic bytes
-
-            // Log hash for debugging (but don't fail on mismatch)
-            if !MODEL_SHA256.is_empty() {
-                if let Ok(hash) = compute_sha256(path) {
-                    if hash != MODEL_SHA256 {
-                        tracing::info!(
-                            "Model hash differs from expected (this is OK - HuggingFace may have updated the file): {}",
-                            hash
-                        );
-                    }
-                }
-            }
+            format_valid = true;
         }
     }
 
@@ -161,25 +263,9 @@ pub fn verify(path: &std::path::Path) -> ModelVerification {
         path: path.to_string_lossy().to_string(),
         exists,
         size_valid,
-        hash_valid,
-        is_valid: exists && size_valid && hash_valid,
+        format_valid,
+        is_valid: exists && size_valid && format_valid,
     }
-}
-
-fn compute_sha256(path: &std::path::Path) -> std::io::Result<String> {
-    let mut file = std::fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 8192];
-
-    loop {
-        let bytes_read = std::io::Read::read(&mut file, &mut buffer)?;
-        if bytes_read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..bytes_read]);
-    }
-
-    Ok(format!("{:x}", hasher.finalize()))
 }
 
 /// Validate GGML file magic bytes
@@ -200,9 +286,16 @@ fn validate_ggml_magic(path: &std::path::Path) -> bool {
     magic == GGML_MAGIC_GGML || magic == GGML_MAGIC_GGJT
 }
 
+/// Download the default model variant (for backwards compatibility)
 pub async fn download() -> Result<PathBuf, String> {
-    let path = default_model_path();
-    tracing::info!("Starting model download to {:?}", path);
+    download_variant(ModelVariant::default()).await
+}
+
+/// Download a specific model variant
+pub async fn download_variant(variant: ModelVariant) -> Result<PathBuf, String> {
+    let def = get_definition(variant);
+    let path = model_path_for_variant(variant);
+    tracing::info!("Starting {} model download to {:?}", def.display_name, path);
 
     // Create directory if needed
     if let Some(parent) = path.parent() {
@@ -216,24 +309,25 @@ pub async fn download() -> Result<PathBuf, String> {
     {
         let mut state = DOWNLOAD_STATE.lock().unwrap();
         *state = InternalDownloadState {
+            variant: Some(variant),
             bytes_downloaded: 0,
-            total_bytes: MODEL_SIZE_BYTES,
+            total_bytes: def.size_bytes,
             percentage: 0.0,
             status: DownloadStatus::Downloading,
         };
-        tracing::info!("Download state reset to Downloading");
+        tracing::info!("Download state reset to Downloading for {:?}", variant);
     }
 
     // Download
     let client = Client::new();
-    tracing::info!("Fetching model from {}", MODEL_URL);
+    tracing::info!("Fetching model from {}", def.url);
 
     let response = client
-        .get(MODEL_URL)
+        .get(def.url)
         .send()
         .await
         .map_err(|e| {
-            let err_msg = format!("Network error: {}", e);
+            let err_msg = format!("Network error: {e}");
             tracing::error!("{}", err_msg);
             let mut state = DOWNLOAD_STATE.lock().unwrap();
             state.status = DownloadStatus::Failed(err_msg.clone());
@@ -248,11 +342,11 @@ pub async fn download() -> Result<PathBuf, String> {
         return Err(err_msg);
     }
 
-    let total_size = response.content_length().unwrap_or(MODEL_SIZE_BYTES);
+    let total_size = response.content_length().unwrap_or(def.size_bytes);
     tracing::info!("Model size: {} bytes", total_size);
 
     let mut file = std::fs::File::create(&path).map_err(|e| {
-        let err_msg = format!("Failed to create file: {}", e);
+        let err_msg = format!("Failed to create file: {e}");
         tracing::error!("{}", err_msg);
         let mut state = DOWNLOAD_STATE.lock().unwrap();
         state.status = DownloadStatus::Failed(err_msg.clone());
@@ -265,7 +359,7 @@ pub async fn download() -> Result<PathBuf, String> {
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| {
-            let err_msg = format!("Download error: {}", e);
+            let err_msg = format!("Download error: {e}");
             tracing::error!("{}", err_msg);
             let mut state = DOWNLOAD_STATE.lock().unwrap();
             state.status = DownloadStatus::Failed(err_msg.clone());
@@ -273,7 +367,7 @@ pub async fn download() -> Result<PathBuf, String> {
         })?;
 
         file.write_all(&chunk).map_err(|e| {
-            let err_msg = format!("Write error: {}", e);
+            let err_msg = format!("Write error: {e}");
             tracing::error!("{}", err_msg);
             let mut state = DOWNLOAD_STATE.lock().unwrap();
             state.status = DownloadStatus::Failed(err_msg.clone());
@@ -297,13 +391,13 @@ pub async fn download() -> Result<PathBuf, String> {
         state.status = DownloadStatus::Verifying;
     }
 
-    let verification = verify(&path);
+    let verification = verify_for_variant(&path, variant);
 
     if verification.is_valid {
         let mut state = DOWNLOAD_STATE.lock().unwrap();
         state.status = DownloadStatus::Complete;
         state.percentage = 100.0;
-        tracing::info!("Model verified successfully");
+        tracing::info!("{} model verified successfully", def.display_name);
         Ok(path)
     } else {
         // Delete invalid file
@@ -317,81 +411,21 @@ pub async fn download() -> Result<PathBuf, String> {
     }
 }
 
+/// Delete a downloaded model
+pub fn delete_model(variant: ModelVariant) -> Result<(), String> {
+    let path = model_path_for_variant(variant);
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| {
+            tracing::error!("Failed to delete model: {}", e);
+            e.to_string()
+        })?;
+        tracing::info!("Deleted {} model at {:?}", get_definition(variant).display_name, path);
+    }
+    Ok(())
+}
+
 /// Get current download progress.
 pub fn get_progress() -> DownloadProgress {
     let state = DOWNLOAD_STATE.lock().unwrap();
     DownloadProgress::from(&*state)
-}
-
-/// Open file picker dialog to select a model file and copy it to the default location
-pub fn select_file(app: &tauri::AppHandle) -> Option<PathBuf> {
-    use tauri_plugin_dialog::DialogExt;
-
-    let file_path = app
-        .dialog()
-        .file()
-        .add_filter("Whisper Model", &["bin"])
-        .set_title("Select Whisper Model")
-        .blocking_pick_file();
-
-    let selected_path = file_path.and_then(|f| f.into_path().ok())?;
-
-    // Pre-validate selected file before copying
-    // Check size first
-    let file_size = match std::fs::metadata(&selected_path) {
-        Ok(m) => m.len(),
-        Err(e) => {
-            tracing::error!("Failed to read selected file metadata: {}", e);
-            return None;
-        }
-    };
-
-    // Validate size (1MB tolerance)
-    if !(MODEL_SIZE_BYTES - 1_000_000..=MODEL_SIZE_BYTES + 1_000_000).contains(&file_size) {
-        tracing::error!(
-            "Selected file has invalid size: {} bytes (expected ~{} bytes)",
-            file_size,
-            MODEL_SIZE_BYTES
-        );
-        return None;
-    }
-
-    // Validate GGML magic bytes
-    if !validate_ggml_magic(&selected_path) {
-        tracing::error!("Selected file is not a valid GGML model (invalid magic bytes)");
-        return None;
-    }
-
-    // Get the default model path
-    let dest_path = default_model_path();
-
-    // Create directory if needed
-    if let Some(parent) = dest_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            tracing::error!("Failed to create model directory: {}", e);
-            return None;
-        }
-    }
-
-    // Copy the selected file to the default location
-    if let Err(e) = std::fs::copy(&selected_path, &dest_path) {
-        tracing::error!("Failed to copy model file: {}", e);
-        return None;
-    }
-
-    // Verify the copied file
-    let verification = verify(&dest_path);
-    if !verification.is_valid {
-        tracing::error!(
-            "Copied model file verification failed: size_valid={}, hash_valid={}",
-            verification.size_valid,
-            verification.hash_valid
-        );
-        // Delete invalid file
-        let _ = std::fs::remove_file(&dest_path);
-        return None;
-    }
-
-    tracing::info!("Copied and verified model from {:?} to {:?}", selected_path, dest_path);
-    Some(dest_path)
 }

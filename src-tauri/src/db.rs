@@ -49,7 +49,7 @@ fn sanitize_fts5_query(query: &str) -> String {
     if result.trim().is_empty() {
         String::new()
     } else {
-        format!("\"{}\"", result)
+        format!("\"{result}\"")
     }
 }
 
@@ -61,11 +61,11 @@ pub fn init_db() -> Result<(), String> {
     // Ensure directory exists
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create database directory: {}", e))?;
+            .map_err(|e| format!("Failed to create database directory: {e}"))?;
     }
 
     let conn = Connection::open(&path)
-        .map_err(|e| format!("Failed to open database: {}", e))?;
+        .map_err(|e| format!("Failed to open database: {e}"))?;
 
     // Enable WAL mode for better reliability (non-fatal if fails)
     if let Err(e) = conn.execute("PRAGMA journal_mode=WAL", []) {
@@ -84,7 +84,7 @@ pub fn init_db() -> Result<(), String> {
         )",
         [],
     )
-    .map_err(|e| format!("Failed to create transcripts table: {}", e))?;
+    .map_err(|e| format!("Failed to create transcripts table: {e}"))?;
 
     // Create FTS5 virtual table for full-text search
     conn.execute(
@@ -95,7 +95,7 @@ pub fn init_db() -> Result<(), String> {
         )",
         [],
     )
-    .map_err(|e| format!("Failed to create FTS table: {}", e))?;
+    .map_err(|e| format!("Failed to create FTS table: {e}"))?;
 
     // Create triggers to keep FTS in sync
     conn.execute_batch(
@@ -114,16 +114,16 @@ pub fn init_db() -> Result<(), String> {
         END;
         "
     )
-    .map_err(|e| format!("Failed to create triggers: {}", e))?;
+    .map_err(|e| format!("Failed to create triggers: {e}"))?;
 
     // Create index for faster date queries
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_transcripts_created_at ON transcripts(created_at)",
         [],
     )
-    .map_err(|e| format!("Failed to create index: {}", e))?;
+    .map_err(|e| format!("Failed to create index: {e}"))?;
 
-    let mut db = DB.lock().map_err(|e| format!("Database lock poisoned: {}", e))?;
+    let mut db = DB.lock().map_err(|e| format!("Database lock poisoned: {e}"))?;
     *db = Some(conn);
 
     tracing::info!("Database initialized at {:?}", path);
@@ -134,7 +134,7 @@ fn with_db<T, F>(f: F) -> Result<T, String>
 where
     F: FnOnce(&Connection) -> Result<T, rusqlite::Error>,
 {
-    let db = DB.lock().map_err(|e| format!("Database lock poisoned: {}", e))?;
+    let db = DB.lock().map_err(|e| format!("Database lock poisoned: {e}"))?;
     let conn = db.as_ref().ok_or("Database not initialized")?;
     f(conn).map_err(|e| e.to_string())
 }

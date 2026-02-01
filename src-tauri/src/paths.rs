@@ -10,7 +10,7 @@ pub fn init(app: &tauri::App) -> Result<(), String> {
     let path = app
         .path()
         .app_data_dir()
-        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+        .map_err(|e| format!("Failed to get app data dir: {e}"))?;
 
     APP_DATA_DIR
         .set(path)

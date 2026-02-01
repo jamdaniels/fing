@@ -19,8 +19,8 @@ impl std::fmt::Display for TranscribeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TranscribeError::ModelNotFound => write!(f, "Model file not found"),
-            TranscribeError::ModelLoadFailed(msg) => write!(f, "Failed to load model: {}", msg),
-            TranscribeError::InferenceFailed(msg) => write!(f, "Inference failed: {}", msg),
+            TranscribeError::ModelLoadFailed(msg) => write!(f, "Failed to load model: {msg}"),
+            TranscribeError::InferenceFailed(msg) => write!(f, "Inference failed: {msg}"),
             TranscribeError::EmptyAudio => write!(f, "Audio buffer is empty"),
         }
     }

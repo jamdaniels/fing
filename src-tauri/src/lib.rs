@@ -106,7 +106,7 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
     {
         let mut state = MIC_TEST_STATE
             .lock()
-            .map_err(|e| format!("Mic test state lock poisoned: {}", e))?;
+            .map_err(|e| format!("Mic test state lock poisoned: {e}"))?;
         state.running = false;
         state.level = 0;
         state.receiving = false;
@@ -149,7 +149,7 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
     let my_generation = {
         let mut state = MIC_TEST_STATE
             .lock()
-            .map_err(|e| format!("Mic test state lock poisoned: {}", e))?;
+            .map_err(|e| format!("Mic test state lock poisoned: {e}"))?;
         state.generation += 1;
         state.running = true;
         state.generation
@@ -250,6 +250,11 @@ async fn start_model_download() -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn download_model(variant: model::ModelVariant) -> Result<String, String> {
+    model::download_variant(variant).await.map(|p| p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 fn get_download_progress() -> model::DownloadProgress {
     model::get_progress()
 }
@@ -260,14 +265,52 @@ fn verify_model(path: String) -> model::ModelVerification {
 }
 
 #[tauri::command]
-fn check_model_exists() -> model::ModelVerification {
-    let path = model::default_model_path();
-    model::verify(&path)
+fn check_model_exists_for_variant(variant: model::ModelVariant) -> model::ModelVerification {
+    let path = model::model_path_for_variant(variant);
+    model::verify_for_variant(&path, variant)
 }
 
 #[tauri::command]
-fn select_model_file(app: tauri::AppHandle) -> Option<String> {
-    model::select_file(&app).map(|p| p.to_string_lossy().to_string())
+fn get_models() -> Vec<model::ModelInfo> {
+    let settings = settings::load_settings_sync();
+    model::get_all_models(settings.active_model_variant)
+}
+
+#[tauri::command]
+fn delete_model(variant: model::ModelVariant) -> Result<(), String> {
+    // Check if this is the active model
+    let settings = settings::load_settings_sync();
+    if settings.active_model_variant == variant {
+        return Err("Cannot delete the active model".to_string());
+    }
+    model::delete_model(variant)
+}
+
+#[tauri::command]
+async fn set_active_model(variant: model::ModelVariant, _app: tauri::AppHandle) -> Result<bool, String> {
+    // Check if model is downloaded
+    if !model::is_variant_downloaded(variant) {
+        return Err("Model is not downloaded".to_string());
+    }
+
+    // Get current settings
+    let mut current_settings = settings::load_settings().await;
+    let needs_restart = current_settings.active_model_variant != variant;
+
+    // Update settings
+    current_settings.active_model_variant = variant;
+    settings::save_settings(&current_settings).await?;
+
+    // If app is in Ready state, we need to restart to reload the model
+    let current_state = state::get_state();
+    if needs_restart && current_state == AppState::Ready {
+        tracing::info!("Model variant changed to {:?}, restart required", variant);
+        // Return true to indicate restart is required
+        return Ok(true);
+    }
+
+    // If in NeedsSetup state, no restart needed - model will be loaded on complete_setup
+    Ok(false)
 }
 
 #[tauri::command]
@@ -388,27 +431,30 @@ fn get_current_hotkey() -> String {
 
 #[tauri::command]
 async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
-    // Verify model exists at default path
-    let model_path = model::default_model_path();
-    let verification = model::verify(&model_path);
+    // Load settings to get active model variant
+    let mut current_settings = settings::load_settings().await;
+    let variant = current_settings.active_model_variant;
+
+    // Verify model exists for the active variant
+    let model_path = model::model_path_for_variant(variant);
+    let verification = model::verify_for_variant(&model_path, variant);
 
     if !verification.is_valid {
         return Err(format!(
-            "Model not valid at {}: exists={}, size_valid={}, hash_valid={}",
+            "Model not valid at {}: exists={}, size_valid={}, format_valid={}",
             verification.path,
             verification.exists,
             verification.size_valid,
-            verification.hash_valid
+            verification.format_valid
         ));
     }
 
     // Initialize the transcriber
     let model_path_str = model_path.to_string_lossy().to_string();
     transcribe::init_transcriber(&model_path_str)
-        .map_err(|e| format!("Failed to initialize transcriber: {:?}", e))?;
+        .map_err(|e| format!("Failed to initialize transcriber: {e:?}"))?;
 
     // Save onboarding_completed to settings
-    let mut current_settings = settings::load_settings().await;
     current_settings.onboarding_completed = true;
     settings::save_settings(&current_settings).await?;
 
@@ -432,7 +478,7 @@ async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
         let _ = window.hide();
     }
 
-    tracing::info!("Setup complete, app is ready");
+    tracing::info!("Setup complete with {:?} model, app is ready", variant);
     Ok(())
 }
 
@@ -542,7 +588,7 @@ fn build_mic_menu_items(app: &impl tauri::Manager<tauri::Wry>) -> Result<Vec<Box
 }
 
 fn encode_menu_id(value: &str) -> String {
-    value.as_bytes().iter().map(|b| format!("{:02x}", b)).collect()
+    value.as_bytes().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn decode_menu_id(value: &str) -> Option<String> {
@@ -587,7 +633,7 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
     fn show_window_for_tab(app: &tauri::AppHandle, tab: &str) {
         if let Some(window) = app.get_webview_window("main") {
             let tab_json = serde_json::to_string(tab).unwrap_or_else(|_| "\"home\"".to_string());
-            let script = format!("window.__navigateTo && window.__navigateTo({});", tab_json);
+            let script = format!("window.__navigateTo && window.__navigateTo({tab_json});");
             let _ = window.eval(&script);
             let _ = window.show();
             let _ = window.set_focus();
@@ -682,8 +728,9 @@ pub fn run() {
 
             if saved_settings.onboarding_completed {
                 // User already completed onboarding - verify model and init
-                let model_path = model::default_model_path();
-                let verification = model::verify(&model_path);
+                let variant = saved_settings.active_model_variant;
+                let model_path = model::model_path_for_variant(variant);
+                let verification = model::verify_for_variant(&model_path, variant);
 
                 if verification.is_valid {
                     // Initialize transcriber
@@ -793,10 +840,13 @@ pub fn run() {
             quit_app,
             // Model management
             start_model_download,
+            download_model,
             get_download_progress,
             verify_model,
-            check_model_exists,
-            select_model_file,
+            check_model_exists_for_variant,
+            get_models,
+            delete_model,
+            set_active_model,
             // Setup
             complete_setup,
             // Updates
