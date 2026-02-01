@@ -1505,6 +1505,10 @@ function matchesHotkeyRelease(e: KeyboardEvent, config: { key: string; ctrl: boo
 }
 
 async function init(): Promise<void> {
+  // Platform detection for platform-specific UI (e.g., hide custom titlebar on Windows)
+  const isMac = navigator.userAgent.includes("Mac");
+  document.body.dataset.platform = isMac ? "darwin" : "windows";
+
   try {
     currentAppState = await getAppState();
     appInfo = await getAppInfo();
