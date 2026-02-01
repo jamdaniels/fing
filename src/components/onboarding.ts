@@ -5,18 +5,22 @@ import {
   CheckCircle,
   Download,
   Globe,
+  GlobeLock,
   Keyboard,
   Mic,
   PersonStanding,
+  Shield,
 } from "lucide";
 import { createIcon, escapeHtml } from "../lib/icons";
 import {
-  checkModelExists,
+  checkModelExistsForVariant,
   completeSetup,
   disableOnboardingTestMode,
+  downloadModel,
   enableOnboardingTestMode,
   getAudioDevices,
   getDownloadProgress,
+  getModels,
   getSettings,
   hotkeyPress,
   hotkeyRelease,
@@ -24,13 +28,14 @@ import {
   requestAccessibilityPermission,
   requestMicrophonePermission,
   requestPermissions,
-  startModelDownload,
   updateHotkey,
   updateSettings,
 } from "../lib/ipc";
 import type {
   AudioDevice,
   DownloadProgress,
+  ModelInfo,
+  ModelVariant,
   PermissionStatus,
   Settings,
 } from "../lib/types";
@@ -50,6 +55,8 @@ interface OnboardingState {
   selectedHotkey: string;
   capturedHotkey: string | null;
   testText: string;
+  selectedModelVariant: ModelVariant;
+  models: ModelInfo[];
 }
 
 const SUPPORTED_LANGUAGES = [
@@ -72,6 +79,8 @@ let state: OnboardingState = {
   selectedHotkey: "F8",
   capturedHotkey: null,
   testText: "",
+  selectedModelVariant: "small_q5",
+  models: [],
 };
 
 let container: HTMLElement | null = null;
@@ -225,18 +234,10 @@ function renderDownloadBody(
           <div class="progress-bar-fill" style="width: ${progress?.percentage ?? 0}%"></div>
         </div>
         <div class="download-status ${isFailed ? "error" : ""}${isComplete ? "success centered-status" : ""}${isDownloading ? "centered-status" : ""}">${statusText}</div>
-        ${isFailed ? `<button class="btn btn-primary" id="retry-download-btn">Retry Download</button>` : ""}
       </div>
     `;
   }
   return "";
-}
-
-function renderDownloadFooterButton(isComplete: boolean): string {
-  if (isComplete) {
-    return `<button class="btn btn-primary btn-lg" id="continue-btn">Continue</button>`;
-  }
-  return `<button class="btn btn-primary btn-lg" id="continue-btn" disabled>Continue</button>`;
 }
 
 function renderMicPermissionStatus(status: string | undefined): string {
@@ -316,9 +317,9 @@ function renderWelcome(): void {
       </div>
       <div class="onboarding-body">
         <ul class="onboarding-features">
-          <li>${createIcon(PersonStanding)} All processing happens locally on your device</li>
+          <li>${createIcon(GlobeLock)} All processing happens locally on your device</li>
           <li>${createIcon(Mic)} Microphone is only active while you hold the hotkey</li>
-          <li>${createIcon(Check)} Your audio never leaves your computer</li>
+          <li>${createIcon(Shield)} Your audio never leaves your computer</li>
         </ul>
       </div>
       <div class="onboarding-footer">
@@ -336,6 +337,39 @@ function renderWelcome(): void {
   attachStepIndicatorListeners();
 }
 
+function formatModelSize(bytes: number): string {
+  return `${Math.round(bytes / 1_000_000)} MB`;
+}
+
+function renderModelVariantCards(): string {
+  const variants: { variant: ModelVariant; badge?: string }[] = [
+    { variant: "small_q5", badge: "Recommended" },
+    { variant: "small" },
+    { variant: "large_turbo_q5" },
+  ];
+
+  return variants
+    .map(({ variant, badge }) => {
+      const model = state.models.find((m) => m.variant === variant);
+      if (!model) {
+        return "";
+      }
+      const isSelected = state.selectedModelVariant === variant;
+      return `
+        <button class="model-variant-card ${isSelected ? "selected" : ""}" data-variant="${variant}">
+          ${badge ? `<div class="variant-badge">${badge}</div>` : ""}
+          <div class="variant-name">${model.displayName}</div>
+          <div class="variant-desc">${model.description}</div>
+          <div class="variant-stats">
+            <span>~${formatModelSize(model.sizeBytes)} disk</span>
+            <span>~${model.memoryEstimateMb} MB memory</span>
+          </div>
+        </button>
+      `;
+    })
+    .join("");
+}
+
 function renderDownloadModel(): void {
   if (!container) {
     return;
@@ -346,6 +380,36 @@ function renderDownloadModel(): void {
     progress?.status === "downloading" || progress?.status === "verifying";
   const isComplete = progress?.status === "complete";
   const isFailed = progress?.status === "failed";
+  const downloadBtnText = "Download Model";
+
+  // Determine footer button state
+  let footerButton: string;
+  if (isComplete) {
+    footerButton = `<button class="btn btn-primary btn-lg" id="continue-btn">Continue</button>`;
+  } else if (isDownloading) {
+    footerButton = `<button class="btn btn-primary btn-lg" disabled>Downloading...</button>`;
+  } else if (isFailed) {
+    footerButton = `<button class="btn btn-primary btn-lg" id="retry-btn">Retry Download</button>`;
+  } else {
+    footerButton = `<button class="btn btn-primary btn-lg" id="download-btn">${downloadBtnText}</button>`;
+  }
+
+  // Body content - either selection or progress
+  let bodyContent: string;
+  if (isDownloading || isComplete || isFailed) {
+    bodyContent = renderDownloadBody(
+      isDownloading,
+      isComplete,
+      isFailed,
+      progress
+    );
+  } else {
+    bodyContent = `
+      <div class="model-variant-grid">
+        ${renderModelVariantCards()}
+      </div>
+    `;
+  }
 
   container.innerHTML = `
     <div class="onboarding">
@@ -353,37 +417,54 @@ function renderDownloadModel(): void {
         <div class="onboarding-icon">
           ${createIcon(Download)}
         </div>
-        <h1 class="onboarding-title">Download Speech Model</h1>
-        <p class="onboarding-desc">Fing needs a speech recognition model</p>
+        <h1 class="onboarding-title">Choose Speech Model</h1>
+        <p class="onboarding-desc">Select a model based on your needs</p>
       </div>
       <div class="onboarding-body">
         ${state.downloadError ? `<div class="download-status error" style="margin-bottom: 16px;">${state.downloadError}</div>` : ""}
-        ${renderDownloadBody(isDownloading, isComplete, isFailed, progress)}
-        ${
-          isDownloading || isComplete || isFailed
-            ? ""
-            : `
-          <button class="btn btn-outline btn-lg" id="start-download-btn">Download Model</button>
-        `
-        }
+        ${bodyContent}
       </div>
       <div class="onboarding-footer">
-        ${renderDownloadFooterButton(isComplete)}
+        ${footerButton}
         ${renderStepIndicator(2)}
       </div>
     </div>
   `;
 
+  // Attach variant card click handlers
+  for (const card of document.querySelectorAll(".model-variant-card")) {
+    card.addEventListener("click", (e) => {
+      const variant = (e.currentTarget as HTMLElement).dataset
+        .variant as ModelVariant;
+      state.selectedModelVariant = variant;
+      render();
+    });
+  }
+
   document
-    .getElementById("start-download-btn")
+    .getElementById("download-btn")
     ?.addEventListener("click", handleStartDownload);
   document
-    .getElementById("retry-download-btn")
+    .getElementById("retry-btn")
     ?.addEventListener("click", handleStartDownload);
   document
     .getElementById("continue-btn")
-    ?.addEventListener("click", () => goToStep(3));
+    ?.addEventListener("click", handleDownloadContinue);
   attachStepIndicatorListeners();
+}
+
+async function handleDownloadContinue(): Promise<void> {
+  // Save the selected model variant to settings before proceeding
+  try {
+    const currentSettings = await getSettings();
+    await updateSettings({
+      ...currentSettings,
+      activeModelVariant: state.selectedModelVariant,
+    });
+  } catch (err) {
+    console.error("Failed to save model variant selection:", err);
+  }
+  goToStep(3);
 }
 
 function renderLanguageSelection(): void {
@@ -846,13 +927,21 @@ async function goToStep(step: OnboardingStep): Promise<void> {
     // Set up frontend hotkey listener (WebView2 workaround for Windows)
     const hotkey = state.selectedHotkey;
     const hotkeyLower = hotkey.toLowerCase();
-    console.log("[onboarding] Setting up frontend hotkey listener for:", hotkey);
+    console.log(
+      "[onboarding] Setting up frontend hotkey listener for:",
+      hotkey
+    );
 
     testHotkeyKeydown = (e: KeyboardEvent) => {
-      if (testHotkeyPressed) return;
+      if (testHotkeyPressed) {
+        return;
+      }
       const keyLower = e.key.toLowerCase();
       // Simple match for function keys and single keys
-      if (keyLower === hotkeyLower || (hotkeyLower.startsWith("f") && keyLower === hotkeyLower)) {
+      if (
+        keyLower === hotkeyLower ||
+        (hotkeyLower.startsWith("f") && keyLower === hotkeyLower)
+      ) {
         e.preventDefault();
         e.stopPropagation();
         testHotkeyPressed = true;
@@ -861,9 +950,14 @@ async function goToStep(step: OnboardingStep): Promise<void> {
     };
 
     testHotkeyKeyup = (e: KeyboardEvent) => {
-      if (!testHotkeyPressed) return;
+      if (!testHotkeyPressed) {
+        return;
+      }
       const keyLower = e.key.toLowerCase();
-      if (keyLower === hotkeyLower || (hotkeyLower.startsWith("f") && keyLower === hotkeyLower)) {
+      if (
+        keyLower === hotkeyLower ||
+        (hotkeyLower.startsWith("f") && keyLower === hotkeyLower)
+      ) {
         e.preventDefault();
         e.stopPropagation();
         testHotkeyPressed = false;
@@ -881,6 +975,7 @@ async function goToStep(step: OnboardingStep): Promise<void> {
 function handleStartDownload(): void {
   state.downloadError = null;
   state.downloadProgress = {
+    variant: state.selectedModelVariant,
     bytesDownloaded: 0,
     totalBytes: 0,
     percentage: 0,
@@ -888,7 +983,7 @@ function handleStartDownload(): void {
   };
   render();
 
-  startModelDownload().catch((err) => {
+  downloadModel(state.selectedModelVariant).catch((err) => {
     console.error("Download error:", err);
   });
 
@@ -1010,12 +1105,13 @@ async function handleComplete(): Promise<void> {
 export async function renderOnboarding(el: HTMLElement): Promise<void> {
   container = el;
 
-  // Load saved settings first
+  // Load saved settings and models first
   let savedSettings: Settings | null = null;
+  let models: ModelInfo[] = [];
   try {
-    savedSettings = await getSettings();
+    [savedSettings, models] = await Promise.all([getSettings(), getModels()]);
   } catch (e) {
-    console.error("Failed to load settings:", e);
+    console.error("Failed to load settings/models:", e);
   }
 
   state = {
@@ -1031,6 +1127,8 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     selectedHotkey: savedSettings?.hotkey ?? "F8",
     capturedHotkey: null,
     testText: "",
+    selectedModelVariant: savedSettings?.activeModelVariant ?? "small_q5",
+    models,
   };
 
   // Check if this is a manual reset
@@ -1063,11 +1161,14 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     return;
   }
 
-  // Check if model already exists
+  // Check if the selected model variant already exists
   try {
-    const modelStatus = await checkModelExists();
+    const modelStatus = await checkModelExistsForVariant(
+      state.selectedModelVariant
+    );
     if (modelStatus.isValid) {
       state.downloadProgress = {
+        variant: state.selectedModelVariant,
         bytesDownloaded: 0,
         totalBytes: 0,
         percentage: 100,

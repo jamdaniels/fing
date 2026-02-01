@@ -1,3 +1,4 @@
+use crate::model::ModelVariant;
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 use tokio::fs;
@@ -23,6 +24,8 @@ pub struct Settings {
     pub languages: Vec<String>,
     #[serde(default)]
     pub onboarding_step: Option<u8>,
+    #[serde(default)]
+    pub active_model_variant: ModelVariant,
 }
 
 fn default_languages() -> Vec<String> {
@@ -43,6 +46,7 @@ impl Default for Settings {
             onboarding_completed: false,
             languages: default_languages(),
             onboarding_step: None,
+            active_model_variant: ModelVariant::default(),
         }
     }
 }
@@ -114,15 +118,15 @@ pub async fn save_settings(settings: &Settings) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .await
-            .map_err(|e| format!("Failed to create settings directory: {}", e))?;
+            .map_err(|e| format!("Failed to create settings directory: {e}"))?;
     }
 
     let json = serde_json::to_string_pretty(settings)
-        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+        .map_err(|e| format!("Failed to serialize settings: {e}"))?;
 
     fs::write(&path, json)
         .await
-        .map_err(|e| format!("Failed to write settings: {}", e))?;
+        .map_err(|e| format!("Failed to write settings: {e}"))?;
 
     // Update cache with new settings
     if let Ok(mut cache) = SETTINGS_CACHE.write() {

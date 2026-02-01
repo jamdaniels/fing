@@ -29,8 +29,8 @@ bun run typecheck
 bun run lint
 bun run lint:fix
 
-# Download model for local dev
-mkdir -p .models && curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin" -o .models/ggml-tiny.en.bin
+# Download model for local dev (Lite tier - default)
+mkdir -p .models && curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin" -o .models/ggml-small-q5_1.bin
 ```
 
 ## Architecture
@@ -90,13 +90,16 @@ Use `tauri::async_runtime::spawn` for async tasks and `tauri::async_runtime::blo
 ## Key Constraints
 
 - **Privacy-first**: Mic only active while F8 held, no cloud, no telemetry
-- **Model not bundled**: User downloads ~75MB ggml-tiny.en.bin (SHA256 verified)
+- **Model variants**: Three variants available (Small Q5 ~190MB, Small ~488MB, Large Turbo Q5 ~574MB), user selects during onboarding
 - **macOS permissions**: Requires Accessibility (for hotkey + paste) and Microphone
 - **GPU acceleration**: Metal on macOS, Vulkan on Windows, CPU fallback
 - **Hold-only mode**: V1 only supports hold-to-record (no toggle mode)
 
 ## File Locations
 
-**Model:** `~/Library/Application Support/com.jamdaniels.fing/models/ggml-tiny.en.bin` (macOS)
+**Models:** `~/Library/Application Support/com.jamdaniels.fing/models/` (macOS)
+- Small Q5: `ggml-small-q5_1.bin`
+- Small: `ggml-small.bin`
+- Large Turbo Q5: `ggml-large-v3-turbo-q5_0.bin`
 **Database:** `~/Library/Application Support/com.jamdaniels.fing/transcripts.db`
 **Settings:** `~/Library/Application Support/com.jamdaniels.fing/settings.json`

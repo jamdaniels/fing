@@ -21,8 +21,7 @@ pub fn show_error(app: &AppHandle, title: &str, message: &str) {
         let escaped_title = escape_applescript(title);
         let escaped_message = escape_applescript(message);
         let script = format!(
-            "display notification \"{}\" with title \"{}\"",
-            escaped_message, escaped_title
+            "display notification \"{escaped_message}\" with title \"{escaped_title}\""
         );
         let _ = std::process::Command::new("osascript")
             .args(["-e", &script])
@@ -68,8 +67,7 @@ pub fn show_info(app: &AppHandle, title: &str, message: &str) {
         let escaped_title = escape_applescript(title);
         let escaped_message = escape_applescript(message);
         let script = format!(
-            "display notification \"{}\" with title \"{}\"",
-            escaped_message, escaped_title
+            "display notification \"{escaped_message}\" with title \"{escaped_title}\""
         );
         let _ = std::process::Command::new("osascript")
             .args(["-e", &script])

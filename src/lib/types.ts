@@ -5,6 +5,19 @@ export type AppState =
   | "recording"
   | "processing";
 
+export type ModelVariant = "small_q5" | "small" | "large_turbo_q5";
+
+export interface ModelInfo {
+  variant: ModelVariant;
+  filename: string;
+  displayName: string;
+  description: string;
+  sizeBytes: number;
+  memoryEstimateMb: number;
+  isDownloaded: boolean;
+  isActive: boolean;
+}
+
 export interface Transcript {
   id: number;
   text: string;
@@ -34,6 +47,7 @@ export interface Settings {
   onboardingCompleted: boolean;
   languages: string[];
   onboardingStep: number | null;
+  activeModelVariant: ModelVariant;
 }
 
 export interface UpdateInfo {
@@ -71,6 +85,7 @@ export interface Stats {
 export type SidebarItem = "home" | "history" | "settings" | "about";
 
 export interface DownloadProgress {
+  variant: ModelVariant | null;
   bytesDownloaded: number;
   totalBytes: number;
   percentage: number;
@@ -82,7 +97,7 @@ export interface ModelVerification {
   path: string;
   exists: boolean;
   sizeValid: boolean;
-  hashValid: boolean;
+  formatValid: boolean;
   isValid: boolean;
 }
 

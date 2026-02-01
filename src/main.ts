@@ -10,7 +10,6 @@ import {
   Home,
   type IconNode,
   Info,
-  Keyboard,
   Mic,
   Power,
   RefreshCw,
@@ -23,20 +22,26 @@ import { cleanupOnboarding, renderOnboarding } from "./components/onboarding";
 import { createIcon, escapeHtml } from "./lib/icons";
 import {
   deleteAllTranscripts,
+  deleteModel,
   deleteTranscript,
+  downloadModel,
   getAppInfo,
   getAppState,
   getAudioDevices,
   getAutoStart,
+  getDownloadProgress,
   getMicTestLevel,
+  getModels,
   getRecentTranscripts,
   getSettings,
   getStats,
   refreshAudioDevices,
+  relaunchApp,
   requestAccessibilityPermission,
   requestMicrophonePermission,
   requestPermissions,
   searchTranscripts,
+  setActiveModel,
   setAutoStart,
   startMicTest,
   stopMicTest,
@@ -48,6 +53,8 @@ import type {
   AudioDevice,
   MicrophoneTest,
   MicTestStartResult,
+  ModelInfo,
+  ModelVariant,
   Settings as SettingsType,
   SidebarItem,
   Stats,
@@ -80,6 +87,12 @@ let micTestModalCleanup: (() => void) | null = null;
 let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 let sidebarListenerAttached = false;
 let contentListenerAttached = false;
+let models: ModelInfo[] = [];
+let modelDownloadPollInterval: number | null = null;
+let modelDownloadProgress: {
+  variant: ModelVariant;
+  percentage: number;
+} | null = null;
 
 function navigateToTab(tab: SidebarItem): void {
   if (!["home", "history", "settings", "about"].includes(tab)) {
@@ -319,14 +332,16 @@ async function handleDeleteTranscript(id: number): Promise<void> {
 }
 
 async function handleClearAll(): Promise<void> {
-  if (
-    // biome-ignore lint/suspicious/noAlert: confirm is acceptable for destructive actions
-    !confirm(
-      "Are you sure you want to delete all transcripts? This cannot be undone."
-    )
-  ) {
+  const confirmed = await showConfirmDialog({
+    title: "Clear All Transcripts",
+    body: "Are you sure you want to delete all transcripts? This cannot be undone.",
+    confirmText: "Delete All",
+    danger: true,
+  });
+  if (!confirmed) {
     return;
   }
+
   try {
     await deleteAllTranscripts();
     transcriptOffset = 0;
@@ -500,12 +515,14 @@ async function loadSettings(force = false): Promise<void> {
   }
 
   try {
-    const [loadedSettings, devices] = await Promise.all([
+    const [loadedSettings, devices, loadedModels] = await Promise.all([
       getSettings(),
       getAudioDevices(),
+      getModels(),
     ]);
     settings = loadedSettings;
     audioDevices = devices;
+    models = loadedModels;
 
     const autoStart = await getAutoStart().catch(() => null);
     if (autoStart !== null && settings) {
@@ -515,6 +532,7 @@ async function loadSettings(force = false): Promise<void> {
   } catch {
     settings = null;
     audioDevices = [];
+    models = [];
   }
 }
 
@@ -633,30 +651,33 @@ function showHotkeyModal(): void {
   const currentHotkey = settings?.hotkey ?? "F8";
 
   const modal = document.createElement("div");
-  modal.className = "hotkey-modal-overlay";
+  modal.className = "dialog-overlay";
 
   const renderModal = () => {
     modal.innerHTML = `
-      <div class="hotkey-modal">
-        <button class="hotkey-modal-close">${createIcon(X)}</button>
-        <div class="hotkey-modal-icon">${createIcon(Keyboard)}</div>
-        <div class="hotkey-modal-title">Set recording hotkey</div>
-        <div class="hotkey-modal-desc">Press a key or combination</div>
-        <div class="hotkey-modal-preview">
-          <span class="hotkey-modal-key ${capturedHotkey ? "captured" : ""}">${formatKeyForDisplay(capturedHotkey ?? currentHotkey)}</span>
-          ${capturedHotkey && capturedHotkey !== currentHotkey ? '<span class="hotkey-modal-new">New</span>' : ""}
+      <div class="dialog hotkey-dialog">
+        <button class="dialog-close">${createIcon(X)}</button>
+        <div class="dialog-header">
+          <div class="dialog-title">Set recording hotkey</div>
         </div>
-        <div class="hotkey-modal-actions">
+        <div class="dialog-body">
+          <div class="hotkey-dialog-desc">Press a key or combination</div>
+          <div class="hotkey-modal-preview">
+            <span class="hotkey-modal-key ${capturedHotkey ? "captured" : ""}">${formatKeyForDisplay(capturedHotkey ?? currentHotkey)}</span>
+            ${capturedHotkey && capturedHotkey !== currentHotkey ? '<span class="hotkey-modal-new">New</span>' : ""}
+          </div>
+          <button class="hotkey-fn-link">Use Fn key instead</button>
+        </div>
+        <div class="dialog-footer hotkey-dialog-footer">
+          <span class="hotkey-dialog-hint">Press Escape to cancel</span>
           <button class="btn btn-primary hotkey-confirm-btn" ${capturedHotkey ? "" : "disabled"}>Set hotkey</button>
         </div>
-        <button class="hotkey-fn-link">Use Fn key instead</button>
-        <div class="hotkey-modal-hint">Press Escape to cancel</div>
       </div>
     `;
 
     // Re-attach event listeners after re-render
     modal
-      .querySelector(".hotkey-modal-close")
+      .querySelector(".dialog-close")
       ?.addEventListener("click", closeHotkeyModal);
 
     modal.querySelector(".hotkey-fn-link")?.addEventListener("click", () => {
@@ -680,7 +701,7 @@ function showHotkeyModal(): void {
           closeHotkeyModal();
           renderContent();
         } else {
-          const desc = modal.querySelector(".hotkey-modal-desc");
+          const desc = modal.querySelector(".hotkey-dialog-desc");
           if (desc) {
             desc.textContent = "Failed to set hotkey. Try another key.";
             desc.classList.add("error");
@@ -713,7 +734,7 @@ function showHotkeyModal(): void {
   };
 
   const clickHandler = (e: MouseEvent) => {
-    if ((e.target as HTMLElement).classList.contains("hotkey-modal-overlay")) {
+    if ((e.target as HTMLElement).classList.contains("dialog-overlay")) {
       closeHotkeyModal();
     }
   };
@@ -746,7 +767,7 @@ async function showMicTestModal(): Promise<void> {
   let localDevices = [...audioDevices];
 
   const modal = document.createElement("div");
-  modal.className = "hotkey-modal-overlay";
+  modal.className = "dialog-overlay";
 
   const getMicOptions = () =>
     localDevices
@@ -763,54 +784,54 @@ async function showMicTestModal(): Promise<void> {
       deviceMatchResult && !deviceMatchResult.deviceMatched;
 
     modal.innerHTML = `
-      <div class="hotkey-modal mic-test-modal">
-        <button class="hotkey-modal-close">${createIcon(X)}</button>
-        <div class="hotkey-modal-icon">${createIcon(Mic)}</div>
-        <div class="hotkey-modal-title">Test Microphone</div>
-        <div class="hotkey-modal-desc">Make sure your microphone is working</div>
-
-        <div class="mic-test-container">
-          <div class="mic-select-row">
-            <label for="modal-mic-select">Device:</label>
-            <div class="mic-select-wrapper">
-              <select id="modal-mic-select" class="settings-select">
-                ${getMicOptions()}
-              </select>
-              <button class="btn btn-icon mic-refresh-btn" title="Refresh devices">${createIcon(RefreshCw)}</button>
+      <div class="dialog mic-test-dialog">
+        <button class="dialog-close">${createIcon(X)}</button>
+        <div class="dialog-header">
+          <div class="dialog-title">Test Microphone</div>
+        </div>
+        <div class="dialog-body">
+          <div class="mic-test-container">
+            <div class="mic-select-row">
+              <label for="modal-mic-select">Device:</label>
+              <div class="mic-select-wrapper">
+                <select id="modal-mic-select" class="settings-select">
+                  ${getMicOptions()}
+                </select>
+                <button class="btn btn-icon mic-refresh-btn" title="Refresh devices">${createIcon(RefreshCw)}</button>
+              </div>
             </div>
-          </div>
 
-          ${
-            showMismatchWarning
-              ? `<div class="mic-mismatch-warning">
-              Selected device not found. Using fallback device.
-            </div>`
-              : ""
-          }
-
-          <div class="audio-level-container">
-            <div class="audio-level-label">Audio Level</div>
-            <div class="audio-level-bar">
-              <div class="audio-level-fill ${levelPercent > 10 ? "active" : ""}" style="width: ${levelPercent}%"></div>
-            </div>
-          </div>
-
-          <div class="mic-test-prompt ${audioDetected ? "success" : ""}">
             ${
-              audioDetected
-                ? `${createIcon(CheckCircle)} Audio detected! Your microphone is working.`
-                : `${createIcon(Mic)} Say something to test...`
+              showMismatchWarning
+                ? `<div class="mic-mismatch-warning">
+                Selected device not found. Using fallback device.
+              </div>`
+                : ""
             }
+
+            <div class="audio-level-container">
+              <div class="audio-level-label">Audio Level</div>
+              <div class="audio-level-bar">
+                <div class="audio-level-fill ${levelPercent > 10 ? "active" : ""}" style="width: ${levelPercent}%"></div>
+              </div>
+            </div>
+
+            <div class="mic-test-prompt ${audioDetected ? "success" : ""}">
+              ${
+                audioDetected
+                  ? `${createIcon(CheckCircle)} Audio detected! Your microphone is working.`
+                  : `${createIcon(Mic)} Say something to test...`
+              }
+            </div>
           </div>
         </div>
-
-        <div class="mic-test-actions">
+        <div class="dialog-footer">
           <button class="btn btn-primary mic-test-done-btn">Done</button>
         </div>
       </div>
     `;
 
-    const closeBtn = modal.querySelector(".hotkey-modal-close");
+    const closeBtn = modal.querySelector(".dialog-close");
     closeBtn?.addEventListener("click", closeMicTestModal);
 
     const doneBtn = modal.querySelector(".mic-test-done-btn");
@@ -900,7 +921,7 @@ async function showMicTestModal(): Promise<void> {
   }, 150);
 
   const clickHandler = (e: MouseEvent) => {
-    if ((e.target as HTMLElement).classList.contains("hotkey-modal-overlay")) {
+    if ((e.target as HTMLElement).classList.contains("dialog-overlay")) {
       closeMicTestModal();
     }
   };
@@ -935,6 +956,130 @@ async function closeMicTestModal(): Promise<void> {
   if (micTestModalCleanup) {
     await micTestModalCleanup();
   }
+}
+
+function startModelDownloadPolling(variant: ModelVariant): void {
+  if (modelDownloadPollInterval) {
+    clearInterval(modelDownloadPollInterval);
+  }
+
+  modelDownloadProgress = { variant, percentage: 0 };
+
+  // Immediately update UI to show 0%
+  const modelList = document.querySelector(".model-list");
+  if (modelList && currentView === "settings") {
+    modelList.innerHTML = renderModelList();
+  }
+
+  modelDownloadPollInterval = window.setInterval(async () => {
+    const progress = await getDownloadProgress();
+
+    if (progress.status === "complete" || progress.status === "failed") {
+      if (modelDownloadPollInterval) {
+        clearInterval(modelDownloadPollInterval);
+        modelDownloadPollInterval = null;
+      }
+      modelDownloadProgress = null;
+      // Refresh models and re-render
+      await loadSettings(true);
+      if (currentView === "settings") {
+        renderContent();
+      }
+    } else if (
+      progress.status === "downloading" ||
+      progress.status === "verifying"
+    ) {
+      // Update progress and re-render model list only
+      modelDownloadProgress = { variant, percentage: progress.percentage };
+      const modelList = document.querySelector(".model-list");
+      if (modelList && currentView === "settings") {
+        modelList.innerHTML = renderModelList();
+      }
+    }
+  }, 500);
+}
+
+function showRestartDialog(previousVariant?: ModelVariant): void {
+  const modal = document.createElement("div");
+  modal.className = "dialog-overlay";
+  modal.innerHTML = `
+    <div class="dialog">
+      <div class="dialog-header">
+        <div class="dialog-title">Restart Required</div>
+      </div>
+      <div class="dialog-body">Fing needs to restart to load the new model.</div>
+      <div class="dialog-footer">
+        <button class="btn btn-secondary" id="restart-later-btn">Later</button>
+        <button class="btn btn-primary" id="restart-now-btn">Restart Now</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  document
+    .getElementById("restart-later-btn")
+    ?.addEventListener("click", async () => {
+      modal.remove();
+      if (previousVariant) {
+        await setActiveModel(previousVariant);
+      }
+      loadSettings(true).then(() => renderContent());
+    });
+
+  document.getElementById("restart-now-btn")?.addEventListener("click", () => {
+    relaunchApp();
+  });
+}
+
+interface ConfirmDialogOptions {
+  title: string;
+  body: string;
+  confirmText?: string;
+  cancelText?: string;
+  danger?: boolean;
+}
+
+function showConfirmDialog(options: ConfirmDialogOptions): Promise<boolean> {
+  const {
+    title,
+    body,
+    confirmText = "Confirm",
+    cancelText = "Cancel",
+    danger = false,
+  } = options;
+  return new Promise((resolve) => {
+    const modal = document.createElement("div");
+    modal.className = "dialog-overlay";
+    modal.innerHTML = `
+      <div class="dialog">
+        <div class="dialog-header">
+          <div class="dialog-title">${title}</div>
+        </div>
+        <div class="dialog-body">${body}</div>
+        <div class="dialog-footer">
+          <button class="btn btn-secondary" id="dialog-cancel-btn">${cancelText}</button>
+          <button class="btn ${danger ? "btn-danger" : "btn-primary"}" id="dialog-confirm-btn">${confirmText}</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    document
+      .getElementById("dialog-cancel-btn")
+      ?.addEventListener("click", () => {
+        modal.remove();
+        resolve(false);
+      });
+
+    document
+      .getElementById("dialog-confirm-btn")
+      ?.addEventListener("click", () => {
+        modal.remove();
+        resolve(true);
+      });
+  });
 }
 
 async function handleSettingChange(
@@ -1039,6 +1184,82 @@ function handleSettingsClick(e: MouseEvent): void {
       sessionStorage.setItem("onboarding-reset", "true");
       window.location.reload();
     });
+    return;
+  }
+
+  // Handle model download button
+  const downloadModelBtn = target.closest(
+    ".download-model-btn"
+  ) as HTMLButtonElement | null;
+  if (downloadModelBtn) {
+    const variant = downloadModelBtn.dataset.variant as ModelVariant;
+
+    downloadModel(variant).catch((err) => {
+      console.error("Download error:", err);
+    });
+
+    // Start polling for progress
+    startModelDownloadPolling(variant);
+    return;
+  }
+
+  // Handle model activate button
+  const activateModelBtn = target.closest(
+    ".activate-model-btn"
+  ) as HTMLButtonElement | null;
+  if (activateModelBtn) {
+    const variant = activateModelBtn.dataset.variant as ModelVariant;
+    const previousVariant = settings?.activeModelVariant;
+    activateModelBtn.disabled = true;
+    activateModelBtn.textContent = "Activating...";
+
+    setActiveModel(variant)
+      .then((needsRestart) => {
+        if (needsRestart) {
+          showRestartDialog(previousVariant);
+        } else {
+          loadSettings(true).then(() => renderContent());
+        }
+      })
+      .catch((err) => {
+        console.error("Activate error:", err);
+        activateModelBtn.disabled = false;
+        activateModelBtn.textContent = "Activate";
+      });
+    return;
+  }
+
+  // Handle model delete button
+  const deleteModelBtn = target.closest(
+    ".delete-model-btn"
+  ) as HTMLButtonElement | null;
+  if (deleteModelBtn) {
+    const variant = deleteModelBtn.dataset.variant as ModelVariant;
+    const model = models.find((m) => m.variant === variant);
+    const modelName = model?.displayName ?? variant;
+
+    showConfirmDialog({
+      title: "Delete Model",
+      body: `Delete ${modelName} model? You can download it again later.`,
+      confirmText: "Delete",
+      danger: true,
+    }).then((confirmed) => {
+      if (!confirmed) {
+        return;
+      }
+
+      deleteModelBtn.disabled = true;
+      deleteModelBtn.textContent = "Deleting...";
+
+      deleteModel(variant)
+        .then(() => loadSettings(true))
+        .then(() => renderContent())
+        .catch((err) => {
+          console.error("Delete error:", err);
+          deleteModelBtn.disabled = false;
+          deleteModelBtn.textContent = "Delete";
+        });
+    });
   }
 }
 
@@ -1078,6 +1299,57 @@ const SUPPORTED_LANGUAGES = [
   { code: "fr", name: "French" },
 ];
 
+function formatModelSize(bytes: number): string {
+  return `${Math.round(bytes / 1_000_000)} MB`;
+}
+
+function renderModelList(): string {
+  if (models.length === 0) {
+    return '<div class="model-empty">Loading models...</div>';
+  }
+
+  const header = `
+    <div class="model-header">
+      <span class="model-col-name">Variant</span>
+      <span class="model-col-desc">Speed</span>
+      <span class="model-col-size">Disk / Memory</span>
+      <span class="model-col-actions"></span>
+    </div>
+  `;
+
+  const rows = models
+    .map((model) => {
+      const isDownloading = modelDownloadProgress?.variant === model.variant;
+      let actions = "";
+
+      if (model.isActive) {
+        actions = `<span class="model-status-badge active">In Use</span>`;
+      } else if (isDownloading) {
+        const pct = Math.round(modelDownloadProgress?.percentage ?? 0);
+        actions = `<span class="model-download-progress">${pct}%</span>`;
+      } else if (model.isDownloaded) {
+        actions = `
+          <button class="btn btn-secondary btn-sm activate-model-btn" data-variant="${model.variant}">Activate</button>
+          <button class="btn btn-secondary btn-sm delete-model-btn" data-variant="${model.variant}">Delete</button>
+        `;
+      } else {
+        actions = `<button class="btn btn-secondary btn-sm download-model-btn" data-variant="${model.variant}">Download</button>`;
+      }
+
+      return `
+        <div class="model-row">
+          <span class="model-col-name">${model.displayName}</span>
+          <span class="model-col-desc">${model.description}</span>
+          <span class="model-col-size">~${formatModelSize(model.sizeBytes)} / ~${model.memoryEstimateMb} MB</span>
+          <span class="model-col-actions">${actions}</span>
+        </div>
+      `;
+    })
+    .join("");
+
+  return header + rows;
+}
+
 function renderSettingsUI(el: HTMLElement): void {
   const micOptions = audioDevices
     .map(
@@ -1116,6 +1388,12 @@ function renderSettingsUI(el: HTMLElement): void {
           <div class="settings-row-desc">Select one for best accuracy, or multiple for auto-detection</div>
         </div>
         <div class="lang-checkboxes">${langCheckboxes}</div>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Models</div>
+      <div class="model-list">
+        ${renderModelList()}
       </div>
     </div>
     <div class="settings-section">
@@ -1165,7 +1443,7 @@ function renderSettingsUI(el: HTMLElement): void {
       </div>
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">Privacy</div>
+      <div class="settings-section-title">Transcriptions</div>
       <div class="settings-row">
         <div>
           <div class="settings-row-label">Save transcript history</div>
@@ -1392,13 +1670,21 @@ function showMainUI(): void {
 // Windows WebView2 hotkey workaround
 // WebView2 doesn't propagate keyboard events to low-level hooks when focused
 // so we handle hotkeys via JavaScript when the window is focused
-let hotkeyConfig: { key: string; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean } | null = null;
+let hotkeyConfig: {
+  key: string;
+  ctrl: boolean;
+  alt: boolean;
+  shift: boolean;
+  meta: boolean;
+} | null = null;
 let hotkeyPressed = false;
 
 async function setupHotkeyListener(): Promise<void> {
   // Only needed on Windows, but safe to run everywhere
   try {
-    const { getSettings, hotkeyPress, hotkeyRelease } = await import("./lib/ipc");
+    const { getSettings, hotkeyPress, hotkeyRelease } = await import(
+      "./lib/ipc"
+    );
     // Get hotkey from settings (more reliable than backend config which may not be initialized)
     const currentSettings = await getSettings();
     const hotkeyStr = currentSettings.hotkey || "F8";
@@ -1406,7 +1692,9 @@ async function setupHotkeyListener(): Promise<void> {
     console.log("[hotkey] Frontend listener configured for:", hotkeyStr);
 
     document.addEventListener("keydown", (e) => {
-      if (!hotkeyConfig || hotkeyPressed) return;
+      if (!hotkeyConfig || hotkeyPressed) {
+        return;
+      }
       if (matchesHotkey(e, hotkeyConfig)) {
         e.preventDefault();
         e.stopPropagation();
@@ -1416,7 +1704,9 @@ async function setupHotkeyListener(): Promise<void> {
     });
 
     document.addEventListener("keyup", (e) => {
-      if (!hotkeyConfig || !hotkeyPressed) return;
+      if (!(hotkeyConfig && hotkeyPressed)) {
+        return;
+      }
       if (matchesHotkeyRelease(e, hotkeyConfig)) {
         e.preventDefault();
         e.stopPropagation();
@@ -1437,7 +1727,13 @@ async function setupHotkeyListener(): Promise<void> {
   }
 }
 
-function parseHotkeyString(hotkey: string): { key: string; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean } {
+function parseHotkeyString(hotkey: string): {
+  key: string;
+  ctrl: boolean;
+  alt: boolean;
+  shift: boolean;
+  meta: boolean;
+} {
   const parts = hotkey.split("+");
   let key = "";
   let ctrl = false;
@@ -1463,12 +1759,29 @@ function parseHotkeyString(hotkey: string): { key: string; ctrl: boolean; alt: b
   return { key, ctrl, alt, shift, meta };
 }
 
-function matchesHotkey(e: KeyboardEvent, config: { key: string; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean }): boolean {
+function matchesHotkey(
+  e: KeyboardEvent,
+  config: {
+    key: string;
+    ctrl: boolean;
+    alt: boolean;
+    shift: boolean;
+    meta: boolean;
+  }
+): boolean {
   // Check modifiers
-  if (e.ctrlKey !== config.ctrl) return false;
-  if (e.altKey !== config.alt) return false;
-  if (e.shiftKey !== config.shift) return false;
-  if (e.metaKey !== config.meta) return false;
+  if (e.ctrlKey !== config.ctrl) {
+    return false;
+  }
+  if (e.altKey !== config.alt) {
+    return false;
+  }
+  if (e.shiftKey !== config.shift) {
+    return false;
+  }
+  if (e.metaKey !== config.meta) {
+    return false;
+  }
 
   // Check base key
   const key = config.key.toLowerCase();
@@ -1488,7 +1801,16 @@ function matchesHotkey(e: KeyboardEvent, config: { key: string; ctrl: boolean; a
   return eventKey === key;
 }
 
-function matchesHotkeyRelease(e: KeyboardEvent, config: { key: string; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean }): boolean {
+function matchesHotkeyRelease(
+  e: KeyboardEvent,
+  config: {
+    key: string;
+    ctrl: boolean;
+    alt: boolean;
+    shift: boolean;
+    meta: boolean;
+  }
+): boolean {
   // For release, we check if the base key was released
   const key = config.key.toLowerCase();
   const eventKey = e.key.toLowerCase();

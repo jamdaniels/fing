@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::audio::AudioCapture;
 use crate::db::{save_transcript, NewTranscript};
-use crate::model::default_model_path;
+use crate::model::model_path_for_variant;
 use crate::paste::paste_text;
 use crate::settings::{load_settings, load_settings_sync};
 use crate::sounds;
@@ -285,9 +285,12 @@ pub fn on_key_up(app: &AppHandle) {
             audio_buffer.len() as f32 / 16000.0
         );
 
+        // Load settings for model variant and language
+        let settings = load_settings().await;
+
         // Initialize transcriber if needed
         if get_transcriber().is_none() {
-            let model_path = default_model_path();
+            let model_path = model_path_for_variant(settings.active_model_variant);
             let model_path_str = model_path.to_string_lossy().to_string();
 
             // Check if model exists
@@ -307,16 +310,13 @@ pub fn on_key_up(app: &AppHandle) {
                 crate::notifications::show_error(
                     &app_handle,
                     "Model Error",
-                    &format!("Failed to load model: {}", e),
+                    &format!("Failed to load model: {e}"),
                 );
                 finish_transcription(&app_handle, None, duration_ms, test_mode).await;
                 return;
             }
             tracing::info!("Transcriber initialized from {:?}", model_path);
         }
-
-        // Load settings for language and other options
-        let settings = load_settings().await;
 
         // Determine language from settings
         // 1 language = use it, 2+ = auto-detect (None)
@@ -334,7 +334,7 @@ pub fn on_key_up(app: &AppHandle) {
                 crate::notifications::show_error(
                     &app_handle,
                     "Transcription Error",
-                    &format!("{}", e),
+                    &format!("{e}"),
                 );
                 finish_transcription(&app_handle, None, duration_ms, test_mode).await;
                 return;
@@ -372,7 +372,7 @@ pub fn on_key_up(app: &AppHandle) {
 
             // Paste text directly (no clipboard), with trailing space for continuation
             if settings.paste_enabled {
-                let paste_result = paste_text(&format!("{} ", text));
+                let paste_result = paste_text(&format!("{text} "));
                 if paste_result.should_notify() {
                     tracing::warn!("Direct text input failed after transcription");
                 }

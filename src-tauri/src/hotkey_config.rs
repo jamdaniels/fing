@@ -33,7 +33,7 @@ fn set_base_key(
     full: &str,
 ) -> Result<(), String> {
     if current.is_some() {
-        return Err(format!("Multiple base keys in hotkey: {}", full));
+        return Err(format!("Multiple base keys in hotkey: {full}"));
     }
     *current = Some(new_key);
     Ok(())
@@ -63,7 +63,7 @@ pub fn parse_hotkey_string(raw: &str) -> Result<HotkeyConfig, String> {
     }
 
     if value.len() > MAX_HOTKEY_LENGTH {
-        return Err(format!("Hotkey too long (max {} chars)", MAX_HOTKEY_LENGTH));
+        return Err(format!("Hotkey too long (max {MAX_HOTKEY_LENGTH} chars)"));
     }
 
     if !value
@@ -76,8 +76,7 @@ pub fn parse_hotkey_string(raw: &str) -> Result<HotkeyConfig, String> {
     let parts: Vec<&str> = value.split('+').collect();
     if parts.len() > MAX_HOTKEY_PARTS {
         return Err(format!(
-            "Too many keys in combination (max {})",
-            MAX_HOTKEY_PARTS
+            "Too many keys in combination (max {MAX_HOTKEY_PARTS})"
         ));
     }
 
@@ -94,7 +93,7 @@ pub fn parse_hotkey_string(raw: &str) -> Result<HotkeyConfig, String> {
             return Err("Hotkey contains empty key component".to_string());
         }
         if trimmed.len() > MAX_HOTKEY_PART_LENGTH {
-            return Err(format!("Invalid key name: {}", trimmed));
+            return Err(format!("Invalid key name: {trimmed}"));
         }
 
         let lower = trimmed.to_lowercase();
@@ -149,7 +148,7 @@ pub fn parse_hotkey_string(raw: &str) -> Result<HotkeyConfig, String> {
             }
         }
 
-        return Err(format!("Unknown key: {}", trimmed));
+        return Err(format!("Unknown key: {trimmed}"));
     }
 
     let require_fn = saw_fn;
@@ -181,7 +180,7 @@ pub fn set_hotkey_from_string(raw: &str) -> Result<(), String> {
 
     let mut guard = HOTKEY_CONFIG
         .write()
-        .map_err(|e| format!("Hotkey config lock poisoned: {}", e))?;
+        .map_err(|e| format!("Hotkey config lock poisoned: {e}"))?;
     *guard = Some(config);
 
     tracing::info!("Hotkey updated to: {}", raw);
@@ -222,7 +221,7 @@ pub fn get_hotkey_string() -> String {
 
     let key_str = match config.key {
         HotkeyKey::Function => "Fn".to_string(),
-        HotkeyKey::F(n) => format!("F{}", n),
+        HotkeyKey::F(n) => format!("F{n}"),
         HotkeyKey::Space => "Space".to_string(),
         HotkeyKey::Char(c) => c.to_string(),
     };
