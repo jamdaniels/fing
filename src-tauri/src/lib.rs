@@ -713,9 +713,21 @@ pub fn run() {
             let menu = build_tray_menu(app)?;
 
             // Create tray icon with explicit ID for later access
+            // macOS: white template icon that respects dark/light mode
+            // Windows: colored app icon
             TrayIconBuilder::with_id(TRAY_ID)
-                .icon(tauri::include_image!("icons/tray.png"))
-                .icon_as_template(true)
+                .icon({
+                    #[cfg(target_os = "macos")]
+                    {
+                        tauri::include_image!("icons/tray.png")
+                    }
+                    #[cfg(target_os = "windows")]
+                    {
+                        tauri::include_image!("icons/32x32.png")
+                    }
+                })
+                .icon_as_template(cfg!(target_os = "macos"))
+                .tooltip("Fing")
                 .menu(&menu)
                 .on_menu_event(|app, event| {
                     handle_menu_event(app, event.id.as_ref());
