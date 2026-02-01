@@ -99,6 +99,11 @@ body {
   background-color: var(--bg-primary);
 }
 
+/* Windows has native titlebar, hide custom drag region */
+body[data-platform="windows"] .titlebar {
+  display: none;
+}
+
 .app-body {
   display: flex;
   flex: 1;
@@ -1607,6 +1612,18 @@ body {
 }
 
 .test-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.test-input-readonly {
+  cursor: default;
+  user-select: none;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+}
+
+.test-input-placeholder {
   color: var(--text-tertiary);
 }
 

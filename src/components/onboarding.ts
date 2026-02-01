@@ -18,11 +18,14 @@ import {
   getAudioDevices,
   getDownloadProgress,
   getSettings,
+  hotkeyPress,
+  hotkeyRelease,
   relaunchApp,
   requestAccessibilityPermission,
   requestMicrophonePermission,
   requestPermissions,
   startModelDownload,
+  updateHotkey,
   updateSettings,
 } from "../lib/ipc";
 import type {
@@ -75,6 +78,10 @@ let container: HTMLElement | null = null;
 let downloadPollInterval: number | null = null;
 let hotkeyKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 let testResultUnlisten: UnlistenFn | null = null;
+// Frontend hotkey handling for test step (WebView2 workaround)
+let testHotkeyPressed = false;
+let testHotkeyKeydown: ((e: KeyboardEvent) => void) | null = null;
+let testHotkeyKeyup: ((e: KeyboardEvent) => void) | null = null;
 
 const TOTAL_STEPS = 8;
 
@@ -652,6 +659,9 @@ async function handleHotkeyContinue(): Promise<void> {
       hotkey: finalHotkey,
     });
     state.selectedHotkey = finalHotkey;
+
+    // Update the backend's runtime hotkey config so it takes effect immediately
+    await updateHotkey(finalHotkey);
   } catch (err) {
     console.error("Failed to save hotkey:", err);
   }
@@ -727,13 +737,10 @@ function renderTestStep(): void {
         <p class="onboarding-desc">Hold <span class="hotkey-key-inline">${formatKeyForDisplay(hotkey)}</span> and speak</p>
       </div>
       <div class="onboarding-body">
-        <input
-          type="text"
+        <div
           id="test-input"
-          class="test-input"
-          placeholder="Your transcription will appear here..."
-          value="${escapeHtml(state.testText)}"
-        />
+          class="test-input test-input-readonly"
+        >${state.testText ? escapeHtml(state.testText) : '<span class="test-input-placeholder">Your transcription will appear here...</span>'}</div>
         <p class="onboarding-hint ${hasText ? "invisible" : ""}">Complete a test transcription to continue</p>
       </div>
       <div class="onboarding-footer">
@@ -744,23 +751,6 @@ function renderTestStep(): void {
       </div>
     </div>
   `;
-
-  // Auto-focus the input
-  const input = document.getElementById("test-input") as HTMLInputElement;
-  input?.focus();
-
-  // Watch for input changes (text gets pasted by the hotkey)
-  input?.addEventListener("input", (e) => {
-    state.testText = (e.target as HTMLInputElement).value;
-    const finishBtn = document.getElementById(
-      "finish-btn"
-    ) as HTMLButtonElement;
-    const hint = document.querySelector(".onboarding-hint");
-    if (state.testText.trim().length > 0) {
-      finishBtn?.removeAttribute("disabled");
-      hint?.classList.add("invisible");
-    }
-  });
 
   document
     .getElementById("finish-btn")
@@ -852,6 +842,37 @@ async function goToStep(step: OnboardingStep): Promise<void> {
         render();
       }
     );
+
+    // Set up frontend hotkey listener (WebView2 workaround for Windows)
+    const hotkey = state.selectedHotkey;
+    const hotkeyLower = hotkey.toLowerCase();
+    console.log("[onboarding] Setting up frontend hotkey listener for:", hotkey);
+
+    testHotkeyKeydown = (e: KeyboardEvent) => {
+      if (testHotkeyPressed) return;
+      const keyLower = e.key.toLowerCase();
+      // Simple match for function keys and single keys
+      if (keyLower === hotkeyLower || (hotkeyLower.startsWith("f") && keyLower === hotkeyLower)) {
+        e.preventDefault();
+        e.stopPropagation();
+        testHotkeyPressed = true;
+        hotkeyPress().catch(console.error);
+      }
+    };
+
+    testHotkeyKeyup = (e: KeyboardEvent) => {
+      if (!testHotkeyPressed) return;
+      const keyLower = e.key.toLowerCase();
+      if (keyLower === hotkeyLower || (hotkeyLower.startsWith("f") && keyLower === hotkeyLower)) {
+        e.preventDefault();
+        e.stopPropagation();
+        testHotkeyPressed = false;
+        hotkeyRelease().catch(console.error);
+      }
+    };
+
+    document.addEventListener("keydown", testHotkeyKeydown);
+    document.addEventListener("keyup", testHotkeyKeyup);
   }
 
   render();
@@ -945,6 +966,16 @@ async function stopPolling(): Promise<void> {
     testResultUnlisten();
     testResultUnlisten = null;
   }
+  // Clean up frontend hotkey listeners
+  if (testHotkeyKeydown) {
+    document.removeEventListener("keydown", testHotkeyKeydown);
+    testHotkeyKeydown = null;
+  }
+  if (testHotkeyKeyup) {
+    document.removeEventListener("keyup", testHotkeyKeyup);
+    testHotkeyKeyup = null;
+  }
+  testHotkeyPressed = false;
   // Disable test mode when leaving test step
   try {
     await disableOnboardingTestMode();

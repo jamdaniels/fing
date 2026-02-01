@@ -26,8 +26,10 @@ use std::sync::Mutex;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    ActivationPolicy, Emitter, Manager,
+    Emitter, Manager,
 };
+#[cfg(target_os = "macos")]
+use tauri::ActivationPolicy;
 
 /// Consolidated mic test state to prevent race conditions
 /// All state changes go through a single lock acquisition
@@ -366,6 +368,24 @@ fn update_hotkey(hotkey: String) -> Result<(), String> {
     hotkey_config::set_hotkey_from_string(&hotkey)
 }
 
+// Frontend hotkey handling for Windows WebView2 workaround
+// WebView2 doesn't properly propagate keyboard events to WH_KEYBOARD_LL hooks
+// so we need to handle hotkeys from JavaScript when the window is focused
+#[tauri::command]
+fn hotkey_press(app: tauri::AppHandle) {
+    hotkey::on_key_down(&app);
+}
+
+#[tauri::command]
+fn hotkey_release(app: tauri::AppHandle) {
+    hotkey::on_key_up(&app);
+}
+
+#[tauri::command]
+fn get_current_hotkey() -> String {
+    hotkey_config::get_hotkey_string()
+}
+
 #[tauri::command]
 async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
     // Verify model exists at default path
@@ -476,6 +496,7 @@ fn rebuild_tray_menu(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
+#[allow(clippy::type_complexity)]
 fn build_mic_menu_items(app: &impl tauri::Manager<tauri::Wry>) -> Result<Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>>, Box<dyn std::error::Error>> {
     let devices = AudioCapture::list_devices();
     let current_settings = settings::load_settings_sync();
@@ -525,13 +546,12 @@ fn encode_menu_id(value: &str) -> String {
 }
 
 fn decode_menu_id(value: &str) -> Option<String> {
-    if value.len() % 2 != 0 {
+    if !value.len().is_multiple_of(2) {
         return None;
     }
 
     let mut bytes = Vec::with_capacity(value.len() / 2);
-    let mut iter = value.as_bytes().chunks(2);
-    while let Some(pair) = iter.next() {
+    for pair in value.as_bytes().chunks(2) {
         let hex = std::str::from_utf8(pair).ok()?;
         let byte = u8::from_str_radix(hex, 16).ok()?;
         bytes.push(byte);
@@ -634,7 +654,8 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt::init();
+    // Use try_init to avoid panic if stderr isn't available (Windows without console)
+    let _ = tracing_subscriber::fmt::try_init();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -693,9 +714,21 @@ pub fn run() {
             let menu = build_tray_menu(app)?;
 
             // Create tray icon with explicit ID for later access
+            // macOS: white template icon that respects dark/light mode
+            // Windows: colored app icon
             TrayIconBuilder::with_id(TRAY_ID)
-                .icon(tauri::include_image!("icons/tray.png"))
-                .icon_as_template(true)
+                .icon({
+                    #[cfg(target_os = "macos")]
+                    {
+                        tauri::include_image!("icons/tray.png")
+                    }
+                    #[cfg(target_os = "windows")]
+                    {
+                        tauri::include_image!("icons/32x32.png")
+                    }
+                })
+                .icon_as_template(cfg!(target_os = "macos"))
+                .tooltip("Fing")
                 .menu(&menu)
                 .on_menu_event(|app, event| {
                     handle_menu_event(app, event.id.as_ref());
@@ -778,6 +811,10 @@ pub fn run() {
             request_permissions,
             try_register_hotkey,
             update_hotkey,
+            // Frontend hotkey handling (WebView2 workaround)
+            hotkey_press,
+            hotkey_release,
+            get_current_hotkey,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

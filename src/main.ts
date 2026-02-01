@@ -613,6 +613,11 @@ async function setHotkey(hotkey: string): Promise<boolean> {
 
     // Re-register the hotkey in backend
     await invoke("update_hotkey", { hotkey });
+
+    // Update frontend hotkey listener (Windows WebView2 workaround)
+    hotkeyConfig = parseHotkeyString(hotkey);
+    console.log("[hotkey] Frontend listener updated to:", hotkey);
+
     return true;
   } catch (err) {
     console.error("Failed to update hotkey:", err);
@@ -1384,7 +1389,126 @@ function showMainUI(): void {
   renderContent();
 }
 
+// Windows WebView2 hotkey workaround
+// WebView2 doesn't propagate keyboard events to low-level hooks when focused
+// so we handle hotkeys via JavaScript when the window is focused
+let hotkeyConfig: { key: string; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean } | null = null;
+let hotkeyPressed = false;
+
+async function setupHotkeyListener(): Promise<void> {
+  // Only needed on Windows, but safe to run everywhere
+  try {
+    const { getSettings, hotkeyPress, hotkeyRelease } = await import("./lib/ipc");
+    // Get hotkey from settings (more reliable than backend config which may not be initialized)
+    const currentSettings = await getSettings();
+    const hotkeyStr = currentSettings.hotkey || "F8";
+    hotkeyConfig = parseHotkeyString(hotkeyStr);
+    console.log("[hotkey] Frontend listener configured for:", hotkeyStr);
+
+    document.addEventListener("keydown", (e) => {
+      if (!hotkeyConfig || hotkeyPressed) return;
+      if (matchesHotkey(e, hotkeyConfig)) {
+        e.preventDefault();
+        e.stopPropagation();
+        hotkeyPressed = true;
+        hotkeyPress().catch(console.error);
+      }
+    });
+
+    document.addEventListener("keyup", (e) => {
+      if (!hotkeyConfig || !hotkeyPressed) return;
+      if (matchesHotkeyRelease(e, hotkeyConfig)) {
+        e.preventDefault();
+        e.stopPropagation();
+        hotkeyPressed = false;
+        hotkeyRelease().catch(console.error);
+      }
+    });
+
+    // Also release on blur (window loses focus)
+    window.addEventListener("blur", () => {
+      if (hotkeyPressed) {
+        hotkeyPressed = false;
+        hotkeyRelease().catch(console.error);
+      }
+    });
+  } catch (err) {
+    console.error("Failed to setup hotkey listener:", err);
+  }
+}
+
+function parseHotkeyString(hotkey: string): { key: string; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean } {
+  const parts = hotkey.split("+");
+  let key = "";
+  let ctrl = false;
+  let alt = false;
+  let shift = false;
+  let meta = false;
+
+  for (const part of parts) {
+    const lower = part.toLowerCase();
+    if (lower === "ctrl" || lower === "control") {
+      ctrl = true;
+    } else if (lower === "alt" || lower === "option") {
+      alt = true;
+    } else if (lower === "shift") {
+      shift = true;
+    } else if (lower === "meta" || lower === "cmd" || lower === "command") {
+      meta = true;
+    } else {
+      key = part; // The base key (e.g., "F9", "A", "Space")
+    }
+  }
+
+  return { key, ctrl, alt, shift, meta };
+}
+
+function matchesHotkey(e: KeyboardEvent, config: { key: string; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean }): boolean {
+  // Check modifiers
+  if (e.ctrlKey !== config.ctrl) return false;
+  if (e.altKey !== config.alt) return false;
+  if (e.shiftKey !== config.shift) return false;
+  if (e.metaKey !== config.meta) return false;
+
+  // Check base key
+  const key = config.key.toLowerCase();
+  const eventKey = e.key.toLowerCase();
+
+  // Function keys
+  if (key.startsWith("f") && key.length <= 3) {
+    return eventKey === key;
+  }
+
+  // Space
+  if (key === "space") {
+    return e.code === "Space" || eventKey === " ";
+  }
+
+  // Single character
+  return eventKey === key;
+}
+
+function matchesHotkeyRelease(e: KeyboardEvent, config: { key: string; ctrl: boolean; alt: boolean; shift: boolean; meta: boolean }): boolean {
+  // For release, we check if the base key was released
+  const key = config.key.toLowerCase();
+  const eventKey = e.key.toLowerCase();
+
+  if (key.startsWith("f") && key.length <= 3) {
+    return eventKey === key;
+  }
+
+  if (key === "space") {
+    return e.code === "Space" || eventKey === " ";
+  }
+
+  return eventKey === key;
+}
+
 async function init(): Promise<void> {
+  // Platform detection for platform-specific UI (e.g., hide custom titlebar on Windows)
+  const isMac = navigator.userAgent.includes("Mac");
+  document.body.dataset.platform = isMac ? "darwin" : "windows";
+
   try {
     currentAppState = await getAppState();
     appInfo = await getAppInfo();
@@ -1395,17 +1519,24 @@ async function init(): Promise<void> {
 
   if (currentAppState === "needs-setup") {
     await showOnboarding();
+    // Don't set up frontend hotkey listener during onboarding
+    // The onboarding flow has its own temporary listener for the test step
   } else {
     showMainUI();
     loadSettings().catch(() => {
       // Ignore settings warmup failures
     });
+    // Setup frontend hotkey handling (Windows WebView2 workaround)
+    // Only after main UI is ready and settings are loaded
+    setupHotkeyListener().catch(console.error);
   }
 
   window.addEventListener("setup-complete", () => {
     cleanupOnboarding();
     currentAppState = "ready";
     showMainUI(); // Rebuild DOM to main UI structure before hiding
+    // Now set up the frontend hotkey listener with the user's chosen hotkey
+    setupHotkeyListener().catch(console.error);
     getCurrentWindow().hide();
   });
 

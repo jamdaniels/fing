@@ -22,6 +22,33 @@ pub fn request_accessibility_permission() -> bool {
     true
 }
 
+/// Check microphone permission - Windows doesn't require explicit permission
+/// but we still check if audio capture works
+pub fn check_microphone_permission() -> String {
+    use crate::audio::AudioCapture;
+
+    let mut capture = AudioCapture::new();
+    match capture.test_microphone() {
+        Ok(test) => {
+            if test.is_receiving_audio || test.peak_level > 0.0 {
+                "granted".to_string()
+            } else {
+                let devices = AudioCapture::list_devices();
+                if devices.is_empty() {
+                    "denied".to_string()
+                } else {
+                    // On Windows, if we have devices but no audio, it's likely just silence
+                    "granted".to_string()
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Microphone check failed: {}", e);
+            "denied".to_string()
+        }
+    }
+}
+
 /// Filter text to printable characters only (security: prevent control char injection)
 fn filter_printable(text: &str) -> String {
     text.chars()

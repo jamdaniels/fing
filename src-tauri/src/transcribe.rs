@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
+/// Whisper-based transcription engine using whisper-rs.
 pub struct Transcriber {
     ctx: Mutex<WhisperContext>,
 }
@@ -69,23 +70,24 @@ impl TranscriptionEngine for Transcriber {
 // Global transcriber instance (loaded once on startup)
 static TRANSCRIBER: once_cell::sync::OnceCell<Transcriber> = once_cell::sync::OnceCell::new();
 
+/// Initialize the global transcriber with the given model file.
+/// Safe to call multiple times - only the first call loads the model.
 pub fn init_transcriber(model_path: &str) -> Result<(), TranscribeError> {
-    // If already initialized, just return Ok
-    if TRANSCRIBER.get().is_some() {
-        tracing::info!("Transcriber already initialized, skipping");
-        return Ok(());
-    }
-
-    let transcriber = Transcriber::new(model_path)?;
-    TRANSCRIBER
-        .set(transcriber)
-        .map_err(|_| TranscribeError::ModelLoadFailed("Transcriber already initialized".to_string()))
+    // Use get_or_try_init for atomic initialization - prevents race condition
+    // where multiple threads try to load the model simultaneously
+    TRANSCRIBER.get_or_try_init(|| {
+        tracing::info!("Initializing transcriber from {}", model_path);
+        Transcriber::new(model_path)
+    })?;
+    Ok(())
 }
 
+/// Get the global transcriber instance (None if not initialized).
 pub fn get_transcriber() -> Option<&'static Transcriber> {
     TRANSCRIBER.get()
 }
 
+/// Transcribe audio using the global transcriber.
 pub fn transcribe_audio(audio: &[f32], language: Option<&str>) -> Result<String, TranscribeError> {
     match get_transcriber() {
         Some(t) => t.transcribe(audio, language),

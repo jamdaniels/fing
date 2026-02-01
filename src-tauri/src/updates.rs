@@ -7,6 +7,7 @@ const GITHUB_OWNER: &str = "OWNER";
 const GITHUB_REPO: &str = "fing";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Result of checking for updates via GitHub releases.
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateInfo {
     pub available: bool,

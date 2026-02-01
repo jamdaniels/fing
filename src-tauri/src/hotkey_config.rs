@@ -1,6 +1,7 @@
 use once_cell::sync::Lazy;
 use std::sync::RwLock;
 
+/// Parsed hotkey configuration with modifiers and base key.
 #[derive(Clone, Debug)]
 pub struct HotkeyConfig {
     pub key: HotkeyKey,
@@ -11,6 +12,7 @@ pub struct HotkeyConfig {
     pub require_fn: bool,
 }
 
+/// The base key in a hotkey combination.
 #[derive(Clone, Debug)]
 pub enum HotkeyKey {
     Function,
@@ -53,6 +55,7 @@ fn parse_function_key(token: &str) -> Option<u8> {
     }
 }
 
+/// Parse a hotkey string like "Ctrl+Shift+F8" into a config.
 pub fn parse_hotkey_string(raw: &str) -> Result<HotkeyConfig, String> {
     let value = raw.trim();
     if value.is_empty() {
@@ -172,6 +175,7 @@ pub fn parse_hotkey_string(raw: &str) -> Result<HotkeyConfig, String> {
     })
 }
 
+/// Parse and set the global hotkey configuration.
 pub fn set_hotkey_from_string(raw: &str) -> Result<(), String> {
     let config = parse_hotkey_string(raw)?;
 
@@ -189,4 +193,40 @@ pub fn get_hotkey_config() -> Option<HotkeyConfig> {
         .read()
         .ok()
         .and_then(|cfg| cfg.as_ref().cloned())
+}
+
+/// Get the current hotkey as a string for frontend use
+pub fn get_hotkey_string() -> String {
+    let config = match get_hotkey_config() {
+        Some(c) => c,
+        None => return "F8".to_string(), // Default
+    };
+
+    let mut parts = Vec::new();
+
+    if config.require_ctrl {
+        parts.push("Ctrl");
+    }
+    if config.require_alt {
+        parts.push("Alt");
+    }
+    if config.require_shift {
+        parts.push("Shift");
+    }
+    if config.require_meta {
+        parts.push("Meta");
+    }
+    if config.require_fn {
+        parts.push("Fn");
+    }
+
+    let key_str = match config.key {
+        HotkeyKey::Function => "Fn".to_string(),
+        HotkeyKey::F(n) => format!("F{}", n),
+        HotkeyKey::Space => "Space".to_string(),
+        HotkeyKey::Char(c) => c.to_string(),
+    };
+    parts.push(&key_str);
+
+    parts.join("+")
 }

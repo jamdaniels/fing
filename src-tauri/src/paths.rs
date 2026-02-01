@@ -17,21 +17,22 @@ pub fn init(app: &tauri::App) -> Result<(), String> {
         .map_err(|_| "App data dir already initialized".to_string())
 }
 
-/// Get the app data directory. Panics if not initialized.
-pub fn app_data_dir() -> &'static PathBuf {
-    APP_DATA_DIR
-        .get()
-        .expect("App data dir not initialized - call paths::init() first")
+/// Get the app data directory. Returns None if not initialized.
+pub fn app_data_dir() -> Option<&'static PathBuf> {
+    APP_DATA_DIR.get()
 }
 
-pub fn db_path() -> PathBuf {
-    app_data_dir().join("transcripts.db")
+/// Path to the SQLite database file. Returns None if paths not initialized.
+pub fn db_path() -> Option<PathBuf> {
+    app_data_dir().map(|p| p.join("transcripts.db"))
 }
 
-pub fn settings_path() -> PathBuf {
-    app_data_dir().join("settings.json")
+/// Path to the settings JSON file. Returns None if paths not initialized.
+pub fn settings_path() -> Option<PathBuf> {
+    app_data_dir().map(|p| p.join("settings.json"))
 }
 
-pub fn models_dir() -> PathBuf {
-    app_data_dir().join("models")
+/// Directory containing downloaded model files. Returns None if paths not initialized.
+pub fn models_dir() -> Option<PathBuf> {
+    app_data_dir().map(|p| p.join("models"))
 }

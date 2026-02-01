@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::db;
 
+/// A word and its usage count.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WordCount {
@@ -8,6 +9,7 @@ pub struct WordCount {
     pub count: i64,
 }
 
+/// Usage statistics for the dashboard.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Stats {
@@ -20,6 +22,7 @@ pub struct Stats {
     pub top_words: Vec<WordCount>,
 }
 
+/// Compute usage statistics from the database.
 pub fn compute_stats() -> Result<Stats, String> {
     let db_stats = db::get_db_stats()?;
 
