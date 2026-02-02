@@ -5,6 +5,8 @@ export type AppState =
   | "recording"
   | "processing";
 
+export type Theme = "system" | "light" | "dark";
+
 export type ModelVariant = "small_q5" | "small" | "large_turbo_q5";
 
 export interface ModelInfo {
@@ -48,6 +50,7 @@ export interface Settings {
   languages: string[];
   onboardingStep: number | null;
   activeModelVariant: ModelVariant;
+  theme: Theme;
 }
 
 export interface UpdateInfo {

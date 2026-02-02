@@ -11,10 +11,13 @@ import {
   type IconNode,
   Info,
   Mic,
+  Monitor,
+  Moon,
   Power,
   RefreshCw,
   Search,
   Settings,
+  Sun,
   Trash2,
   X,
 } from "lucide";
@@ -58,12 +61,23 @@ import type {
   Settings as SettingsType,
   SidebarItem,
   Stats,
+  Theme,
   Transcript,
 } from "./lib/types";
 
 declare global {
   interface Window {
     __navigateTo?: (tab: SidebarItem) => void;
+  }
+}
+
+function applyTheme(theme: Theme): void {
+  if (theme === "system") {
+    document.documentElement.removeAttribute("data-theme");
+    localStorage.removeItem("fing-theme");
+  } else {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("fing-theme", theme);
   }
 }
 
@@ -670,7 +684,7 @@ function showHotkeyModal(): void {
         </div>
         <div class="dialog-footer hotkey-dialog-footer">
           <span class="hotkey-dialog-hint">Press Escape to cancel</span>
-          <button class="btn btn-primary hotkey-confirm-btn" ${capturedHotkey ? "" : "disabled"}>Set hotkey</button>
+          <button class="btn btn-accent hotkey-confirm-btn" ${capturedHotkey ? "" : "disabled"}>Set hotkey</button>
         </div>
       </div>
     `;
@@ -819,14 +833,14 @@ async function showMicTestModal(): Promise<void> {
             <div class="mic-test-prompt ${audioDetected ? "success" : ""}">
               ${
                 audioDetected
-                  ? `${createIcon(CheckCircle)} Audio detected! Your microphone is working.`
+                  ? `${createIcon(CheckCircle)} Audio detected`
                   : `${createIcon(Mic)} Say something to test...`
               }
             </div>
           </div>
         </div>
-        <div class="dialog-footer">
-          <button class="btn btn-primary mic-test-done-btn">Done</button>
+        <div class="dialog-footer mic-test-footer">
+          <button class="btn btn-accent mic-test-done-btn">Done</button>
         </div>
       </div>
     `;
@@ -892,7 +906,7 @@ async function showMicTestModal(): Promise<void> {
     const prompt = modal.querySelector(".mic-test-prompt") as HTMLElement;
     if (prompt && audioDetected && !prompt.classList.contains("success")) {
       prompt.classList.add("success");
-      prompt.innerHTML = `${createIcon(CheckCircle)} Audio detected! Your microphone is working.`;
+      prompt.innerHTML = `${createIcon(CheckCircle)} Audio detected`;
     }
   };
 
@@ -1009,8 +1023,8 @@ function showRestartDialog(previousVariant?: ModelVariant): void {
       </div>
       <div class="dialog-body">Fing needs to restart to load the new model.</div>
       <div class="dialog-footer">
-        <button class="btn btn-secondary" id="restart-later-btn">Later</button>
-        <button class="btn btn-primary" id="restart-now-btn">Restart Now</button>
+        <button class="btn btn-outline" id="restart-later-btn">Later</button>
+        <button class="btn btn-accent" id="restart-now-btn">Restart Now</button>
       </div>
     </div>
   `;
@@ -1058,8 +1072,8 @@ function showConfirmDialog(options: ConfirmDialogOptions): Promise<boolean> {
         </div>
         <div class="dialog-body">${body}</div>
         <div class="dialog-footer">
-          <button class="btn btn-secondary" id="dialog-cancel-btn">${cancelText}</button>
-          <button class="btn ${danger ? "btn-danger" : "btn-primary"}" id="dialog-confirm-btn">${confirmText}</button>
+          <button class="btn btn-outline" id="dialog-cancel-btn">${cancelText}</button>
+          <button class="btn ${danger ? "btn-danger" : "btn-accent"}" id="dialog-confirm-btn">${confirmText}</button>
         </div>
       </div>
     `;
@@ -1120,8 +1134,28 @@ async function handleAutoStartToggle(
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI event handler with necessary branches
 function handleSettingsClick(e: MouseEvent): void {
   const target = e.target as HTMLElement;
+
+  // Handle theme selection
+  const themeOption = target.closest(
+    ".appearance-option"
+  ) as HTMLElement | null;
+  if (themeOption) {
+    const theme = themeOption.dataset.theme as Theme;
+    if (theme && settings) {
+      for (const opt of document.querySelectorAll(".appearance-option")) {
+        opt.classList.toggle(
+          "selected",
+          (opt as HTMLElement).dataset.theme === theme
+        );
+      }
+      applyTheme(theme);
+      handleSettingChange("theme", theme);
+    }
+    return;
+  }
 
   // Handle toggle clicks
   const toggle = target.closest(".toggle") as HTMLElement | null;
@@ -1239,8 +1273,8 @@ function handleSettingsClick(e: MouseEvent): void {
     const modelName = model?.displayName ?? variant;
 
     showConfirmDialog({
-      title: "Delete Model",
-      body: `Delete ${modelName} model? You can download it again later.`,
+      title: `Delete ${modelName}`,
+      body: "You can download it again later.",
       confirmText: "Delete",
       danger: true,
     }).then((confirmed) => {
@@ -1310,9 +1344,9 @@ function renderModelList(): string {
 
   const header = `
     <div class="model-header">
-      <span class="model-col-name">Variant</span>
-      <span class="model-col-desc">Speed</span>
-      <span class="model-col-size">Disk / Memory</span>
+      <span class="model-col-name">Model</span>
+      <span class="model-col-desc">Accuracy</span>
+      <span class="model-col-size">Disk / RAM</span>
       <span class="model-col-actions"></span>
     </div>
   `;
@@ -1368,26 +1402,47 @@ function renderSettingsUI(el: HTMLElement): void {
     `
   ).join("");
 
+  const currentTheme = settings?.theme ?? "system";
+
   el.innerHTML = `
     <h1>Settings</h1>
     <div class="settings-section">
-      <div class="settings-section-title">Recording</div>
-      <div class="settings-row">
-        <div>
-          <div class="settings-row-label">Hotkey</div>
-          <div class="settings-row-desc">Press and hold to record</div>
+      <div class="settings-section-title">General</div>
+      <div class="settings-card">
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Appearance</div>
+            <div class="settings-row-desc">Choose your preferred theme</div>
+          </div>
+          <div class="appearance-selector">
+            <button class="appearance-option ${currentTheme === "system" ? "selected" : ""}" data-theme="system">
+              ${createIcon(Monitor)}
+              <span>System</span>
+            </button>
+            <button class="appearance-option ${currentTheme === "light" ? "selected" : ""}" data-theme="light">
+              ${createIcon(Sun)}
+              <span>Light</span>
+            </button>
+            <button class="appearance-option ${currentTheme === "dark" ? "selected" : ""}" data-theme="dark">
+              ${createIcon(Moon)}
+              <span>Dark</span>
+            </button>
+          </div>
         </div>
-        <button class="btn btn-outline hotkey-btn">${formatKeyForDisplay(settings?.hotkey ?? "F8")}</button>
-      </div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-section-title">Language</div>
-      <div class="settings-row lang-row">
-        <div>
-          <div class="settings-row-label">Languages</div>
-          <div class="settings-row-desc">Select one for best accuracy, or multiple for auto-detection</div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Hotkey</div>
+            <div class="settings-row-desc">Press and hold to record</div>
+          </div>
+          <button class="btn btn-secondary hotkey-btn">${formatKeyForDisplay(settings?.hotkey ?? "F8")}</button>
         </div>
-        <div class="lang-checkboxes">${langCheckboxes}</div>
+        <div class="settings-row lang-row">
+          <div>
+            <div class="settings-row-label">Language</div>
+            <div class="settings-row-desc">Select one for best accuracy, or multiple for auto-detection</div>
+          </div>
+          <div class="lang-checkboxes">${langCheckboxes}</div>
+        </div>
       </div>
     </div>
     <div class="settings-section">
@@ -1398,78 +1453,83 @@ function renderSettingsUI(el: HTMLElement): void {
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Audio</div>
-      <div class="settings-row">
-        <div>
-          <div class="settings-row-label">Microphone</div>
-          <div class="settings-row-desc">Select audio input device</div>
+      <div class="settings-card">
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Microphone</div>
+            <div class="settings-row-desc">Select audio input device</div>
+          </div>
+          <div class="mic-select-wrapper">
+            <select class="settings-select mic-select">
+              ${micOptions}
+            </select>
+            <button class="btn btn-icon mic-refresh-btn" title="Refresh devices">${createIcon(RefreshCw)}</button>
+          </div>
         </div>
-        <div class="mic-select-wrapper">
-          <select class="settings-select mic-select">
-            ${micOptions}
-          </select>
-          <button class="btn btn-icon mic-refresh-btn" title="Refresh devices">${createIcon(RefreshCw)}</button>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Sound feedback</div>
+            <div class="settings-row-desc">Play sounds for recording start/stop</div>
+          </div>
+          <div class="toggle ${settings?.soundEnabled ? "active" : ""}" data-setting="soundEnabled"></div>
         </div>
-      </div>
-      <div class="settings-row">
-        <div>
-          <div class="settings-row-label">Sound feedback</div>
-          <div class="settings-row-desc">Play sounds for recording start/stop</div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Test microphone</div>
+            <div class="settings-row-desc">Check if your microphone is working</div>
+          </div>
+          <button class="btn btn-secondary mic-test-btn">Test</button>
         </div>
-        <div class="toggle ${settings?.soundEnabled ? "active" : ""}" data-setting="soundEnabled"></div>
-      </div>
-      <div class="settings-row">
-        <div>
-          <div class="settings-row-label">Test microphone</div>
-          <div class="settings-row-desc">Check if your microphone is working</div>
-        </div>
-        <button class="btn btn-outline mic-test-btn">Test</button>
       </div>
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Permissions</div>
-      <div class="settings-row">
-        <div>
-          <div class="settings-row-label">Microphone</div>
-          <div class="settings-row-desc">Required for voice recording</div>
+      <div class="settings-card">
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Microphone</div>
+            <div class="settings-row-desc">Required for voice recording</div>
+          </div>
+          <span class="permission-badge" data-permission="microphone">Checking...</span>
         </div>
-        <span class="permission-badge" data-permission="microphone">Checking...</span>
-      </div>
-      <div class="settings-row">
-        <div>
-          <div class="settings-row-label">Accessibility</div>
-          <div class="settings-row-desc">Required for global hotkey and paste</div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Accessibility</div>
+            <div class="settings-row-desc">Required for global hotkey and paste</div>
+          </div>
+          <span class="permission-badge" data-permission="accessibility">Checking...</span>
         </div>
-        <span class="permission-badge" data-permission="accessibility">Checking...</span>
       </div>
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">Transcriptions</div>
-      <div class="settings-row">
-        <div>
-          <div class="settings-row-label">Save transcript history</div>
-          <div class="settings-row-desc">Store transcripts locally for search</div>
+      <div class="settings-section-title">Data</div>
+      <div class="settings-card">
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Save transcript history</div>
+            <div class="settings-row-desc">Store transcripts locally for search</div>
+          </div>
+          <div class="toggle ${settings?.historyEnabled ? "active" : ""}" data-setting="historyEnabled"></div>
         </div>
-        <div class="toggle ${settings?.historyEnabled ? "active" : ""}" data-setting="historyEnabled"></div>
       </div>
     </div>
     <div class="settings-section">
       <div class="settings-section-title">System</div>
-      <div class="settings-row">
-        <div>
-          <div class="settings-row-label">Start on login</div>
-          <div class="settings-row-desc">Launch Fing when you log in</div>
+      <div class="settings-card">
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Start on login</div>
+            <div class="settings-row-desc">Launch Fing when you log in</div>
+          </div>
+          <div class="toggle ${settings?.autoStart ? "active" : ""}" data-setting="autoStart"></div>
         </div>
-        <div class="toggle ${settings?.autoStart ? "active" : ""}" data-setting="autoStart"></div>
-      </div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-section-title">Setup</div>
-      <div class="settings-row">
-        <div>
-          <div class="settings-row-label">Reset onboarding</div>
-          <div class="settings-row-desc">Go through the setup process again</div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Reset onboarding</div>
+            <div class="settings-row-desc">Go through the setup process again</div>
+          </div>
+          <button class="btn btn-secondary reset-onboarding-btn">Reset</button>
         </div>
-        <button class="btn btn-outline reset-onboarding-btn">Reset</button>
       </div>
     </div>
   `;
@@ -1579,7 +1639,7 @@ function renderAbout(el: HTMLElement): void {
       <p class="about-tagline">Fast, private, local speech-to-text</p>
       <div class="about-backend">Backend: ${info?.inferenceBackend ?? "Unknown"}</div>
       <br/><br/>
-      <a href="https://github.com/jamdaniels/fing" target="_blank" class="btn btn-outline">GitHub ${createIcon(ArrowUpRight)}</a>
+      <a href="https://github.com/jamdaniels/fing" target="_blank" class="btn btn-secondary">GitHub ${createIcon(ArrowUpRight)}</a>
     </div>
   `;
 }
@@ -1845,9 +1905,15 @@ async function init(): Promise<void> {
     // The onboarding flow has its own temporary listener for the test step
   } else {
     showMainUI();
-    loadSettings().catch(() => {
-      // Ignore settings warmup failures
-    });
+    loadSettings()
+      .then(() => {
+        if (settings?.theme) {
+          applyTheme(settings.theme);
+        }
+      })
+      .catch(() => {
+        // Ignore settings warmup failures
+      });
     // Setup frontend hotkey handling (Windows WebView2 workaround)
     // Only after main UI is ready and settings are loaded
     setupHotkeyListener().catch(console.error);

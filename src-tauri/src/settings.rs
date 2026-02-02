@@ -3,6 +3,16 @@ use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 use tokio::fs;
 
+/// User-selected theme preference.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
 /// Cached settings to reduce disk I/O
 static SETTINGS_CACHE: RwLock<Option<Settings>> = RwLock::new(None);
 
@@ -26,6 +36,7 @@ pub struct Settings {
     pub onboarding_step: Option<u8>,
     #[serde(default)]
     pub active_model_variant: ModelVariant,
+    pub theme: Theme,
 }
 
 fn default_languages() -> Vec<String> {
@@ -47,6 +58,7 @@ impl Default for Settings {
             languages: default_languages(),
             onboarding_step: None,
             active_model_variant: ModelVariant::default(),
+            theme: Theme::default(),
         }
     }
 }

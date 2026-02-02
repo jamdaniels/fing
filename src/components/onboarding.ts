@@ -245,9 +245,9 @@ function renderMicPermissionStatus(status: string | undefined): string {
     return `<div class="permission-status granted">Granted</div>`;
   }
   if (status === "prompt") {
-    return `<button class="btn btn-outline btn-sm" id="grant-microphone-btn">Allow</button>`;
+    return `<button class="btn btn-secondary btn-sm" id="grant-microphone-btn">Allow</button>`;
   }
-  return `<button class="btn btn-outline btn-sm" id="grant-microphone-btn">Grant</button>`;
+  return `<button class="btn btn-secondary btn-sm" id="grant-microphone-btn">Grant</button>`;
 }
 
 function renderAccessibilityPermissionStatus(
@@ -259,7 +259,7 @@ function renderAccessibilityPermissionStatus(
   if (status === "not-applicable") {
     return `<div class="permission-status">N/A</div>`;
   }
-  return `<button class="btn btn-outline btn-sm" id="grant-accessibility-btn">Grant</button>`;
+  return `<button class="btn btn-secondary btn-sm" id="grant-accessibility-btn">Grant</button>`;
 }
 
 function render(): void {
@@ -323,7 +323,7 @@ function renderWelcome(): void {
         </ul>
       </div>
       <div class="onboarding-footer">
-        <button class="btn btn-primary btn-lg" id="get-started-btn">
+        <button class="btn btn-accent btn-lg" id="get-started-btn">
           Get Started
         </button>
         ${renderStepIndicator(1)}
@@ -385,13 +385,13 @@ function renderDownloadModel(): void {
   // Determine footer button state
   let footerButton: string;
   if (isComplete) {
-    footerButton = `<button class="btn btn-primary btn-lg" id="continue-btn">Continue</button>`;
+    footerButton = `<button class="btn btn-accent btn-lg" id="continue-btn">Continue</button>`;
   } else if (isDownloading) {
-    footerButton = `<button class="btn btn-primary btn-lg" disabled>Downloading...</button>`;
+    footerButton = `<button class="btn btn-accent btn-lg" disabled>Downloading...</button>`;
   } else if (isFailed) {
-    footerButton = `<button class="btn btn-primary btn-lg" id="retry-btn">Retry Download</button>`;
+    footerButton = `<button class="btn btn-accent btn-lg" id="retry-btn">Retry Download</button>`;
   } else {
-    footerButton = `<button class="btn btn-primary btn-lg" id="download-btn">${downloadBtnText}</button>`;
+    footerButton = `<button class="btn btn-accent btn-lg" id="download-btn">${downloadBtnText}</button>`;
   }
 
   // Body content - either selection or progress
@@ -497,7 +497,7 @@ function renderLanguageSelection(): void {
         <p class="onboarding-hint">Select one for best accuracy, or multiple for auto-detection</p>
       </div>
       <div class="onboarding-footer">
-        <button class="btn btn-primary btn-lg" id="continue-btn">
+        <button class="btn btn-accent btn-lg" id="continue-btn">
           Continue
         </button>
         ${renderStepIndicator(3)}
@@ -607,8 +607,8 @@ function renderPermissions(): void {
       <div class="onboarding-footer">
         ${
           allGranted
-            ? `<button class="btn btn-primary btn-lg" id="continue-btn">Continue</button>`
-            : `<button class="btn btn-primary btn-lg" id="restart-btn">Restart to Apply</button>`
+            ? `<button class="btn btn-accent btn-lg" id="continue-btn">Continue</button>`
+            : `<button class="btn btn-accent btn-lg" id="restart-btn">Restart to Apply</button>`
         }
         ${renderStepIndicator(4)}
       </div>
@@ -690,7 +690,7 @@ function renderHotkeyStep(): void {
         </div>
       </div>
       <div class="onboarding-footer">
-        <button class="btn btn-primary btn-lg" id="continue-btn">
+        <button class="btn btn-accent btn-lg" id="continue-btn">
           Continue
         </button>
         ${renderStepIndicator(5)}
@@ -783,7 +783,7 @@ function renderMicSelection(): void {
         </select>
       </div>
       <div class="onboarding-footer">
-        <button class="btn btn-primary btn-lg" id="continue-btn">
+        <button class="btn btn-accent btn-lg" id="continue-btn">
           Continue
         </button>
         ${renderStepIndicator(6)}
@@ -825,7 +825,7 @@ function renderTestStep(): void {
         <p class="onboarding-hint ${hasText ? "invisible" : ""}">Complete a test transcription to continue</p>
       </div>
       <div class="onboarding-footer">
-        <button class="btn btn-primary btn-lg" id="finish-btn" ${hasText ? "" : "disabled"}>
+        <button class="btn btn-accent btn-lg" id="finish-btn" ${hasText ? "" : "disabled"}>
           Finish Setup
         </button>
         ${renderStepIndicator(7)}
@@ -875,7 +875,7 @@ function renderCompletion(): void {
         </div>
       </div>
       <div class="onboarding-footer">
-        <button class="btn btn-primary btn-lg" id="start-btn" type="button" ${
+        <button class="btn btn-accent btn-lg" id="start-btn" type="button" ${
           isCompleting ? "disabled" : ""
         }>
           ${isCompleting ? "Finishing setup..." : "Start Using Fing"}

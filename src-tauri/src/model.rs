@@ -35,7 +35,7 @@ pub const MODEL_REGISTRY: &[ModelDefinition] = &[
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
         size_bytes: 190_000_000, // ~190 MB
         display_name: "Small Q5",
-        description: "Fastest",
+        description: "Good",
         memory_estimate_mb: 300,
     },
     ModelDefinition {
@@ -44,7 +44,7 @@ pub const MODEL_REGISTRY: &[ModelDefinition] = &[
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
         size_bytes: 488_000_000, // ~488 MB
         display_name: "Small",
-        description: "More accurate",
+        description: "Better",
         memory_estimate_mb: 600,
     },
     ModelDefinition {
@@ -53,7 +53,7 @@ pub const MODEL_REGISTRY: &[ModelDefinition] = &[
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
         size_bytes: 574_000_000, // ~574 MB
         display_name: "Large Turbo Q5",
-        description: "Most accurate",
+        description: "Best",
         memory_estimate_mb: 750,
     },
 ];

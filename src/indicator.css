@@ -14,7 +14,8 @@ body {
 .indicator {
   width: 70px;
   height: 30px;
-  background: rgba(0, 0, 0, 0.85);
+  background: rgba(20, 20, 20, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 15px;
   display: flex;
   align-items: center;
