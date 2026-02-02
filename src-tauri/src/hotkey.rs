@@ -24,6 +24,21 @@ static RECORDING_SESSION_ID: AtomicU64 = AtomicU64::new(0);
 // Onboarding test mode - when enabled, hotkey works even during NeedsSetup state
 static ONBOARDING_TEST_MODE: AtomicBool = AtomicBool::new(false);
 
+/// Check if transcription contains only blank audio markers (no actual speech)
+fn is_blank_audio(text: &str) -> bool {
+    let normalized = text.to_lowercase();
+    matches!(
+        normalized.as_str(),
+        "[blank_audio]"
+            | "(blank audio)"
+            | "[silence]"
+            | "(silence)"
+            | "[no speech]"
+            | "(no speech)"
+            | "[inaudible]"
+    )
+}
+
 // Commands sent to the audio thread
 enum AudioCommand {
     StartRecording(Option<String>),
@@ -343,8 +358,10 @@ pub fn on_key_up(app: &AppHandle) {
 
         // Handle empty or whitespace-only transcription
         let text = text.trim().to_string();
-        if text.is_empty() {
-            tracing::warn!("Transcription returned empty text");
+
+        // Filter out whisper special tokens indicating no speech
+        if text.is_empty() || is_blank_audio(&text) {
+            tracing::info!("No speech detected, skipping paste/save");
             finish_transcription(&app_handle, None, duration_ms, test_mode).await;
             return;
         }
