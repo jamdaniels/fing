@@ -13,6 +13,16 @@ pub enum Theme {
     Dark,
 }
 
+/// History retention mode.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
+pub enum HistoryMode {
+    #[serde(rename = "off")]
+    Off,
+    #[default]
+    #[serde(rename = "30d")]
+    ThirtyDays,
+}
+
 /// Cached settings to reduce disk I/O
 static SETTINGS_CACHE: RwLock<Option<Settings>> = RwLock::new(None);
 
@@ -26,8 +36,8 @@ pub struct Settings {
     pub auto_start: bool,
     pub sound_enabled: bool,
     pub paste_enabled: bool,
-    pub history_enabled: bool,
-    pub history_limit: i64,
+    #[serde(default)]
+    pub history_mode: HistoryMode,
     #[serde(default)]
     pub onboarding_completed: bool,
     #[serde(default = "default_languages")]
@@ -52,8 +62,7 @@ impl Default for Settings {
             auto_start: false,
             sound_enabled: true,
             paste_enabled: true,
-            history_enabled: true,
-            history_limit: 1000,
+            history_mode: HistoryMode::default(),
             onboarding_completed: false,
             languages: default_languages(),
             onboarding_step: None,

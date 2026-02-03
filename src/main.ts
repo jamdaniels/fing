@@ -54,6 +54,7 @@ import type {
   AppInfo,
   AppState,
   AudioDevice,
+  HistoryMode,
   MicrophoneTest,
   MicTestStartResult,
   ModelInfo,
@@ -206,6 +207,66 @@ function renderContent(): void {
 }
 
 function renderHome(el: HTMLElement): void {
+  if (settings?.historyMode === "off") {
+    const mockWords = [
+      { word: "meeting", pct: 100 },
+      { word: "project", pct: 72 },
+      { word: "update", pct: 55 },
+      { word: "review", pct: 38 },
+      { word: "schedule", pct: 24 },
+    ];
+    const mockWordHtml = mockWords
+      .map(
+        (w, i) => `
+      <div class="word-item">
+        <span class="word-rank">${i + 1}</span>
+        <span class="word-text">${w.word}</span>
+        <div class="word-bar-container"><div class="word-bar" style="width: ${w.pct}%"></div></div>
+        <span class="word-count">${Math.round(w.pct * 0.4)}</span>
+      </div>`
+      )
+      .join("");
+
+    el.innerHTML = `
+      <h1>Dashboard</h1>
+      <div class="dashboard-disabled-wrapper">
+        <div class="dashboard-disabled-ghost" aria-hidden="true">
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Transcriptions Today</div>
+              <div class="stat-value">12</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Words Today</div>
+              <div class="stat-value">847</div>
+            </div>
+          </div>
+          <div class="stat-card" style="margin-bottom: 24px;">
+            <div class="stat-label">Most Used Words</div>
+            <div class="word-list">${mockWordHtml}</div>
+          </div>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Average words per transcription</div>
+              <div class="stat-value">71</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Average speaking speed</div>
+              <div class="stat-value">142 <span class="stat-unit">wpm</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="dashboard-disabled-overlay">
+          <div class="dashboard-disabled-card">
+            <div class="dashboard-disabled-title">History is disabled</div>
+            <p>Enable history in settings to see your stats</p>
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
   const topWords = stats?.topWords ?? [];
   const maxCount = topWords.length > 0 ? topWords[0].count : 1;
 
@@ -447,6 +508,65 @@ function renderHistory(
   el: HTMLElement,
   options: { restoreFocus?: boolean; skipLoad?: boolean } = {}
 ): void {
+  if (settings?.historyMode === "off") {
+    const mockTranscripts = [
+      {
+        time: "2:34 PM",
+        words: 42,
+        text: "I think we should focus on the user experience for the next sprint and prioritize the onboarding flow improvements",
+      },
+      {
+        time: "1:15 PM",
+        words: 28,
+        text: "Can you send me the latest design files for the dashboard? I want to review them before our meeting",
+      },
+    ];
+
+    const mockListHtml = `
+      <div class="date-group-header">Today</div>
+      ${mockTranscripts
+        .map(
+          (m) => `
+        <div class="list-item">
+          <div class="list-item-header">
+            <span class="list-item-time">${m.time}</span>
+            <span class="list-item-words">${m.words} words</span>
+          </div>
+          <div class="list-item-text">${m.text}</div>
+          <div class="list-item-actions">
+            <button class="copy-btn">${createIcon(Copy)}</button>
+            <button class="delete-btn">${createIcon(Trash2)}</button>
+          </div>
+        </div>`
+        )
+        .join("")}
+    `;
+
+    el.innerHTML = `
+      <div class="history-sticky-header">
+        <div class="history-header"><h1>History</h1></div>
+      </div>
+      <div class="history-scrollable">
+        <div class="dashboard-disabled-wrapper">
+          <div class="dashboard-disabled-ghost" aria-hidden="true">
+            <div class="search-wrapper" style="margin-bottom: 16px;">
+              ${createIcon(Search)}
+              <input type="text" class="search-input" placeholder="Search transcripts..." disabled>
+            </div>
+            <div class="transcript-list">${mockListHtml}</div>
+          </div>
+          <div class="dashboard-disabled-overlay">
+            <div class="dashboard-disabled-card">
+              <div class="dashboard-disabled-title">History is disabled</div>
+              <p>Enable history in settings to save transcripts</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
   const { restoreFocus = false, skipLoad = false } = options;
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI rendering with necessary loops
   const doRender = () => {
@@ -1143,9 +1263,30 @@ function handleSettingsClick(e: MouseEvent): void {
     ".appearance-option"
   ) as HTMLElement | null;
   if (themeOption) {
+    // History mode segmented control
+    const historyMode = themeOption.dataset.historyMode as
+      | HistoryMode
+      | undefined;
+    if (historyMode && settings) {
+      const selector = themeOption.closest(".appearance-selector");
+      if (selector) {
+        for (const opt of selector.querySelectorAll(".appearance-option")) {
+          opt.classList.toggle(
+            "selected",
+            (opt as HTMLElement).dataset.historyMode === historyMode
+          );
+        }
+      }
+      handleSettingChange("historyMode", historyMode);
+      return;
+    }
+
+    // Theme selector
     const theme = themeOption.dataset.theme as Theme;
     if (theme && settings) {
-      for (const opt of document.querySelectorAll(".appearance-option")) {
+      for (const opt of document.querySelectorAll(
+        ".appearance-option[data-theme]"
+      )) {
         opt.classList.toggle(
           "selected",
           (opt as HTMLElement).dataset.theme === theme
@@ -1506,10 +1647,17 @@ function renderSettingsUI(el: HTMLElement): void {
       <div class="settings-card">
         <div class="settings-row">
           <div>
-            <div class="settings-row-label">Save transcript history</div>
+            <div class="settings-row-label">Transcript history</div>
             <div class="settings-row-desc">Store transcripts locally for search</div>
           </div>
-          <div class="toggle ${settings?.historyEnabled ? "active" : ""}" data-setting="historyEnabled"></div>
+          <div class="appearance-selector" data-setting="historyMode">
+            <button class="appearance-option ${settings?.historyMode === "off" ? "selected" : ""}" data-history-mode="off">
+              <span>Off</span>
+            </button>
+            <button class="appearance-option ${settings?.historyMode !== "off" ? "selected" : ""}" data-history-mode="30d">
+              <span>Last 30 days</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

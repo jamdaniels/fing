@@ -130,6 +130,17 @@ pub fn init_db() -> Result<(), String> {
     Ok(())
 }
 
+/// Delete transcripts older than 30 days.
+pub fn prune_old_transcripts() -> Result<u64, String> {
+    with_db(|conn| {
+        let deleted = conn.execute(
+            "DELETE FROM transcripts WHERE created_at < datetime('now', '-30 days')",
+            [],
+        )?;
+        Ok(deleted as u64)
+    })
+}
+
 fn with_db<T, F>(f: F) -> Result<T, String>
 where
     F: FnOnce(&Connection) -> Result<T, rusqlite::Error>,
@@ -279,10 +290,18 @@ pub struct DbStats {
 pub fn get_db_stats() -> Result<DbStats, String> {
     with_db(|conn| {
         let total_transcriptions: i64 = conn
-            .query_row("SELECT COUNT(*) FROM transcripts", [], |row| row.get(0))?;
+            .query_row(
+                "SELECT COUNT(*) FROM transcripts WHERE created_at >= datetime('now', '-30 days')",
+                [],
+                |row| row.get(0),
+            )?;
 
         let total_words: i64 = conn
-            .query_row("SELECT COALESCE(SUM(word_count), 0) FROM transcripts", [], |row| row.get(0))?;
+            .query_row(
+                "SELECT COALESCE(SUM(word_count), 0) FROM transcripts WHERE created_at >= datetime('now', '-30 days')",
+                [],
+                |row| row.get(0),
+            )?;
 
         let transcriptions_today: i64 = conn
             .query_row(
@@ -298,10 +317,10 @@ pub fn get_db_stats() -> Result<DbStats, String> {
                 |row| row.get(0),
             )?;
 
-        // Average WPM: total words / total duration in minutes
+        // Average WPM: total words / total duration in minutes (last 30 days)
         let average_wpm: f64 = conn
             .query_row(
-                "SELECT COALESCE(SUM(word_count), 0), COALESCE(SUM(duration_ms), 0) FROM transcripts",
+                "SELECT COALESCE(SUM(word_count), 0), COALESCE(SUM(duration_ms), 0) FROM transcripts WHERE created_at >= datetime('now', '-30 days')",
                 [],
                 |row| {
                     let words: i64 = row.get(0)?;

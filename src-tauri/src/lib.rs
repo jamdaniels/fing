@@ -721,6 +721,13 @@ pub fn run() {
                 tracing::error!("Failed to initialize database: {}", e);
             }
 
+            // Prune transcripts older than 30 days
+            match db::prune_old_transcripts() {
+                Ok(0) => {}
+                Ok(n) => tracing::info!("Pruned {n} old transcripts"),
+                Err(e) => tracing::warn!("Failed to prune old transcripts: {e}"),
+            }
+
             // Check if onboarding was previously completed
             let app_handle = app.handle().clone();
             let saved_settings = tauri::async_runtime::block_on(settings::load_settings());

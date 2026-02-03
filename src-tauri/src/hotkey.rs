@@ -396,7 +396,7 @@ pub fn on_key_up(app: &AppHandle) {
             }
 
             // Save to history if enabled
-             if settings.history_enabled {
+             if settings.history_mode == crate::settings::HistoryMode::ThirtyDays {
                 let transcript = NewTranscript {
                     text: text.clone(),
                     duration_ms,

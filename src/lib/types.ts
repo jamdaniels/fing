@@ -35,7 +35,7 @@ export interface AudioDevice {
   isDefault: boolean;
 }
 
-export type HistoryLimit = 100 | 500 | 1000 | 5000 | -1;
+export type HistoryMode = "off" | "30d";
 
 export interface Settings {
   hotkey: string;
@@ -44,8 +44,7 @@ export interface Settings {
   autoStart: boolean;
   soundEnabled: boolean;
   pasteEnabled: boolean;
-  historyEnabled: boolean;
-  historyLimit: HistoryLimit;
+  historyMode: HistoryMode;
   onboardingCompleted: boolean;
   languages: string[];
   onboardingStep: number | null;
