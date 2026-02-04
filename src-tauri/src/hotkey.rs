@@ -24,6 +24,11 @@ static RECORDING_SESSION_ID: AtomicU64 = AtomicU64::new(0);
 // Onboarding test mode - when enabled, hotkey works even during NeedsSetup state
 static ONBOARDING_TEST_MODE: AtomicBool = AtomicBool::new(false);
 
+/// Whether onboarding test mode is currently active
+pub(crate) fn is_onboarding_test_mode() -> bool {
+    ONBOARDING_TEST_MODE.load(Ordering::SeqCst)
+}
+
 /// Check if transcription contains only blank audio markers (no actual speech)
 fn is_blank_audio(text: &str) -> bool {
     let normalized = text.to_lowercase();
@@ -88,9 +93,7 @@ fn ensure_audio_thread() {
                     if let Err(e) = capture.init_capture() {
                         tracing::error!("Failed to init audio capture: {}", e);
                         // Send empty response on error
-                        let _ = resp_tx.send(AudioResponse {
-                            buffer: Vec::new(),
-                        });
+                        let _ = resp_tx.send(AudioResponse { buffer: Vec::new() });
                         continue;
                     }
                     capture.begin_recording();
@@ -138,9 +141,7 @@ pub fn on_key_down(app: &AppHandle) {
     {
         std::thread::spawn(|| {
             if let Some(bundle_id) = crate::platform::get_frontmost_app() {
-                *FRONTMOST_APP
-                    .lock()
-                    .expect("Frontmost app mutex poisoned") = Some(bundle_id);
+                *FRONTMOST_APP.lock().expect("Frontmost app mutex poisoned") = Some(bundle_id);
             }
         });
     }
@@ -245,9 +246,7 @@ pub fn on_key_up(app: &AppHandle) {
     // Stop recording and get audio buffer
     // We need to send command and then receive response
     let cmd_sent = {
-        let thread_guard = AUDIO_THREAD
-            .lock()
-            .expect("Audio thread mutex poisoned");
+        let thread_guard = AUDIO_THREAD.lock().expect("Audio thread mutex poisoned");
         if let Some(ref thread) = *thread_guard {
             thread.cmd_tx.send(AudioCommand::StopRecording).is_ok()
         } else {
@@ -370,7 +369,9 @@ pub fn on_key_up(app: &AppHandle) {
 
         if test_mode {
             // In test mode, emit event instead of pasting (indicator steals focus)
-            app_handle.emit("test-transcription-result", text.clone()).ok();
+            app_handle
+                .emit("test-transcription-result", text.clone())
+                .ok();
         } else {
             // Restore focus to the app that was active when recording started
             #[cfg(target_os = "macos")]
@@ -396,7 +397,7 @@ pub fn on_key_up(app: &AppHandle) {
             }
 
             // Save to history if enabled
-             if settings.history_mode == crate::settings::HistoryMode::ThirtyDays {
+            if settings.history_mode == crate::settings::HistoryMode::ThirtyDays {
                 let transcript = NewTranscript {
                     text: text.clone(),
                     duration_ms,

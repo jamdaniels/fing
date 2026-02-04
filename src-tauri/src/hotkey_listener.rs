@@ -6,10 +6,10 @@ use crate::hotkey_config::{get_hotkey_config, HotkeyKey};
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use once_cell::sync::Lazy;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-use rdev::{Event, EventType, Key};
 #[cfg(target_os = "windows")]
 use rdev::listen;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use rdev::{Event, EventType, Key};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::sync::{Mutex, OnceLock};
 
@@ -85,6 +85,8 @@ fn start_hotkey_listener_impl(app: AppHandle) -> Result<(), String> {
 // macOS uses grab() which can intercept and block key events
 #[cfg(target_os = "macos")]
 fn grab_callback(event: Event) -> Option<Event> {
+    let test_mode = crate::hotkey::is_onboarding_test_mode();
+
     let config = match get_hotkey_config() {
         Some(c) => c,
         None => return Some(event),
@@ -95,6 +97,18 @@ fn grab_callback(event: Event) -> Option<Event> {
         Err(poisoned) => poisoned.into_inner(),
     };
     let state = &mut *state_guard;
+
+    // In test mode we run the same detection logic but never swallow events
+    // (return Some(event) instead of None). This ensures macOS delivers
+    // KeyUp even though we intercepted KeyPress — the indicator window
+    // steals focus so we can't rely on WebView JS handlers.
+    let passthrough = |event: Event| -> Option<Event> {
+        if test_mode {
+            Some(event)
+        } else {
+            None
+        }
+    };
 
     match event.event_type {
         EventType::KeyPress(key) => {
@@ -107,12 +121,11 @@ fn grab_callback(event: Event) -> Option<Event> {
                         crate::hotkey::on_key_down(app);
                     }
                 }
-                // Swallow base key when used as hotkey
-                None
+                passthrough(event)
             } else if state.hotkey_active {
                 // While the hotkey is held, swallow all other key presses so
                 // system shortcuts (Mission Control, etc.) don't interfere.
-                None
+                passthrough(event)
             } else {
                 Some(event)
             }
@@ -127,26 +140,35 @@ fn grab_callback(event: Event) -> Option<Event> {
                         crate::hotkey::on_key_up(app);
                     }
                 }
-                // Swallow base key release when used as hotkey
-                None
-            } else {
-                // If a required modifier (including Fn) is released while the
-                // base key is still held, treat it as hotkey release.
-                if state.hotkey_active && !modifiers_match(&state.mod_state, &config) {
+                passthrough(event)
+            } else if state.hotkey_active {
+                if !modifiers_match(&state.mod_state, &config) {
+                    // A required modifier was released while base key still held
                     state.hotkey_active = false;
                     if let Some(app) = APP_HANDLE.get() {
                         crate::hotkey::on_key_up(app);
                     }
-                    // Swallow this modifier release as part of the hotkey
-                    return None;
+                    return passthrough(event);
                 }
 
-                if state.hotkey_active {
-                    // Swallow all other key releases while the hotkey is held.
-                    None
-                } else {
-                    Some(event)
+                if !is_modifier_key(&key) {
+                    // Safety net: a non-modifier, non-base-key release while
+                    // hotkey is active likely means macOS delivered the base
+                    // key release under a different Key variant. Treat it as
+                    // the hotkey release to avoid getting stuck.
+                    tracing::warn!(
+                        "Unexpected KeyRelease {:?} while hotkey active — treating as hotkey release",
+                        key
+                    );
+                    state.hotkey_active = false;
+                    if let Some(app) = APP_HANDLE.get() {
+                        crate::hotkey::on_key_up(app);
+                    }
                 }
+
+                passthrough(event)
+            } else {
+                Some(event)
             }
         }
         _ => Some(event),
@@ -238,11 +260,22 @@ fn update_mod_state(key: &Key, is_down: bool, state: &mut ModState) {
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn modifiers_match(state: &ModState, config: &crate::hotkey_config::HotkeyConfig) -> bool {
+    // On MacBook keyboards, Fn transforms media keys into F-keys at hardware level.
+    // When the base key is an F-key and Fn is NOT explicitly required, ignore Fn state.
+    // This allows "F9" hotkey to work whether user presses F9 directly (external kbd)
+    // or Fn+F9 (MacBook with media key defaults).
+    let fn_matches = if !config.require_fn && matches!(config.key, HotkeyKey::F(_)) {
+        // Ignore Fn state for F-key hotkeys that don't explicitly require Fn
+        true
+    } else {
+        state.fn_down == config.require_fn
+    };
+
     state.ctrl == config.require_ctrl
         && state.alt == config.require_alt
         && state.shift == config.require_shift
         && state.meta == config.require_meta
-        && state.fn_down == config.require_fn
+        && fn_matches
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -282,6 +315,25 @@ fn is_base_key(key: &Key, base: &HotkeyKey) -> bool {
             None => false,
         },
     }
+}
+
+/// Returns true for modifier keys that should not trigger the safety net release.
+#[cfg(target_os = "macos")]
+fn is_modifier_key(key: &Key) -> bool {
+    matches!(
+        key,
+        Key::ControlLeft
+            | Key::ControlRight
+            | Key::Alt
+            | Key::AltGr
+            | Key::ShiftLeft
+            | Key::ShiftRight
+            | Key::MetaLeft
+            | Key::MetaRight
+            | Key::Function
+            | Key::CapsLock
+            | Key::NumLock
+    )
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
