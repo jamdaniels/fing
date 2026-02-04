@@ -1,7 +1,7 @@
+use once_cell::sync::Lazy;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use once_cell::sync::Lazy;
 
 /// Global database connection (SQLite with FTS5).
 static DB: Lazy<Mutex<Option<Connection>>> = Lazy::new(|| Mutex::new(None));
@@ -55,8 +55,7 @@ fn sanitize_fts5_query(query: &str) -> String {
 
 /// Initialize the database, creating tables and FTS5 index if needed.
 pub fn init_db() -> Result<(), String> {
-    let path = crate::paths::db_path()
-        .ok_or_else(|| "App paths not initialized".to_string())?;
+    let path = crate::paths::db_path().ok_or_else(|| "App paths not initialized".to_string())?;
 
     // Ensure directory exists
     if let Some(parent) = path.parent() {
@@ -64,8 +63,7 @@ pub fn init_db() -> Result<(), String> {
             .map_err(|e| format!("Failed to create database directory: {e}"))?;
     }
 
-    let conn = Connection::open(&path)
-        .map_err(|e| format!("Failed to open database: {e}"))?;
+    let conn = Connection::open(&path).map_err(|e| format!("Failed to open database: {e}"))?;
 
     // Enable WAL mode for better reliability (non-fatal if fails)
     if let Err(e) = conn.execute("PRAGMA journal_mode=WAL", []) {
@@ -123,7 +121,9 @@ pub fn init_db() -> Result<(), String> {
     )
     .map_err(|e| format!("Failed to create index: {e}"))?;
 
-    let mut db = DB.lock().map_err(|e| format!("Database lock poisoned: {e}"))?;
+    let mut db = DB
+        .lock()
+        .map_err(|e| format!("Database lock poisoned: {e}"))?;
     *db = Some(conn);
 
     tracing::info!("Database initialized at {:?}", path);
@@ -145,7 +145,9 @@ fn with_db<T, F>(f: F) -> Result<T, String>
 where
     F: FnOnce(&Connection) -> Result<T, rusqlite::Error>,
 {
-    let db = DB.lock().map_err(|e| format!("Database lock poisoned: {e}"))?;
+    let db = DB
+        .lock()
+        .map_err(|e| format!("Database lock poisoned: {e}"))?;
     let conn = db.as_ref().ok_or("Database not initialized")?;
     f(conn).map_err(|e| e.to_string())
 }
@@ -204,7 +206,7 @@ pub fn get_recent_transcripts(limit: i64, offset: i64) -> Result<Vec<Transcript>
             "SELECT id, text, created_at, duration_ms, app_context, word_count
              FROM transcripts
              ORDER BY created_at DESC
-             LIMIT ?1 OFFSET ?2"
+             LIMIT ?1 OFFSET ?2",
         )?;
 
         let rows = stmt.query_map(params![limit, offset], |row| {
@@ -241,7 +243,7 @@ pub fn search_transcripts(query: &str, limit: i64, offset: i64) -> Result<Vec<Tr
              JOIN transcripts_fts fts ON t.id = fts.rowid
              WHERE transcripts_fts MATCH ?1
              ORDER BY rank
-             LIMIT ?2 OFFSET ?3"
+             LIMIT ?2 OFFSET ?3",
         )?;
 
         let rows = stmt.query_map(params![sanitized_query, limit, offset], |row| {
@@ -289,12 +291,11 @@ pub struct DbStats {
 
 pub fn get_db_stats() -> Result<DbStats, String> {
     with_db(|conn| {
-        let total_transcriptions: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM transcripts WHERE created_at >= datetime('now', '-30 days')",
-                [],
-                |row| row.get(0),
-            )?;
+        let total_transcriptions: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM transcripts WHERE created_at >= datetime('now', '-30 days')",
+            [],
+            |row| row.get(0),
+        )?;
 
         let total_words: i64 = conn
             .query_row(
@@ -347,28 +348,30 @@ pub fn get_db_stats() -> Result<DbStats, String> {
     })
 }
 
-fn get_top_words(conn: &rusqlite::Connection, limit: usize) -> Result<Vec<(String, i64)>, rusqlite::Error> {
+fn get_top_words(
+    conn: &rusqlite::Connection,
+    limit: usize,
+) -> Result<Vec<(String, i64)>, rusqlite::Error> {
     use std::collections::HashMap;
 
     // Stop words to filter out
     const STOP_WORDS: &[&str] = &[
-        "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with",
-        "by", "from", "is", "it", "that", "this", "be", "are", "was", "were", "been", "have",
-        "has", "had", "do", "does", "did", "will", "would", "could", "should", "may", "might",
-        "can", "just", "so", "like", "if", "then", "than", "when", "what", "which", "who",
-        "how", "all", "each", "every", "both", "few", "more", "most", "other", "some", "such",
-        "no", "not", "only", "same", "too", "very", "as", "into", "through", "during", "before",
-        "after", "above", "below", "up", "down", "out", "off", "over", "under", "again", "further",
-        "once", "here", "there", "where", "why", "any", "about", "because", "also", "get", "got",
-        "going", "go", "know", "think", "want", "need", "make", "see", "look", "come", "back",
-        "now", "way", "well", "even", "new", "take", "use", "your", "our", "their", "my", "its",
-        "you", "we", "they", "he", "she", "him", "her", "his", "them", "i", "me", "us",
-        "yeah", "yes", "okay", "ok", "um", "uh", "ah", "oh", "hmm", "actually", "really",
+        "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by",
+        "from", "is", "it", "that", "this", "be", "are", "was", "were", "been", "have", "has",
+        "had", "do", "does", "did", "will", "would", "could", "should", "may", "might", "can",
+        "just", "so", "like", "if", "then", "than", "when", "what", "which", "who", "how", "all",
+        "each", "every", "both", "few", "more", "most", "other", "some", "such", "no", "not",
+        "only", "same", "too", "very", "as", "into", "through", "during", "before", "after",
+        "above", "below", "up", "down", "out", "off", "over", "under", "again", "further", "once",
+        "here", "there", "where", "why", "any", "about", "because", "also", "get", "got", "going",
+        "go", "know", "think", "want", "need", "make", "see", "look", "come", "back", "now", "way",
+        "well", "even", "new", "take", "use", "your", "our", "their", "my", "its", "you", "we",
+        "they", "he", "she", "him", "her", "his", "them", "i", "me", "us", "yeah", "yes", "okay",
+        "ok", "um", "uh", "ah", "oh", "hmm", "actually", "really",
     ];
 
-    let mut stmt = conn.prepare(
-        "SELECT text FROM transcripts WHERE created_at >= datetime('now', '-30 days')"
-    )?;
+    let mut stmt = conn
+        .prepare("SELECT text FROM transcripts WHERE created_at >= datetime('now', '-30 days')")?;
 
     let mut word_counts: HashMap<String, i64> = HashMap::new();
 

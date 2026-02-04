@@ -86,8 +86,8 @@ pub fn type_text(text: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    let mut enigo = Enigo::new(&Settings::default())
-        .map_err(|e| format!("Failed to init enigo: {e:?}"))?;
+    let mut enigo =
+        Enigo::new(&Settings::default()).map_err(|e| format!("Failed to init enigo: {e:?}"))?;
 
     enigo
         .text(&filtered)

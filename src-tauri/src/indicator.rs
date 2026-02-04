@@ -1,5 +1,5 @@
-use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use std::time::Duration;
+use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
 #[derive(Clone, serde::Serialize)]
 pub struct IndicatorStatePayload {
@@ -12,8 +12,13 @@ pub fn show_recording(app: &AppHandle) -> Result<(), String> {
     position_indicator(&window)?;
     window.show().map_err(|e| e.to_string())?;
 
-    app.emit("indicator-state-changed", IndicatorStatePayload { state: "recording".to_string() })
-        .map_err(|e| e.to_string())?;
+    app.emit(
+        "indicator-state-changed",
+        IndicatorStatePayload {
+            state: "recording".to_string(),
+        },
+    )
+    .map_err(|e| e.to_string())?;
 
     tracing::info!("Indicator showing: recording");
     Ok(())
@@ -21,8 +26,13 @@ pub fn show_recording(app: &AppHandle) -> Result<(), String> {
 
 /// Show indicator in processing state
 pub fn show_processing(app: &AppHandle) -> Result<(), String> {
-    app.emit("indicator-state-changed", IndicatorStatePayload { state: "processing".to_string() })
-        .map_err(|e| e.to_string())?;
+    app.emit(
+        "indicator-state-changed",
+        IndicatorStatePayload {
+            state: "processing".to_string(),
+        },
+    )
+    .map_err(|e| e.to_string())?;
 
     tracing::info!("Indicator showing: processing");
     Ok(())
@@ -30,8 +40,13 @@ pub fn show_processing(app: &AppHandle) -> Result<(), String> {
 
 /// Hide the indicator window
 pub fn hide(app: &AppHandle) -> Result<(), String> {
-    app.emit("indicator-state-changed", IndicatorStatePayload { state: "hidden".to_string() })
-        .map_err(|e| e.to_string())?;
+    app.emit(
+        "indicator-state-changed",
+        IndicatorStatePayload {
+            state: "hidden".to_string(),
+        },
+    )
+    .map_err(|e| e.to_string())?;
 
     // Delay hide to allow shrink animation
     let app_handle = app.clone();

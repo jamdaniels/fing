@@ -73,9 +73,7 @@ fn get_platform_asset_name() -> &'static str {
 }
 
 pub async fn check_for_updates() -> Result<UpdateInfo, String> {
-    let url = format!(
-        "https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
-    );
+    let url = format!("https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest");
 
     let client = reqwest::Client::new();
     let response = client

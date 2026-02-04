@@ -10,8 +10,8 @@ use std::sync::Mutex;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelVariant {
-    #[default]
     SmallQ5,
+    #[default]
     Small,
     LargeTurboQ5,
 }
@@ -50,7 +50,8 @@ pub const MODEL_REGISTRY: &[ModelDefinition] = &[
     ModelDefinition {
         variant: ModelVariant::LargeTurboQ5,
         filename: "ggml-large-v3-turbo-q5_0.bin",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+        url:
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
         size_bytes: 574_000_000, // ~574 MB
         display_name: "Large Turbo Q5",
         description: "Best",
@@ -222,7 +223,10 @@ pub fn verify_for_variant(path: &std::path::Path, variant: ModelVariant) -> Mode
 }
 
 /// Internal verify function with optional expected size.
-fn verify_with_expected_size(path: &std::path::Path, expected_size: Option<u64>) -> ModelVerification {
+fn verify_with_expected_size(
+    path: &std::path::Path,
+    expected_size: Option<u64>,
+) -> ModelVerification {
     let exists = path.exists();
     let mut size_valid = false;
     let mut format_valid = false;
@@ -234,9 +238,14 @@ fn verify_with_expected_size(path: &std::path::Path, expected_size: Option<u64>)
             if let Some(expected) = expected_size {
                 // Tier-specific: 20% tolerance
                 let tolerance = expected / 5;
-                size_valid = size > expected.saturating_sub(tolerance) && size < expected + tolerance;
+                size_valid =
+                    size > expected.saturating_sub(tolerance) && size < expected + tolerance;
                 if !size_valid {
-                    tracing::warn!("Model file size invalid: {} bytes (expected ~{} bytes)", size, expected);
+                    tracing::warn!(
+                        "Model file size invalid: {} bytes (expected ~{} bytes)",
+                        size,
+                        expected
+                    );
                 }
             } else {
                 // General check: any whisper model should be at least 50MB
@@ -322,17 +331,13 @@ pub async fn download_variant(variant: ModelVariant) -> Result<PathBuf, String> 
     let client = Client::new();
     tracing::info!("Fetching model from {}", def.url);
 
-    let response = client
-        .get(def.url)
-        .send()
-        .await
-        .map_err(|e| {
-            let err_msg = format!("Network error: {e}");
-            tracing::error!("{}", err_msg);
-            let mut state = DOWNLOAD_STATE.lock().unwrap();
-            state.status = DownloadStatus::Failed(err_msg.clone());
-            err_msg
-        })?;
+    let response = client.get(def.url).send().await.map_err(|e| {
+        let err_msg = format!("Network error: {e}");
+        tracing::error!("{}", err_msg);
+        let mut state = DOWNLOAD_STATE.lock().unwrap();
+        state.status = DownloadStatus::Failed(err_msg.clone());
+        err_msg
+    })?;
 
     if !response.status().is_success() {
         let err_msg = format!("HTTP error: {}", response.status());
@@ -419,7 +424,11 @@ pub fn delete_model(variant: ModelVariant) -> Result<(), String> {
             tracing::error!("Failed to delete model: {}", e);
             e.to_string()
         })?;
-        tracing::info!("Deleted {} model at {:?}", get_definition(variant).display_name, path);
+        tracing::info!(
+            "Deleted {} model at {:?}",
+            get_definition(variant).display_name,
+            path
+        );
     }
     Ok(())
 }

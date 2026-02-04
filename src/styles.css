@@ -2182,3 +2182,17 @@ body[data-platform="windows"] .titlebar {
   width: 14px;
   height: 14px;
 }
+
+.history-toggle-onboarding {
+  display: flex;
+  justify-content: center;
+}
+
+.onboarding-body.history-body {
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.history-body .onboarding-features li:last-child {
+  margin-bottom: 12px;
+}

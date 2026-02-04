@@ -23,21 +23,21 @@ mod updates;
 use audio::{AudioCapture, AudioDevice, MicrophoneTest};
 use state::AppState;
 use std::sync::Mutex;
+#[cfg(target_os = "macos")]
+use tauri::ActivationPolicy;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     Emitter, Manager,
 };
-#[cfg(target_os = "macos")]
-use tauri::ActivationPolicy;
 
 /// Consolidated mic test state to prevent race conditions
 /// All state changes go through a single lock acquisition
 #[derive(Default)]
 struct MicTestState {
     running: bool,
-    generation: u64,      // Incremented each time a new test starts
-    level: u32,           // Fixed-point (level * 10000)
+    generation: u64, // Incremented each time a new test starts
+    level: u32,      // Fixed-point (level * 10000)
     receiving: bool,
     device_id: Option<String>,
 }
@@ -140,9 +140,7 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
         result.device_matched
     );
     if !match_result.matched {
-        tracing::warn!(
-            "Device mismatch! Requested device not found, using fallback."
-        );
+        tracing::warn!("Device mismatch! Requested device not found, using fallback.");
     }
 
     // Mark as running and get generation BEFORE spawning thread
@@ -246,12 +244,16 @@ fn stop_mic_test() {
 
 #[tauri::command]
 async fn start_model_download() -> Result<String, String> {
-    model::download().await.map(|p| p.to_string_lossy().to_string())
+    model::download()
+        .await
+        .map(|p| p.to_string_lossy().to_string())
 }
 
 #[tauri::command]
 async fn download_model(variant: model::ModelVariant) -> Result<String, String> {
-    model::download_variant(variant).await.map(|p| p.to_string_lossy().to_string())
+    model::download_variant(variant)
+        .await
+        .map(|p| p.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -287,7 +289,10 @@ fn delete_model(variant: model::ModelVariant) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn set_active_model(variant: model::ModelVariant, _app: tauri::AppHandle) -> Result<bool, String> {
+async fn set_active_model(
+    variant: model::ModelVariant,
+    _app: tauri::AppHandle,
+) -> Result<bool, String> {
     // Check if model is downloaded
     if !model::is_variant_downloaded(variant) {
         return Err("Model is not downloaded".to_string());
@@ -487,7 +492,10 @@ fn build_tray_menu(app: &tauri::App) -> Result<Menu<tauri::Wry>, Box<dyn std::er
     build_tray_menu_for_state(app, current_state)
 }
 
-fn build_tray_menu_for_state(app: &impl tauri::Manager<tauri::Wry>, current_state: AppState) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
+fn build_tray_menu_for_state(
+    app: &impl tauri::Manager<tauri::Wry>,
+    current_state: AppState,
+) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
     if current_state == AppState::NeedsSetup {
         // Simplified menu for setup state
         let setup = MenuItem::with_id(app, "setup", "Complete Setup...", true, None::<&str>)?;
@@ -506,18 +514,28 @@ fn build_tray_menu_for_state(app: &impl tauri::Manager<tauri::Wry>, current_stat
         let mic_items = build_mic_menu_items(app)?;
 
         let separator2 = PredefinedMenuItem::separator(app)?;
-        let updates = MenuItem::with_id(app, "check_updates", "Check for Updates", true, None::<&str>)?;
+        let updates = MenuItem::with_id(
+            app,
+            "check_updates",
+            "Check for Updates",
+            true,
+            None::<&str>,
+        )?;
         let separator3 = PredefinedMenuItem::separator(app)?;
         let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
         // Build menu with mic items spread inline
-        let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = vec![
-            &open, &history, &settings, &separator1,
-        ];
+        let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+            vec![&open, &history, &settings, &separator1];
         for item in &mic_items {
             items.push(item.as_ref());
         }
-        items.extend([&separator2 as &dyn tauri::menu::IsMenuItem<tauri::Wry>, &updates, &separator3, &quit]);
+        items.extend([
+            &separator2 as &dyn tauri::menu::IsMenuItem<tauri::Wry>,
+            &updates,
+            &separator3,
+            &quit,
+        ]);
 
         Ok(Menu::with_items(app, &items)?)
     }
@@ -543,7 +561,9 @@ fn rebuild_tray_menu(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::E
 }
 
 #[allow(clippy::type_complexity)]
-fn build_mic_menu_items(app: &impl tauri::Manager<tauri::Wry>) -> Result<Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>>, Box<dyn std::error::Error>> {
+fn build_mic_menu_items(
+    app: &impl tauri::Manager<tauri::Wry>,
+) -> Result<Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>>, Box<dyn std::error::Error>> {
     let devices = AudioCapture::list_devices();
     let current_settings = settings::load_settings_sync();
     let selected_id = current_settings.selected_microphone_id;
@@ -573,7 +593,8 @@ fn build_mic_menu_items(app: &impl tauri::Manager<tauri::Wry>) -> Result<Vec<Box
         } else {
             device.is_default
         };
-        let item = CheckMenuItem::with_id(app, &item_id, &device.name, true, is_checked, None::<&str>)?;
+        let item =
+            CheckMenuItem::with_id(app, &item_id, &device.name, true, is_checked, None::<&str>)?;
         mic_entries.push(MicMenuEntry {
             device_id: Some(device.id.clone()),
             item: item.clone(),
@@ -588,7 +609,11 @@ fn build_mic_menu_items(app: &impl tauri::Manager<tauri::Wry>) -> Result<Vec<Box
 }
 
 fn encode_menu_id(value: &str) -> String {
-    value.as_bytes().iter().map(|b| format!("{b:02x}")).collect()
+    value
+        .as_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 fn decode_menu_id(value: &str) -> Option<String> {
@@ -614,7 +639,11 @@ fn update_mic_menu_checks(selected_id: Option<String>) {
 
     let has_selected_device = selected_id
         .as_ref()
-        .map(|id| stored.iter().any(|entry| entry.device_id.as_ref() == Some(id)))
+        .map(|id| {
+            stored
+                .iter()
+                .any(|entry| entry.device_id.as_ref() == Some(id))
+        })
         .unwrap_or(false);
 
     for entry in stored.iter() {
@@ -625,7 +654,9 @@ fn update_mic_menu_checks(selected_id: Option<String>) {
         };
         // When no selection, we can't easily determine default here, so just uncheck all
         // The menu will be rebuilt with correct state on next app launch
-        let _ = entry.item.set_checked(if has_selected_device { checked } else { false });
+        let _ = entry
+            .item
+            .set_checked(if has_selected_device { checked } else { false });
     }
 }
 

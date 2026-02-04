@@ -782,7 +782,7 @@ function showHotkeyModal(): void {
   closeHotkeyModal();
 
   let capturedHotkey: string | null = null;
-  const currentHotkey = settings?.hotkey ?? "F8";
+  const currentHotkey = settings?.hotkey ?? "F9";
 
   const modal = document.createElement("div");
   modal.className = "dialog-overlay";
@@ -1254,6 +1254,23 @@ async function handleAutoStartToggle(
   }
 }
 
+async function handleHistoryModeOff(): Promise<void> {
+  const confirmed = await showConfirmDialog({
+    title: "Turn Off History?",
+    body: "All saved transcripts will be permanently deleted.",
+    confirmText: "Confirm",
+    danger: true,
+  });
+  if (!confirmed) {
+    return;
+  }
+
+  await deleteAllTranscripts();
+  await handleSettingChange("historyMode", "off");
+  stats = await getStats().catch(() => null);
+  renderContent();
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI event handler with necessary branches
 function handleSettingsClick(e: MouseEvent): void {
   const target = e.target as HTMLElement;
@@ -1268,6 +1285,10 @@ function handleSettingsClick(e: MouseEvent): void {
       | HistoryMode
       | undefined;
     if (historyMode && settings) {
+      if (historyMode === "off" && settings.historyMode !== "off") {
+        handleHistoryModeOff();
+        return;
+      }
       const selector = themeOption.closest(".appearance-selector");
       if (selector) {
         for (const opt of selector.querySelectorAll(".appearance-option")) {
@@ -1575,7 +1596,7 @@ function renderSettingsUI(el: HTMLElement): void {
             <div class="settings-row-label">Hotkey</div>
             <div class="settings-row-desc">Press and hold to record</div>
           </div>
-          <button class="btn btn-secondary hotkey-btn">${formatKeyForDisplay(settings?.hotkey ?? "F8")}</button>
+          <button class="btn btn-secondary hotkey-btn">${formatKeyForDisplay(settings?.hotkey ?? "F9")}</button>
         </div>
         <div class="settings-row lang-row">
           <div>
@@ -1895,7 +1916,7 @@ async function setupHotkeyListener(): Promise<void> {
     );
     // Get hotkey from settings (more reliable than backend config which may not be initialized)
     const currentSettings = await getSettings();
-    const hotkeyStr = currentSettings.hotkey || "F8";
+    const hotkeyStr = currentSettings.hotkey || "F9";
     hotkeyConfig = parseHotkeyString(hotkeyStr);
     console.log("[hotkey] Frontend listener configured for:", hotkeyStr);
 
@@ -2067,9 +2088,11 @@ async function init(): Promise<void> {
     setupHotkeyListener().catch(console.error);
   }
 
-  window.addEventListener("setup-complete", () => {
+  window.addEventListener("setup-complete", async () => {
     cleanupOnboarding();
     currentAppState = "ready";
+    await loadSettings(true);
+    stats = await getStats().catch(() => null);
     showMainUI(); // Rebuild DOM to main UI structure before hiding
     // Now set up the frontend hotkey listener with the user's chosen hotkey
     setupHotkeyListener().catch(console.error);

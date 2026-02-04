@@ -202,8 +202,9 @@ impl AudioCapture {
                     id,
                     device_names
                 );
-                let default_device =
-                    host.default_input_device().ok_or(AudioError::NoDevicesFound)?;
+                let default_device = host
+                    .default_input_device()
+                    .ok_or(AudioError::NoDevicesFound)?;
                 let default_name = default_device
                     .name()
                     .unwrap_or_else(|_| "Unknown".to_string());
@@ -217,7 +218,9 @@ impl AudioCapture {
                 ))
             }
             None => {
-                let device = host.default_input_device().ok_or(AudioError::NoDevicesFound)?;
+                let device = host
+                    .default_input_device()
+                    .ok_or(AudioError::NoDevicesFound)?;
                 let name = device.name().unwrap_or_else(|_| "Unknown".to_string());
                 Ok((
                     device,
@@ -273,7 +276,12 @@ impl AudioCapture {
                     let count = CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
                     if count.is_multiple_of(100) {
                         let peak: f32 = data.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-                        tracing::info!("Audio callback #{}: {} samples, peak={:.4}", count, data.len(), peak);
+                        tracing::info!(
+                            "Audio callback #{}: {} samples, peak={:.4}",
+                            count,
+                            data.len(),
+                            peak
+                        );
                     }
                     let mut buf = buffer.lock().unwrap();
                     // Convert to mono by averaging channels
@@ -296,8 +304,16 @@ impl AudioCapture {
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
                         let count = CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
                         if count.is_multiple_of(100) {
-                            let peak: f32 = data.iter().map(|&s| (s as f32 / 32768.0).abs()).fold(0.0f32, f32::max);
-                            tracing::info!("Audio callback #{}: {} samples, peak={:.4}", count, data.len(), peak);
+                            let peak: f32 = data
+                                .iter()
+                                .map(|&s| (s as f32 / 32768.0).abs())
+                                .fold(0.0f32, f32::max);
+                            tracing::info!(
+                                "Audio callback #{}: {} samples, peak={:.4}",
+                                count,
+                                data.len(),
+                                peak
+                            );
                         }
                         let mut buf = buffer.lock().unwrap();
                         for chunk in data.chunks(channels) {
@@ -409,7 +425,11 @@ impl AudioCapture {
             Err(e) => {
                 tracing::error!("Failed to create resampler: {}", e);
                 // Fallback: simple linear interpolation
-                return Self::simple_resample(&buffer, self.native_sample_rate, WHISPER_SAMPLE_RATE);
+                return Self::simple_resample(
+                    &buffer,
+                    self.native_sample_rate,
+                    WHISPER_SAMPLE_RATE,
+                );
             }
         };
 

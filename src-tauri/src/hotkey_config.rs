@@ -198,7 +198,7 @@ pub fn get_hotkey_config() -> Option<HotkeyConfig> {
 pub fn get_hotkey_string() -> String {
     let config = match get_hotkey_config() {
         Some(c) => c,
-        None => return "F8".to_string(), // Default
+        None => return "F9".to_string(), // Default
     };
 
     let mut parts = Vec::new();

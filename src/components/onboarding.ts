@@ -1,14 +1,17 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  BarChart3,
   Check,
   CheckCircle,
+  ClipboardList,
   Download,
   Globe,
   GlobeLock,
   Keyboard,
   Mic,
   PersonStanding,
+  Search,
   Shield,
 } from "lucide";
 import { createIcon, escapeHtml } from "../lib/icons";
@@ -34,13 +37,14 @@ import {
 import type {
   AudioDevice,
   DownloadProgress,
+  HistoryMode,
   ModelInfo,
   ModelVariant,
   PermissionStatus,
   Settings,
 } from "../lib/types";
 
-type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 interface OnboardingState {
   step: OnboardingStep;
@@ -56,6 +60,7 @@ interface OnboardingState {
   capturedHotkey: string | null;
   testText: string;
   selectedModelVariant: ModelVariant;
+  selectedHistoryMode: HistoryMode;
   models: ModelInfo[];
 }
 
@@ -76,10 +81,11 @@ let state: OnboardingState = {
   audioDevices: [],
   selectedDeviceId: null,
   selectedLanguages: ["en"],
-  selectedHotkey: "F8",
+  selectedHotkey: "F9",
   capturedHotkey: null,
   testText: "",
-  selectedModelVariant: "small_q5",
+  selectedModelVariant: "small",
+  selectedHistoryMode: "30d",
   models: [],
 };
 
@@ -92,10 +98,10 @@ let testHotkeyPressed = false;
 let testHotkeyKeydown: ((e: KeyboardEvent) => void) | null = null;
 let testHotkeyKeyup: ((e: KeyboardEvent) => void) | null = null;
 
-const TOTAL_STEPS = 8;
+const TOTAL_STEPS = 9;
 
 function renderStepIndicator(currentStep: OnboardingStep): string {
-  if (currentStep === 8) {
+  if (currentStep === 9) {
     return ""; // Don't show on completion
   }
 
@@ -267,8 +273,8 @@ function render(): void {
     return;
   }
 
-  // Remove hotkey listener when leaving step 5
-  if (state.step !== 5 && hotkeyKeyHandler) {
+  // Remove hotkey listener when leaving step 6
+  if (state.step !== 6 && hotkeyKeyHandler) {
     document.removeEventListener("keydown", hotkeyKeyHandler);
     hotkeyKeyHandler = null;
   }
@@ -284,18 +290,21 @@ function render(): void {
       renderLanguageSelection();
       break;
     case 4:
-      renderPermissions();
+      renderHistoryStep();
       break;
     case 5:
-      renderHotkeyStep();
+      renderPermissions();
       break;
     case 6:
-      renderMicSelection();
+      renderHotkeyStep();
       break;
     case 7:
-      renderTestStep();
+      renderMicSelection();
       break;
     case 8:
+      renderTestStep();
+      break;
+    case 9:
       renderCompletion();
       break;
     default:
@@ -343,8 +352,8 @@ function formatModelSize(bytes: number): string {
 
 function renderModelVariantCards(): string {
   const variants: { variant: ModelVariant; badge?: string }[] = [
-    { variant: "small_q5", badge: "Recommended" },
-    { variant: "small" },
+    { variant: "small_q5" },
+    { variant: "small", badge: "Recommended" },
     { variant: "large_turbo_q5" },
   ];
 
@@ -546,6 +555,71 @@ async function handleLanguageContinue(): Promise<void> {
   goToStep(4);
 }
 
+function renderHistoryStep(): void {
+  if (!container) {
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="onboarding">
+      <div class="onboarding-header">
+        <div class="onboarding-icon">
+          ${createIcon(ClipboardList)}
+        </div>
+        <h1 class="onboarding-title">Transcript History</h1>
+        <p class="onboarding-desc">Keep track of your transcriptions</p>
+      </div>
+      <div class="onboarding-body history-body">
+        <ul class="onboarding-features">
+          <li>${createIcon(BarChart3)} See daily usage stats on your dashboard</li>
+          <li>${createIcon(Search)} Search and copy past transcriptions</li>
+          <li>${createIcon(Shield)} Everything stays local on your device</li>
+        </ul>
+        <div class="history-toggle-onboarding">
+          <div class="appearance-selector">
+            <button class="appearance-option ${state.selectedHistoryMode === "off" ? "selected" : ""}" data-history-mode="off">Off</button>
+            <button class="appearance-option ${state.selectedHistoryMode === "30d" ? "selected" : ""}" data-history-mode="30d">Last 30 days</button>
+          </div>
+        </div>
+        <p class="onboarding-hint">You can change this later in settings</p>
+      </div>
+      <div class="onboarding-footer">
+        <button class="btn btn-accent btn-lg" id="continue-btn">
+          Continue
+        </button>
+        ${renderStepIndicator(4)}
+      </div>
+    </div>
+  `;
+
+  for (const btn of document.querySelectorAll("[data-history-mode]")) {
+    btn.addEventListener("click", (e) => {
+      state.selectedHistoryMode = (e.currentTarget as HTMLElement).dataset
+        .historyMode as HistoryMode;
+      render();
+    });
+  }
+
+  document
+    .getElementById("continue-btn")
+    ?.addEventListener("click", handleHistoryStepContinue);
+  attachStepIndicatorListeners();
+}
+
+async function handleHistoryStepContinue(): Promise<void> {
+  try {
+    const currentSettings = await getSettings();
+    await updateSettings({
+      ...currentSettings,
+      historyMode: state.selectedHistoryMode,
+    });
+  } catch (err) {
+    console.error("Failed to save history mode:", err);
+  }
+
+  goToStep(5);
+}
+
 function renderPermissions(): void {
   if (!container) {
     return;
@@ -555,7 +629,7 @@ function renderPermissions(): void {
   const isMac = navigator.userAgent.includes("Mac");
 
   if (!isMac) {
-    goToStep(5);
+    goToStep(6);
     return;
   }
 
@@ -610,7 +684,7 @@ function renderPermissions(): void {
             ? `<button class="btn btn-accent btn-lg" id="continue-btn">Continue</button>`
             : `<button class="btn btn-accent btn-lg" id="restart-btn">Restart to Apply</button>`
         }
-        ${renderStepIndicator(4)}
+        ${renderStepIndicator(5)}
       </div>
     </div>
   `;
@@ -642,7 +716,7 @@ async function handlePermissionsContinue(): Promise<void> {
   } catch (err) {
     console.error("Failed to clear onboarding step:", err);
   }
-  goToStep(5);
+  goToStep(6);
 }
 
 async function handleRestartForPermissions(): Promise<void> {
@@ -650,7 +724,7 @@ async function handleRestartForPermissions(): Promise<void> {
     const currentSettings = await getSettings();
     await updateSettings({
       ...currentSettings,
-      onboardingStep: 4,
+      onboardingStep: 5,
     });
   } catch (err) {
     console.error("Failed to save onboarding step:", err);
@@ -693,7 +767,7 @@ function renderHotkeyStep(): void {
         <button class="btn btn-accent btn-lg" id="continue-btn">
           Continue
         </button>
-        ${renderStepIndicator(5)}
+        ${renderStepIndicator(6)}
       </div>
     </div>
   `;
@@ -752,7 +826,7 @@ async function handleHotkeyContinue(): Promise<void> {
     hotkeyKeyHandler = null;
   }
 
-  goToStep(6);
+  goToStep(7);
 }
 
 function renderMicSelection(): void {
@@ -786,7 +860,7 @@ function renderMicSelection(): void {
         <button class="btn btn-accent btn-lg" id="continue-btn">
           Continue
         </button>
-        ${renderStepIndicator(6)}
+        ${renderStepIndicator(7)}
       </div>
     </div>
   `;
@@ -796,7 +870,7 @@ function renderMicSelection(): void {
     ?.addEventListener("change", handleMicChange);
   document
     .getElementById("continue-btn")
-    ?.addEventListener("click", () => goToStep(7));
+    ?.addEventListener("click", () => goToStep(8));
   attachStepIndicatorListeners();
 }
 
@@ -828,14 +902,14 @@ function renderTestStep(): void {
         <button class="btn btn-accent btn-lg" id="finish-btn" ${hasText ? "" : "disabled"}>
           Finish Setup
         </button>
-        ${renderStepIndicator(7)}
+        ${renderStepIndicator(8)}
       </div>
     </div>
   `;
 
   document
     .getElementById("finish-btn")
-    ?.addEventListener("click", () => goToStep(8));
+    ?.addEventListener("click", () => goToStep(9));
   attachStepIndicatorListeners();
 }
 
@@ -894,19 +968,19 @@ async function goToStep(step: OnboardingStep): Promise<void> {
   await stopPolling();
   state.step = step;
 
-  if (step === 4) {
+  if (step === 5) {
     await handleRequestPermissions();
   }
 
-  if (step === 5) {
+  if (step === 6) {
     state.capturedHotkey = null;
   }
 
-  if (step === 6) {
+  if (step === 7) {
     await loadAudioDevices();
   }
 
-  if (step === 7) {
+  if (step === 8) {
     state.testText = "";
     // Enable test mode so the hotkey works during onboarding
     try {
@@ -1124,10 +1198,11 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     audioDevices: [],
     selectedDeviceId: null,
     selectedLanguages: savedSettings?.languages ?? ["en"],
-    selectedHotkey: savedSettings?.hotkey ?? "F8",
+    selectedHotkey: savedSettings?.hotkey ?? "F9",
     capturedHotkey: null,
     testText: "",
-    selectedModelVariant: savedSettings?.activeModelVariant ?? "small_q5",
+    selectedModelVariant: savedSettings?.activeModelVariant ?? "small",
+    selectedHistoryMode: savedSettings?.historyMode ?? "30d",
     models,
   };
 
@@ -1145,7 +1220,7 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     console.log("[onboarding] Resuming at step:", savedStep);
 
     // If resuming at permissions step, refresh permissions
-    if (savedStep === 4) {
+    if (savedStep === 5) {
       state.step = savedStep;
       try {
         state.permissions = await requestPermissions();

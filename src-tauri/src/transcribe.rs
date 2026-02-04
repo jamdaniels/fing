@@ -33,10 +33,9 @@ impl TranscriptionEngine for Transcriber {
             return Err(TranscribeError::EmptyAudio);
         }
 
-        let ctx = self
-            .ctx
-            .lock()
-            .map_err(|_| TranscribeError::InferenceFailed("Transcriber lock poisoned".to_string()))?;
+        let ctx = self.ctx.lock().map_err(|_| {
+            TranscribeError::InferenceFailed("Transcriber lock poisoned".to_string())
+        })?;
         let mut state = ctx
             .create_state()
             .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;

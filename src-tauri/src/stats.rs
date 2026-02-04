@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::db;
+use serde::{Deserialize, Serialize};
 
 /// A word and its usage count.
 #[derive(Debug, Clone, Serialize, Deserialize)]

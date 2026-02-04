@@ -56,7 +56,7 @@ fn default_languages() -> Vec<String> {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            hotkey: "F8".to_string(),
+            hotkey: "F9".to_string(),
             model_path: String::new(),
             selected_microphone_id: None,
             auto_start: false,
@@ -132,8 +132,8 @@ pub fn load_settings_sync() -> Settings {
 }
 
 pub async fn save_settings(settings: &Settings) -> Result<(), String> {
-    let path = crate::paths::settings_path()
-        .ok_or_else(|| "App paths not initialized".to_string())?;
+    let path =
+        crate::paths::settings_path().ok_or_else(|| "App paths not initialized".to_string())?;
 
     // Ensure directory exists
     if let Some(parent) = path.parent() {
