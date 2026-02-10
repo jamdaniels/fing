@@ -26,7 +26,7 @@ use std::sync::Mutex;
 #[cfg(target_os = "macos")]
 use tauri::ActivationPolicy;
 use tauri::{
-    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     Emitter, Manager,
 };
@@ -45,7 +45,8 @@ struct MicTestState {
 #[derive(Clone)]
 struct MicMenuEntry {
     device_id: Option<String>,
-    item: CheckMenuItem<tauri::Wry>,
+    name: String,
+    item: MenuItem<tauri::Wry>,
 }
 
 lazy_static::lazy_static! {
@@ -510,7 +511,6 @@ fn build_tray_menu_for_state(
         let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
         let separator1 = PredefinedMenuItem::separator(app)?;
 
-        // Build microphone items (flattened into main menu)
         let mic_items = build_mic_menu_items(app)?;
 
         let separator2 = PredefinedMenuItem::separator(app)?;
@@ -524,7 +524,6 @@ fn build_tray_menu_for_state(
         let separator3 = PredefinedMenuItem::separator(app)?;
         let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
-        // Build menu with mic items spread inline
         let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
             vec![&open, &history, &settings, &separator1];
         for item in &mic_items {
@@ -567,11 +566,6 @@ fn build_mic_menu_items(
     let devices = AudioCapture::list_devices();
     let current_settings = settings::load_settings_sync();
     let selected_id = current_settings.selected_microphone_id;
-    tracing::debug!(
-        "Building mic menu items: devices={}, has_selected_id={}",
-        devices.len(),
-        selected_id.is_some()
-    );
 
     let has_selected_device = selected_id
         .as_ref()
@@ -581,22 +575,21 @@ fn build_mic_menu_items(
     let mut mic_entries: Vec<MicMenuEntry> = Vec::new();
     let mut result: Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>> = Vec::new();
 
-    // Add disabled "Microphone" label as section title
     let mic_label = MenuItem::with_id(app, "mic_label", "Microphone", false, None::<&str>)?;
     result.push(Box::new(mic_label));
 
-    // Add each device - auto-select default device when no selection exists
     for device in &devices {
         let item_id = format!("mic_{}", encode_menu_id(&device.id));
-        let is_checked = if has_selected_device {
+        let is_selected = if has_selected_device {
             selected_id.as_ref() == Some(&device.id)
         } else {
             device.is_default
         };
-        let item =
-            CheckMenuItem::with_id(app, &item_id, &device.name, true, is_checked, None::<&str>)?;
+        let label = mic_item_label(&device.name, is_selected);
+        let item = MenuItem::with_id(app, &item_id, &label, true, None::<&str>)?;
         mic_entries.push(MicMenuEntry {
             device_id: Some(device.id.clone()),
+            name: device.name.clone(),
             item: item.clone(),
         });
         result.push(Box::new(item));
@@ -606,6 +599,14 @@ fn build_mic_menu_items(
     *stored = mic_entries;
 
     Ok(result)
+}
+
+fn mic_item_label(name: &str, selected: bool) -> String {
+    if selected {
+        format!("✓ {name}")
+    } else {
+        name.to_string()
+    }
 }
 
 fn encode_menu_id(value: &str) -> String {
@@ -647,16 +648,12 @@ fn update_mic_menu_checks(selected_id: Option<String>) {
         .unwrap_or(false);
 
     for entry in stored.iter() {
-        let checked = match (&entry.device_id, &selected_id) {
-            (Some(device_id), Some(selected)) => device_id == selected,
-            (Some(_), None) => false, // Will need to check is_default, but we don't have that info here
-            _ => false,
+        let selected = if has_selected_device {
+            matches!((&entry.device_id, &selected_id), (Some(d), Some(s)) if d == s)
+        } else {
+            false
         };
-        // When no selection, we can't easily determine default here, so just uncheck all
-        // The menu will be rebuilt with correct state on next app launch
-        let _ = entry
-            .item
-            .set_checked(if has_selected_device { checked } else { false });
+        let _ = entry.item.set_text(mic_item_label(&entry.name, selected));
     }
 }
 
