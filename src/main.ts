@@ -42,7 +42,6 @@ import {
   relaunchApp,
   requestAccessibilityPermission,
   requestMicrophonePermission,
-  requestPermissions,
   searchTranscripts,
   setActiveModel,
   setAutoStart,
@@ -94,9 +93,6 @@ const PAGE_SIZE = 25;
 let settings: SettingsType | null = null;
 let settingsLoadedAt = 0;
 let audioDevices: AudioDevice[] = [];
-let permissionStatus: { microphone: string; accessibility: string } | null =
-  null;
-let permissionCheckedAt = 0;
 let hotkeyModalCleanup: (() => void) | null = null;
 let micTestModalCleanup: (() => void) | null = null;
 let searchTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -638,7 +634,11 @@ function renderHistory(
 
 const SETTINGS_CACHE_TTL = 5000; // 5 seconds
 
-async function loadSettings(force = false): Promise<void> {
+async function loadSettings(
+  options: { force?: boolean; refreshDevices?: boolean } = {}
+): Promise<void> {
+  const { force = false, refreshDevices = false } = options;
+
   // Skip if cache is fresh (within TTL)
   if (
     !force &&
@@ -649,10 +649,11 @@ async function loadSettings(force = false): Promise<void> {
   }
 
   try {
-    const [loadedSettings, devices, loadedModels] = await Promise.all([
+    const shouldRefreshDevices = refreshDevices || audioDevices.length === 0;
+    const [loadedSettings, loadedModels, devices] = await Promise.all([
       getSettings(),
-      getAudioDevices(),
       getModels(),
+      shouldRefreshDevices ? getAudioDevices() : Promise.resolve(audioDevices),
     ]);
     settings = loadedSettings;
     audioDevices = devices;
@@ -1115,7 +1116,7 @@ function startModelDownloadPolling(variant: ModelVariant): void {
       }
       modelDownloadProgress = null;
       // Refresh models and re-render
-      await loadSettings(true);
+      await loadSettings({ force: true, refreshDevices: false });
       if (currentView === "settings") {
         renderContent();
       }
@@ -1158,7 +1159,9 @@ function showRestartDialog(previousVariant?: ModelVariant): void {
       if (previousVariant) {
         await setActiveModel(previousVariant);
       }
-      loadSettings(true).then(() => renderContent());
+      loadSettings({ force: true, refreshDevices: false }).then(() =>
+        renderContent()
+      );
     });
 
   document.getElementById("restart-now-btn")?.addEventListener("click", () => {
@@ -1371,18 +1374,6 @@ function handleSettingsClick(e: MouseEvent): void {
     return;
   }
 
-  // Handle reset onboarding button
-  if (target.closest(".reset-onboarding-btn")) {
-    if (!settings) {
-      return;
-    }
-    updateSettings({ ...settings, onboardingCompleted: false }).then(() => {
-      sessionStorage.setItem("onboarding-reset", "true");
-      window.location.reload();
-    });
-    return;
-  }
-
   // Handle model download button
   const downloadModelBtn = target.closest(
     ".download-model-btn"
@@ -1414,7 +1405,9 @@ function handleSettingsClick(e: MouseEvent): void {
         if (needsRestart) {
           showRestartDialog(previousVariant);
         } else {
-          loadSettings(true).then(() => renderContent());
+          loadSettings({ force: true, refreshDevices: false }).then(() =>
+            renderContent()
+          );
         }
       })
       .catch((err) => {
@@ -1448,7 +1441,7 @@ function handleSettingsClick(e: MouseEvent): void {
       deleteModelBtn.textContent = "Deleting...";
 
       deleteModel(variant)
-        .then(() => loadSettings(true))
+        .then(() => loadSettings({ force: true, refreshDevices: false }))
         .then(() => renderContent())
         .catch((err) => {
           console.error("Delete error:", err);
@@ -1692,13 +1685,6 @@ function renderSettingsUI(el: HTMLElement): void {
           </div>
           <div class="toggle ${settings?.autoStart ? "active" : ""}" data-setting="autoStart"></div>
         </div>
-        <div class="settings-row">
-          <div>
-            <div class="settings-row-label">Reset onboarding</div>
-            <div class="settings-row-desc">Go through the setup process again</div>
-          </div>
-          <button class="btn btn-secondary reset-onboarding-btn">Reset</button>
-        </div>
       </div>
     </div>
   `;
@@ -1715,7 +1701,7 @@ function renderSettings(el: HTMLElement): void {
 
   if (!cacheFresh) {
     // Refresh in the background and re-render when ready.
-    loadSettings().then(() => {
+    loadSettings({ refreshDevices: false }).then(() => {
       if (currentView === "settings") {
         renderSettingsUI(el);
       }
@@ -1723,9 +1709,7 @@ function renderSettings(el: HTMLElement): void {
   }
 }
 
-const PERMISSION_CACHE_TTL = 10_000; // 10 seconds
-
-async function updatePermissionStatus(): Promise<void> {
+function updatePermissionStatus(): void {
   const micBadge = document.querySelector(
     '[data-permission="microphone"]'
   ) as HTMLElement;
@@ -1737,28 +1721,18 @@ async function updatePermissionStatus(): Promise<void> {
     return;
   }
 
-  // Use cached values if fresh
-  if (
-    permissionStatus &&
-    Date.now() - permissionCheckedAt < PERMISSION_CACHE_TTL
-  ) {
-    updateBadge(micBadge, permissionStatus.microphone, "microphone");
-    updateBadge(accBadge, permissionStatus.accessibility, "accessibility");
+  const isMac = document.body.dataset.platform === "darwin";
+  const hasOnboarded = settings?.onboardingCompleted ?? false;
+
+  if (isMac) {
+    const status = hasOnboarded ? "granted" : "denied";
+    updateBadge(micBadge, status, "microphone");
+    updateBadge(accBadge, status, "accessibility");
     return;
   }
 
-  try {
-    const status = await requestPermissions();
-    permissionStatus = status;
-    permissionCheckedAt = Date.now();
-
-    updateBadge(micBadge, status.microphone, "microphone");
-    updateBadge(accBadge, status.accessibility, "accessibility");
-  } catch (e) {
-    console.error("Failed to check permissions:", e);
-    micBadge.textContent = "Error";
-    accBadge.textContent = "Error";
-  }
+  updateBadge(micBadge, "granted", "microphone");
+  updateBadge(accBadge, "not-applicable", "accessibility");
 }
 
 function updateBadge(
@@ -2074,7 +2048,7 @@ async function init(): Promise<void> {
     // The onboarding flow has its own temporary listener for the test step
   } else {
     showMainUI();
-    loadSettings()
+    loadSettings({ refreshDevices: true })
       .then(() => {
         if (settings?.theme) {
           applyTheme(settings.theme);
@@ -2091,7 +2065,7 @@ async function init(): Promise<void> {
   window.addEventListener("setup-complete", async () => {
     cleanupOnboarding();
     currentAppState = "ready";
-    await loadSettings(true);
+    await loadSettings({ force: true, refreshDevices: true });
     stats = await getStats().catch(() => null);
     showMainUI(); // Rebuild DOM to main UI structure before hiding
     // Now set up the frontend hotkey listener with the user's chosen hotkey

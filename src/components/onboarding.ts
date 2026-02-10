@@ -1206,14 +1206,6 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     models,
   };
 
-  // Check if this is a manual reset
-  const isReset = sessionStorage.getItem("onboarding-reset") === "true";
-  if (isReset) {
-    sessionStorage.removeItem("onboarding-reset");
-    render();
-    return;
-  }
-
   // Check if resuming from a saved step (after restart)
   if (savedSettings?.onboardingStep) {
     const savedStep = savedSettings.onboardingStep as OnboardingStep;
