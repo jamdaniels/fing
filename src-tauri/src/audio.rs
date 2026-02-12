@@ -13,8 +13,12 @@ static OVERFLOW_LOGGED: AtomicBool = AtomicBool::new(false);
 pub const MAX_RECORDING_DURATION_SECS: u32 = 120;
 /// Whisper model input sample rate.
 pub const WHISPER_SAMPLE_RATE: u32 = 16000;
-/// Maximum audio buffer size in samples.
-pub const MAX_BUFFER_SIZE: usize = (MAX_RECORDING_DURATION_SECS * WHISPER_SAMPLE_RATE) as usize;
+/// Initial audio buffer capacity before the input device sample rate is known.
+const INITIAL_BUFFER_CAPACITY: usize = (MAX_RECORDING_DURATION_SECS * WHISPER_SAMPLE_RATE) as usize;
+
+fn max_buffer_size_for_sample_rate(sample_rate: u32) -> usize {
+    MAX_RECORDING_DURATION_SECS as usize * sample_rate as usize
+}
 
 /// Audio input device info for frontend display.
 #[derive(Debug, Clone, Serialize)]
@@ -86,7 +90,7 @@ impl AudioCapture {
         Self {
             selected_device_id: None,
             stream: None,
-            buffer: Arc::new(Mutex::new(Vec::with_capacity(MAX_BUFFER_SIZE))),
+            buffer: Arc::new(Mutex::new(Vec::with_capacity(INITIAL_BUFFER_CAPACITY))),
             native_sample_rate: WHISPER_SAMPLE_RATE,
             is_recording: false,
         }
@@ -243,6 +247,7 @@ impl AudioCapture {
             .map_err(|e| AudioError::DeviceInitFailed(e.to_string()))?;
 
         self.native_sample_rate = config.sample_rate().0;
+        let max_buffer_size = max_buffer_size_for_sample_rate(self.native_sample_rate);
 
         tracing::info!(
             "Initializing audio capture: device='{}', format={:?}, channels={}, sample_rate={}",
@@ -251,6 +256,13 @@ impl AudioCapture {
             config.channels(),
             config.sample_rate().0
         );
+
+        if let Ok(mut buf) = self.buffer.lock() {
+            let capacity = buf.capacity();
+            if capacity < max_buffer_size {
+                buf.reserve(max_buffer_size - capacity);
+            }
+        }
 
         let buffer = Arc::clone(&self.buffer);
         let channels = config.channels() as usize;
@@ -287,7 +299,7 @@ impl AudioCapture {
                     // Convert to mono by averaging channels
                     for chunk in data.chunks(channels) {
                         let mono: f32 = chunk.iter().sum::<f32>() / channels as f32;
-                        if buf.len() < MAX_BUFFER_SIZE {
+                        if buf.len() < max_buffer_size {
                             buf.push(mono);
                         } else if !OVERFLOW_LOGGED.swap(true, Ordering::Relaxed) {
                             tracing::warn!("Audio buffer full (120s max), samples dropped");
@@ -319,7 +331,7 @@ impl AudioCapture {
                         for chunk in data.chunks(channels) {
                             let mono: f32 = chunk.iter().map(|&s| s as f32 / 32768.0).sum::<f32>()
                                 / channels as f32;
-                            if buf.len() < MAX_BUFFER_SIZE {
+                            if buf.len() < max_buffer_size {
                                 buf.push(mono);
                             } else if !OVERFLOW_LOGGED.swap(true, Ordering::Relaxed) {
                                 tracing::warn!("Audio buffer full (120s max), samples dropped");
@@ -342,7 +354,7 @@ impl AudioCapture {
                                 .map(|&s| (s as f32 - 32768.0) / 32768.0)
                                 .sum::<f32>()
                                 / channels as f32;
-                            if buf.len() < MAX_BUFFER_SIZE {
+                            if buf.len() < max_buffer_size {
                                 buf.push(mono);
                             } else if !OVERFLOW_LOGGED.swap(true, Ordering::Relaxed) {
                                 tracing::warn!("Audio buffer full (120s max), samples dropped");

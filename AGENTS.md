@@ -4,7 +4,7 @@ Compact guidance for agents working in Fing.
 ## Mission & Context
 - Fing is a privacy-first speech-to-text tray app: hold hotkey → speak → release → text pasted. All local via whisper.cpp.
 - State machine: `NeedsSetup → Ready ⇄ Recording → Processing → Ready`. Hotkey only active in `Ready`.
-- Core flow (hotkey.rs): hotkey down starts mic + indicator, hotkey up stops capture → resample 16kHz → transcribe → clipboard + DB → hide indicator.
+- Core flow (`hotkey_listener.rs` + `hotkey.rs`): hotkey down starts mic + indicator, hotkey up stops capture → resample 16kHz → transcribe → direct text input + optional DB save → hide indicator.
 - Stack: Vanilla TypeScript + HTML/CSS + Lucide icons; Tauri v2 + Rust; whisper-rs; cpal + rubato; rusqlite (FTS5).
 - Cursor/Copilot rules: none found in `.cursor/rules/`, `.cursorrules`, or `.github/copilot-instructions.md`.
 
@@ -26,8 +26,7 @@ bun run typecheck  # Frontend tsc
 
 cd src-tauri && cargo fmt
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test
-cd src-tauri && cargo test hotkey::tests::register_hotkey -- --nocapture
+cd src-tauri && cargo test   # Optional sanity check; no dedicated suite yet
 ```
 
 ## Code Style
@@ -68,3 +67,4 @@ cd src-tauri && cargo test hotkey::tests::register_hotkey -- --nocapture
 - `src/main.ts` (frontend entry), `src/components/onboarding.ts`
 - `src/lib/ipc.ts`, `src/lib/types.ts`
 - `src-tauri/src/lib.rs`, `src-tauri/src/state.rs`, `src-tauri/src/hotkey.rs`
+- `src-tauri/src/hotkey_listener.rs`, `src-tauri/src/hotkey_config.rs`, `src-tauri/src/paste.rs`
