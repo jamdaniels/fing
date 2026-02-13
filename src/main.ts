@@ -10,6 +10,7 @@ import {
   Home,
   type IconNode,
   Info,
+  LoaderCircle,
   Mic,
   Monitor,
   Moon,
@@ -100,10 +101,69 @@ let sidebarListenerAttached = false;
 let contentListenerAttached = false;
 let models: ModelInfo[] = [];
 let modelDownloadPollInterval: number | null = null;
-let modelDownloadProgress: {
+interface ModelDownloadProgressState {
   variant: ModelVariant;
   percentage: number;
-} | null = null;
+  status: "downloading" | "verifying";
+}
+
+let modelDownloadProgress: ModelDownloadProgressState | null = null;
+
+function toModelDownloadProgress(
+  variant: ModelVariant,
+  progress: {
+    status: string;
+    percentage: number;
+  }
+): ModelDownloadProgressState | null {
+  if (progress.status !== "downloading" && progress.status !== "verifying") {
+    return null;
+  }
+
+  return {
+    variant,
+    percentage: progress.percentage,
+    status: progress.status,
+  };
+}
+
+function hasModelDownloadProgressChanged(
+  previous: ModelDownloadProgressState | null,
+  next: ModelDownloadProgressState
+): boolean {
+  if (!previous) {
+    return true;
+  }
+
+  return (
+    previous.variant !== next.variant ||
+    previous.status !== next.status ||
+    previous.percentage !== next.percentage
+  );
+}
+
+function updateInlineModelDownloadProgress(
+  progress: ModelDownloadProgressState
+): boolean {
+  if (progress.status !== "downloading" || currentView !== "settings") {
+    return false;
+  }
+
+  const row = document.querySelector(
+    `.model-row[data-variant="${progress.variant}"]`
+  );
+  if (!(row instanceof HTMLElement)) {
+    return false;
+  }
+
+  const value = row.querySelector(".model-download-progress-value");
+  if (!(value instanceof HTMLElement)) {
+    return false;
+  }
+
+  value.textContent = `${Math.round(progress.percentage)}%`;
+  return true;
+}
 
 function navigateToTab(tab: SidebarItem): void {
   if (!["home", "history", "settings", "about"].includes(tab)) {
@@ -1098,7 +1158,7 @@ function startModelDownloadPolling(variant: ModelVariant): void {
     clearInterval(modelDownloadPollInterval);
   }
 
-  modelDownloadProgress = { variant, percentage: 0 };
+  modelDownloadProgress = { variant, percentage: 0, status: "downloading" };
 
   // Immediately update UI to show 0%
   const modelList = document.querySelector(".model-list");
@@ -1120,16 +1180,32 @@ function startModelDownloadPolling(variant: ModelVariant): void {
       if (currentView === "settings") {
         renderContent();
       }
-    } else if (
-      progress.status === "downloading" ||
-      progress.status === "verifying"
+      return;
+    }
+
+    const nextProgress = toModelDownloadProgress(variant, progress);
+    if (!nextProgress) {
+      return;
+    }
+
+    if (!hasModelDownloadProgressChanged(modelDownloadProgress, nextProgress)) {
+      return;
+    }
+
+    const previousProgress = modelDownloadProgress;
+    modelDownloadProgress = nextProgress;
+
+    if (
+      previousProgress?.status === "downloading" &&
+      nextProgress.status === "downloading" &&
+      updateInlineModelDownloadProgress(nextProgress)
     ) {
-      // Update progress and re-render model list only
-      modelDownloadProgress = { variant, percentage: progress.percentage };
-      const modelList = document.querySelector(".model-list");
-      if (modelList && currentView === "settings") {
-        modelList.innerHTML = renderModelList();
-      }
+      return;
+    }
+
+    const modelList = document.querySelector(".model-list");
+    if (modelList && currentView === "settings") {
+      modelList.innerHTML = renderModelList();
     }
   }, 500);
 }
@@ -1508,14 +1584,21 @@ function renderModelList(): string {
 
   const rows = models
     .map((model) => {
-      const isDownloading = modelDownloadProgress?.variant === model.variant;
+      const modelProgress =
+        modelDownloadProgress?.variant === model.variant
+          ? modelDownloadProgress
+          : null;
       let actions = "";
 
       if (model.isActive) {
         actions = `<span class="model-status-badge active">In Use</span>`;
-      } else if (isDownloading) {
-        const pct = Math.round(modelDownloadProgress?.percentage ?? 0);
-        actions = `<span class="model-download-progress">${pct}%</span>`;
+      } else if (modelProgress) {
+        if (modelProgress.status === "verifying") {
+          actions = `<span class="model-download-progress verifying"><span class="loading-spinner" aria-hidden="true">${createIcon(LoaderCircle)}</span><span class="model-download-progress-value">Verifying...</span></span>`;
+        } else {
+          const pct = Math.round(modelProgress.percentage);
+          actions = `<span class="model-download-progress"><span class="loading-spinner" aria-hidden="true">${createIcon(LoaderCircle)}</span><span class="model-download-progress-value">${pct}%</span></span>`;
+        }
       } else if (model.isDownloaded) {
         actions = `
           <button class="btn btn-secondary btn-sm activate-model-btn" data-variant="${model.variant}">Activate</button>
@@ -1526,7 +1609,7 @@ function renderModelList(): string {
       }
 
       return `
-        <div class="model-row">
+        <div class="model-row" data-variant="${model.variant}">
           <span class="model-col-name">${model.displayName}</span>
           <span class="model-col-desc">${model.description}</span>
           <span class="model-col-size">~${formatModelSize(model.sizeBytes)} / ~${model.memoryEstimateMb} MB</span>

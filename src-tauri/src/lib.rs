@@ -447,11 +447,12 @@ async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
 
     if !verification.is_valid {
         return Err(format!(
-            "Model not valid at {}: exists={}, size_valid={}, format_valid={}",
+            "Model not valid at {}: exists={}, size_valid={}, format_valid={}, hash_valid={}",
             verification.path,
             verification.exists,
             verification.size_valid,
-            verification.format_valid
+            verification.format_valid,
+            verification.hash_valid
         ));
     }
 

@@ -9,6 +9,7 @@ import {
   Globe,
   GlobeLock,
   Keyboard,
+  LoaderCircle,
   Mic,
   PersonStanding,
   Search,
@@ -218,32 +219,80 @@ function keyEventToHotkey(e: KeyboardEvent): string | null {
   return [...modifiers, key].join("+");
 }
 
-function renderDownloadBody(
-  isDownloading: boolean,
-  isComplete: boolean,
-  isFailed: boolean,
-  progress: DownloadProgress | null
-): string {
-  if (isDownloading || isComplete || isFailed) {
-    let statusText = "";
-    if (isDownloading) {
-      statusText = `${formatBytes(progress?.bytesDownloaded ?? 0)} / ${formatBytes(progress?.totalBytes ?? 0)}`;
-    } else if (isComplete) {
-      statusText = "Download complete!";
-    } else if (isFailed) {
-      statusText = progress?.errorMessage || "Download failed";
-    }
-
-    return `
-      <div class="download-progress-container">
-        <div class="progress-bar">
-          <div class="progress-bar-fill" style="width: ${progress?.percentage ?? 0}%"></div>
-        </div>
-        <div class="download-status ${isFailed ? "error" : ""}${isComplete ? "success centered-status" : ""}${isDownloading ? "centered-status" : ""}">${statusText}</div>
-      </div>
-    `;
+function getDownloadStatusText(progress: DownloadProgress | null): string {
+  const status = progress?.status;
+  if (status === "verifying") {
+    return "Verifying model integrity...";
+  }
+  if (status === "downloading") {
+    return `${formatBytes(progress?.bytesDownloaded ?? 0)} / ${formatBytes(progress?.totalBytes ?? 0)}`;
+  }
+  if (status === "complete") {
+    return "Download complete!";
+  }
+  if (status === "failed") {
+    return progress?.errorMessage || "Download failed";
   }
   return "";
+}
+
+function getDownloadStatusIcon(progress: DownloadProgress | null): string {
+  const status = progress?.status;
+  if (status === "downloading" || status === "verifying") {
+    return `<span class="loading-spinner" aria-hidden="true">${createIcon(LoaderCircle)}</span>`;
+  }
+  if (status === "complete") {
+    return `<span class="status-icon status-icon-complete" aria-hidden="true">${createIcon(Check)}</span>`;
+  }
+  return "";
+}
+
+function getDownloadStatusClasses(progress: DownloadProgress | null): string {
+  const status = progress?.status;
+  const classes = ["download-status"];
+
+  if (status === "failed") {
+    classes.push("error");
+  }
+  if (status === "complete") {
+    classes.push("success", "centered-status");
+  }
+  if (status === "downloading" || status === "verifying") {
+    classes.push("centered-status", "loading");
+  }
+  if (status === "verifying") {
+    classes.push("verifying");
+  }
+
+  return classes.join(" ");
+}
+
+function renderDownloadBody(progress: DownloadProgress | null): string {
+  const status = progress?.status;
+  const isVisible =
+    status === "downloading" ||
+    status === "verifying" ||
+    status === "complete" ||
+    status === "failed";
+
+  if (!isVisible) {
+    return "";
+  }
+
+  const progressWidth =
+    status === "verifying" ? 100 : (progress?.percentage ?? 0);
+  const statusIcon = getDownloadStatusIcon(progress);
+  const statusText = getDownloadStatusText(progress);
+  const statusClasses = getDownloadStatusClasses(progress);
+
+  return `
+    <div class="download-progress-container">
+      <div class="progress-bar">
+        <div class="progress-bar-fill" style="width: ${progressWidth}%"></div>
+      </div>
+      <div class="${statusClasses}">${statusIcon}<span class="download-status-text">${statusText}</span></div>
+    </div>
+  `;
 }
 
 function renderMicPermissionStatus(status: string | undefined): string {
@@ -385,8 +434,8 @@ function renderDownloadModel(): void {
   }
 
   const progress = state.downloadProgress;
-  const isDownloading =
-    progress?.status === "downloading" || progress?.status === "verifying";
+  const isDownloading = progress?.status === "downloading";
+  const isVerifying = progress?.status === "verifying";
   const isComplete = progress?.status === "complete";
   const isFailed = progress?.status === "failed";
   const downloadBtnText = "Download Model";
@@ -395,6 +444,8 @@ function renderDownloadModel(): void {
   let footerButton: string;
   if (isComplete) {
     footerButton = `<button class="btn btn-accent btn-lg" id="continue-btn">Continue</button>`;
+  } else if (isVerifying) {
+    footerButton = `<button class="btn btn-accent btn-lg" disabled>Verifying...</button>`;
   } else if (isDownloading) {
     footerButton = `<button class="btn btn-accent btn-lg" disabled>Downloading...</button>`;
   } else if (isFailed) {
@@ -405,13 +456,8 @@ function renderDownloadModel(): void {
 
   // Body content - either selection or progress
   let bodyContent: string;
-  if (isDownloading || isComplete || isFailed) {
-    bodyContent = renderDownloadBody(
-      isDownloading,
-      isComplete,
-      isFailed,
-      progress
-    );
+  if (isDownloading || isVerifying || isComplete || isFailed) {
+    bodyContent = renderDownloadBody(progress);
   } else {
     bodyContent = `
       <div class="model-variant-grid">
@@ -1107,12 +1153,69 @@ async function handleMicChange(e: Event): Promise<void> {
   await persistSelectedDevice(state.selectedDeviceId);
 }
 
+function hasDownloadProgressChanged(
+  previous: DownloadProgress | null,
+  next: DownloadProgress
+): boolean {
+  if (!previous) {
+    return true;
+  }
+
+  return (
+    previous.status !== next.status ||
+    previous.percentage !== next.percentage ||
+    previous.bytesDownloaded !== next.bytesDownloaded ||
+    previous.totalBytes !== next.totalBytes ||
+    previous.errorMessage !== next.errorMessage ||
+    previous.variant !== next.variant
+  );
+}
+
+function updateInlineDownloadProgress(progress: DownloadProgress): boolean {
+  if (progress.status !== "downloading" || state.step !== 2 || !container) {
+    return false;
+  }
+
+  const fill = container.querySelector(
+    ".download-progress-container .progress-bar-fill"
+  );
+  const text = container.querySelector(
+    ".download-progress-container .download-status-text"
+  );
+
+  if (!(fill instanceof HTMLElement && text instanceof HTMLElement)) {
+    return false;
+  }
+
+  fill.style.width = `${progress.percentage}%`;
+  text.textContent = getDownloadStatusText(progress);
+  return true;
+}
+
 function startDownloadPolling(): void {
   console.log("[onboarding] Starting download polling");
   downloadPollInterval = window.setInterval(async () => {
     const progress = await getDownloadProgress();
+    const changed = hasDownloadProgressChanged(
+      state.downloadProgress,
+      progress
+    );
+
+    if (!changed) {
+      return;
+    }
+
     console.log("[onboarding] Download progress:", progress);
+    const previousStatus = state.downloadProgress?.status;
     state.downloadProgress = progress;
+
+    if (
+      previousStatus === "downloading" &&
+      progress.status === "downloading" &&
+      updateInlineDownloadProgress(progress)
+    ) {
+      return;
+    }
 
     if (progress.status === "complete" || progress.status === "failed") {
       console.log(

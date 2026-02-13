@@ -33,6 +33,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
 rodio = "0.20"
 rdev = { git = "https://github.com/rustdesk-org/rdev", default-features = false }
+sha2 = "0.10"
 
 # macOS: Metal for Apple GPUs
 [target.'cfg(target_os = "macos")'.dependencies]

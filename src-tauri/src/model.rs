@@ -2,9 +2,13 @@
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::io::Write;
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::io::{BufReader, Read, Write};
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::SystemTime;
 
 /// Model variant representing different quality/size tradeoffs
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -21,6 +25,7 @@ pub struct ModelDefinition {
     pub variant: ModelVariant,
     pub filename: &'static str,
     pub url: &'static str,
+    pub sha256: &'static str,
     pub size_bytes: u64,
     pub display_name: &'static str,
     pub description: &'static str,
@@ -33,6 +38,7 @@ pub const MODEL_REGISTRY: &[ModelDefinition] = &[
         variant: ModelVariant::SmallQ5,
         filename: "ggml-small-q5_1.bin",
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
+        sha256: "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
         size_bytes: 190_000_000, // ~190 MB
         display_name: "Small Q5",
         description: "Good",
@@ -42,6 +48,7 @@ pub const MODEL_REGISTRY: &[ModelDefinition] = &[
         variant: ModelVariant::Small,
         filename: "ggml-small.bin",
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+        sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
         size_bytes: 488_000_000, // ~488 MB
         display_name: "Small",
         description: "Better",
@@ -52,6 +59,7 @@ pub const MODEL_REGISTRY: &[ModelDefinition] = &[
         filename: "ggml-large-v3-turbo-q5_0.bin",
         url:
             "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+        sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
         size_bytes: 574_000_000, // ~574 MB
         display_name: "Large Turbo Q5",
         description: "Best",
@@ -93,6 +101,7 @@ pub struct ModelVerification {
     pub exists: bool,
     pub size_valid: bool,
     pub format_valid: bool,
+    pub hash_valid: bool,
     pub is_valid: bool,
 }
 
@@ -208,28 +217,40 @@ impl From<&InternalDownloadState> for DownloadProgress {
 lazy_static::lazy_static! {
     static ref DOWNLOAD_STATE: Mutex<InternalDownloadState> =
         Mutex::new(InternalDownloadState::default());
+    static ref HASH_CACHE: Mutex<HashMap<PathBuf, HashCacheEntry>> = Mutex::new(HashMap::new());
+}
+
+const HASH_CACHE_MAX_ENTRIES: usize = 64;
+
+#[derive(Debug, Clone)]
+struct HashCacheEntry {
+    size: u64,
+    modified: Option<SystemTime>,
+    sha256: String,
 }
 
 /// Verify a model file exists and has valid magic bytes.
 /// Uses a general size check (minimum 50MB for any whisper model).
 pub fn verify(path: &std::path::Path) -> ModelVerification {
-    verify_with_expected_size(path, None)
+    verify_with_expected_size(path, None, None)
 }
 
 /// Verify a model file for a specific variant.
 pub fn verify_for_variant(path: &std::path::Path, variant: ModelVariant) -> ModelVerification {
     let def = get_definition(variant);
-    verify_with_expected_size(path, Some(def.size_bytes))
+    verify_with_expected_size(path, Some(def.size_bytes), Some(def.sha256))
 }
 
 /// Internal verify function with optional expected size.
 fn verify_with_expected_size(
     path: &std::path::Path,
     expected_size: Option<u64>,
+    expected_sha256: Option<&str>,
 ) -> ModelVerification {
     let exists = path.exists();
     let mut size_valid = false;
     let mut format_valid = false;
+    let mut hash_valid = expected_sha256.is_none();
 
     if exists {
         // Check file size
@@ -262,9 +283,20 @@ fn verify_with_expected_size(
             size_valid = false;
         }
 
-        // Model is valid if size and magic bytes check pass
         if size_valid {
-            format_valid = true;
+            if let Some(expected_hash) = expected_sha256 {
+                hash_valid = verify_sha256_with_cache(path, expected_hash);
+                if !hash_valid {
+                    tracing::warn!("Model file SHA256 mismatch: {:?}", path);
+                }
+            } else {
+                hash_valid = true;
+            }
+        }
+
+        // Model format is valid if size, magic bytes, and hash checks pass.
+        if size_valid {
+            format_valid = hash_valid;
         }
     }
 
@@ -273,8 +305,77 @@ fn verify_with_expected_size(
         exists,
         size_valid,
         format_valid,
-        is_valid: exists && size_valid && format_valid,
+        hash_valid,
+        is_valid: exists && size_valid && format_valid && hash_valid,
     }
+}
+
+fn metadata_signature(path: &Path) -> Option<(u64, Option<SystemTime>)> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some((metadata.len(), metadata.modified().ok()))
+}
+
+fn compute_file_sha256(path: &Path) -> Result<String, String> {
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+
+    loop {
+        let bytes_read = reader.read(&mut buffer).map_err(|e| e.to_string())?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn verify_sha256_with_cache(path: &Path, expected_sha256: &str) -> bool {
+    let normalized_expected = expected_sha256.trim().to_ascii_lowercase();
+    if normalized_expected.len() != 64
+        || !normalized_expected.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        tracing::error!("Invalid expected SHA256 for {:?}", path);
+        return false;
+    }
+
+    let Some((size, modified)) = metadata_signature(path) else {
+        return false;
+    };
+
+    if let Ok(cache) = HASH_CACHE.lock() {
+        if let Some(entry) = cache.get(path) {
+            if entry.size == size && entry.modified == modified {
+                return entry.sha256 == normalized_expected;
+            }
+        }
+    }
+
+    let computed = match compute_file_sha256(path) {
+        Ok(hash) => hash,
+        Err(e) => {
+            tracing::error!("Failed to compute SHA256 for {:?}: {}", path, e);
+            return false;
+        }
+    };
+
+    if let Ok(mut cache) = HASH_CACHE.lock() {
+        if cache.len() >= HASH_CACHE_MAX_ENTRIES && !cache.contains_key(path) {
+            cache.clear();
+        }
+        cache.insert(
+            path.to_path_buf(),
+            HashCacheEntry {
+                size,
+                modified,
+                sha256: computed.clone(),
+            },
+        );
+    }
+
+    computed == normalized_expected
 }
 
 /// Validate GGML file magic bytes
@@ -424,6 +525,9 @@ pub fn delete_model(variant: ModelVariant) -> Result<(), String> {
             tracing::error!("Failed to delete model: {}", e);
             e.to_string()
         })?;
+        if let Ok(mut cache) = HASH_CACHE.lock() {
+            cache.remove(&path);
+        }
         tracing::info!(
             "Deleted {} model at {:?}",
             get_definition(variant).display_name,

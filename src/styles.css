@@ -962,8 +962,21 @@ body[data-platform="windows"] .titlebar {
   padding-top: 8px;
 }
 
+.download-status.loading {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+
 .download-status.success {
-  color: var(--success);
+  color: var(--accent);
+}
+
+.download-status.verifying {
+  color: var(--text-secondary);
 }
 
 .download-status.error {
@@ -2087,8 +2100,8 @@ body[data-platform="windows"] .titlebar {
 }
 
 .model-status-badge.active {
-  color: var(--success);
-  background-color: var(--success-10);
+  color: var(--accent);
+  background-color: var(--accent-10);
 }
 
 .model-empty {
@@ -2102,11 +2115,45 @@ body[data-platform="windows"] .titlebar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   padding: 5px 10px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--accent);
   min-width: 70px;
+}
+
+.model-download-progress.verifying {
+  color: var(--accent);
+  min-width: 96px;
+}
+
+.status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+}
+
+.status-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+.status-icon-complete {
+  color: var(--accent);
+}
+
+.loading-spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.loading-spinner svg {
+  width: 12px;
+  height: 12px;
+  animation: spin 0.9s linear infinite;
 }
 
 .test-result-area {

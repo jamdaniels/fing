@@ -100,6 +100,7 @@ export interface ModelVerification {
   exists: boolean;
   sizeValid: boolean;
   formatValid: boolean;
+  hashValid: boolean;
   isValid: boolean;
 }
 
