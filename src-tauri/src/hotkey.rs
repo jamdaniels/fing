@@ -365,8 +365,6 @@ pub fn on_key_up(app: &AppHandle) {
             return;
         }
 
-        tracing::info!("Transcription result: {}", text);
-
         if test_mode {
             // In test mode, emit event instead of pasting (indicator steals focus)
             app_handle
