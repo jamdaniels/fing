@@ -1864,8 +1864,10 @@ function renderAbout(el: HTMLElement): void {
       </div>
       <p class="about-tagline">Fast, private, local speech-to-text</p>
       <div class="about-backend">Backend: ${info?.inferenceBackend ?? "Unknown"}</div>
-      <br/><br/>
-      <a href="https://github.com/jamdaniels/fing" target="_blank" class="btn btn-secondary">GitHub ${createIcon(ArrowUpRight)}</a>
+      <div class="about-actions">
+        <a href="https://github.com/jamdaniels/fing" target="_blank" rel="noreferrer" class="btn btn-secondary">GitHub ${createIcon(ArrowUpRight)}</a>
+        <a href="mailto:hi@cem.run?subject=Fing%20feedback" class="btn btn-secondary">Feedback ${createIcon(ArrowUpRight)}</a>
+      </div>
     </div>
   `;
 }
