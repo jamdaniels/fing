@@ -465,7 +465,7 @@ async function handleDeleteTranscript(id: number): Promise<void> {
 async function handleClearAll(): Promise<void> {
   const confirmed = await showConfirmDialog({
     title: "Clear All Transcripts",
-    body: "Are you sure you want to delete all transcripts? This cannot be undone.",
+    body: "Are you sure you want to delete all transcripts?",
     confirmText: "Delete All",
     danger: true,
   });

@@ -277,32 +277,18 @@ impl AudioCapture {
             tracing::error!("Audio stream error: {}", err);
         };
 
-        // Counter for logging
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static CALLBACK_COUNT: AtomicU64 = AtomicU64::new(0);
-
         let stream = match config.sample_format() {
             cpal::SampleFormat::F32 => device.build_input_stream(
                 &stream_config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    let count = CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
-                    if count.is_multiple_of(100) {
-                        let peak: f32 = data.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-                        tracing::info!(
-                            "Audio callback #{}: {} samples, peak={:.4}",
-                            count,
-                            data.len(),
-                            peak
-                        );
-                    }
                     let mut buf = buffer.lock().unwrap();
                     // Convert to mono by averaging channels
                     for chunk in data.chunks(channels) {
                         let mono: f32 = chunk.iter().sum::<f32>() / channels as f32;
                         if buf.len() < max_buffer_size {
                             buf.push(mono);
-                        } else if !OVERFLOW_LOGGED.swap(true, Ordering::Relaxed) {
-                            tracing::warn!("Audio buffer full (120s max), samples dropped");
+                        } else {
+                            OVERFLOW_LOGGED.store(true, Ordering::Relaxed);
                         }
                     }
                 },
@@ -314,27 +300,14 @@ impl AudioCapture {
                 device.build_input_stream(
                     &stream_config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        let count = CALLBACK_COUNT.fetch_add(1, Ordering::Relaxed);
-                        if count.is_multiple_of(100) {
-                            let peak: f32 = data
-                                .iter()
-                                .map(|&s| (s as f32 / 32768.0).abs())
-                                .fold(0.0f32, f32::max);
-                            tracing::info!(
-                                "Audio callback #{}: {} samples, peak={:.4}",
-                                count,
-                                data.len(),
-                                peak
-                            );
-                        }
                         let mut buf = buffer.lock().unwrap();
                         for chunk in data.chunks(channels) {
                             let mono: f32 = chunk.iter().map(|&s| s as f32 / 32768.0).sum::<f32>()
                                 / channels as f32;
                             if buf.len() < max_buffer_size {
                                 buf.push(mono);
-                            } else if !OVERFLOW_LOGGED.swap(true, Ordering::Relaxed) {
-                                tracing::warn!("Audio buffer full (120s max), samples dropped");
+                            } else {
+                                OVERFLOW_LOGGED.store(true, Ordering::Relaxed);
                             }
                         }
                     },
@@ -356,8 +329,8 @@ impl AudioCapture {
                                 / channels as f32;
                             if buf.len() < max_buffer_size {
                                 buf.push(mono);
-                            } else if !OVERFLOW_LOGGED.swap(true, Ordering::Relaxed) {
-                                tracing::warn!("Audio buffer full (120s max), samples dropped");
+                            } else {
+                                OVERFLOW_LOGGED.store(true, Ordering::Relaxed);
                             }
                         }
                     },
@@ -399,6 +372,9 @@ impl AudioCapture {
             let _ = stream.pause();
         }
         self.is_recording = false;
+        if OVERFLOW_LOGGED.swap(false, Ordering::Relaxed) {
+            tracing::warn!("Audio buffer full (120s max), samples dropped");
+        }
 
         // Extract buffer
         let mut buf = self.buffer.lock().unwrap();

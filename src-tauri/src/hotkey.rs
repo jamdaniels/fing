@@ -365,6 +365,8 @@ pub fn on_key_up(app: &AppHandle) {
             return;
         }
 
+        let mut persisted_transcript: Option<String> = None;
+
         if test_mode {
             // In test mode, emit event instead of pasting (indicator steals focus)
             app_handle
@@ -401,13 +403,14 @@ pub fn on_key_up(app: &AppHandle) {
                     duration_ms,
                     app_context: None, // TODO: Get focused app context
                 };
-                if let Err(e) = save_transcript(&transcript) {
-                    tracing::error!("Failed to save transcript: {}", e);
+                match save_transcript(&transcript) {
+                    Ok(_) => persisted_transcript = Some(text.clone()),
+                    Err(e) => tracing::error!("Failed to save transcript: {}", e),
                 }
             }
         }
 
-        finish_transcription(&app_handle, Some(text), duration_ms, test_mode).await;
+        finish_transcription(&app_handle, persisted_transcript, duration_ms, test_mode).await;
     });
 }
 

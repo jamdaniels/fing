@@ -1,6 +1,7 @@
 use once_cell::sync::Lazy;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 /// Global database connection (SQLite with FTS5).
@@ -8,6 +9,27 @@ static DB: Lazy<Mutex<Option<Connection>>> = Lazy::new(|| Mutex::new(None));
 
 /// Maximum allowed FTS5 query length
 const MAX_FTS_QUERY_LENGTH: usize = 500;
+const DEFAULT_PAGE_LIMIT: i64 = 25;
+const MAX_PAGE_LIMIT: i64 = 200;
+const MAX_PAGE_OFFSET: i64 = 10_000;
+
+const STOP_WORDS: &[&str] = &[
+    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by",
+    "from", "is", "it", "that", "this", "be", "are", "was", "were", "been", "have", "has", "had",
+    "do", "does", "did", "will", "would", "could", "should", "may", "might", "can", "just", "so",
+    "like", "if", "then", "than", "when", "what", "which", "who", "how", "all", "each", "every",
+    "both", "few", "more", "most", "other", "some", "such", "no", "not", "only", "same", "too",
+    "very", "as", "into", "through", "during", "before", "after", "above", "below", "up", "down",
+    "out", "off", "over", "under", "again", "further", "once", "here", "there", "where", "why",
+    "any", "about", "because", "also", "get", "got", "going", "go", "know", "think", "want",
+    "need", "make", "see", "look", "come", "back", "now", "way", "well", "even", "new", "take",
+    "use", "your", "our", "their", "my", "its", "you", "we", "they", "he", "she", "him", "her",
+    "his", "them", "i", "me", "us", "yeah", "yes", "okay", "ok", "um", "uh", "ah", "oh", "hmm",
+    "actually", "really",
+];
+
+static STOP_WORD_SET: Lazy<HashSet<&'static str>> =
+    Lazy::new(|| STOP_WORDS.iter().copied().collect());
 
 /// Sanitize FTS5 search query to prevent injection
 fn sanitize_fts5_query(query: &str) -> String {
@@ -53,6 +75,85 @@ fn sanitize_fts5_query(query: &str) -> String {
     }
 }
 
+fn sanitize_pagination(limit: i64, offset: i64) -> (i64, i64) {
+    let limit = if limit <= 0 {
+        DEFAULT_PAGE_LIMIT
+    } else {
+        limit.min(MAX_PAGE_LIMIT)
+    };
+    let offset = offset.clamp(0, MAX_PAGE_OFFSET);
+    (limit, offset)
+}
+
+fn extract_term_counts(text: &str) -> HashMap<String, i64> {
+    let mut word_counts: HashMap<String, i64> = HashMap::new();
+
+    for word in text.split_whitespace() {
+        let clean: String = word
+            .chars()
+            .filter(|c| c.is_alphabetic())
+            .collect::<String>()
+            .to_lowercase();
+
+        if clean.len() < 3 || STOP_WORD_SET.contains(clean.as_str()) {
+            continue;
+        }
+        *word_counts.entry(clean).or_insert(0) += 1;
+    }
+
+    word_counts
+}
+
+fn insert_transcript_terms(
+    conn: &Connection,
+    transcript_id: i64,
+    created_at: &str,
+    term_counts: &HashMap<String, i64>,
+) -> Result<(), rusqlite::Error> {
+    if term_counts.is_empty() {
+        return Ok(());
+    }
+
+    let mut insert_stmt = conn.prepare(
+        "INSERT OR REPLACE INTO transcript_terms (transcript_id, created_at, word, count)
+         VALUES (?1, ?2, ?3, ?4)",
+    )?;
+
+    for (word, count) in term_counts {
+        insert_stmt.execute(params![transcript_id, created_at, word, count])?;
+    }
+
+    Ok(())
+}
+
+fn backfill_recent_term_index(conn: &Connection) -> Result<u64, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.text, t.created_at
+         FROM transcripts t
+         WHERE t.created_at >= datetime('now', '-30 days')
+           AND NOT EXISTS (
+             SELECT 1 FROM transcript_terms tt WHERE tt.transcript_id = t.id
+           )",
+    )?;
+
+    let missing_rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    for (id, text, created_at) in &missing_rows {
+        let term_counts = extract_term_counts(text);
+        insert_transcript_terms(conn, *id, created_at, &term_counts)?;
+    }
+
+    Ok(missing_rows.len() as u64)
+}
+
 /// Initialize the database, creating tables and FTS5 index if needed.
 pub fn init_db() -> Result<(), String> {
     let path = crate::paths::db_path().ok_or_else(|| "App paths not initialized".to_string())?;
@@ -64,6 +165,10 @@ pub fn init_db() -> Result<(), String> {
     }
 
     let conn = Connection::open(&path).map_err(|e| format!("Failed to open database: {e}"))?;
+
+    if let Err(e) = conn.execute("PRAGMA foreign_keys=ON", []) {
+        tracing::warn!("Could not enable foreign key enforcement: {}", e);
+    }
 
     // Enable WAL mode for better reliability (non-fatal if fails)
     if let Err(e) = conn.execute("PRAGMA journal_mode=WAL", []) {
@@ -120,6 +225,38 @@ pub fn init_db() -> Result<(), String> {
         [],
     )
     .map_err(|e| format!("Failed to create index: {e}"))?;
+
+    // Pre-tokenized terms for fast top-word stats queries.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS transcript_terms (
+            transcript_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            word TEXT NOT NULL,
+            count INTEGER NOT NULL,
+            PRIMARY KEY (transcript_id, word),
+            FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE
+        )",
+        [],
+    )
+    .map_err(|e| format!("Failed to create transcript_terms table: {e}"))?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_transcript_terms_created_at
+         ON transcript_terms(created_at)",
+        [],
+    )
+    .map_err(|e| format!("Failed to create transcript_terms created_at index: {e}"))?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_transcript_terms_word
+         ON transcript_terms(word)",
+        [],
+    )
+    .map_err(|e| format!("Failed to create transcript_terms word index: {e}"))?;
+
+    match backfill_recent_term_index(&conn) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("Backfilled term index for {n} transcripts"),
+        Err(e) => tracing::warn!("Failed to backfill term index: {e}"),
+    }
 
     let mut db = DB
         .lock()
@@ -185,8 +322,11 @@ pub fn save_transcript(transcript: &NewTranscript) -> Result<Transcript, String>
 
         let id = conn.last_insert_rowid();
 
-        let mut stmt = conn.prepare("SELECT id, text, created_at, duration_ms, app_context, word_count FROM transcripts WHERE id = ?1")?;
-        stmt.query_row([id], |row| {
+        let mut stmt = conn.prepare(
+            "SELECT id, text, created_at, duration_ms, app_context, word_count
+             FROM transcripts WHERE id = ?1",
+        )?;
+        let transcript = stmt.query_row([id], |row| {
             Ok(Transcript {
                 id: row.get(0)?,
                 text: row.get(1)?,
@@ -195,12 +335,23 @@ pub fn save_transcript(transcript: &NewTranscript) -> Result<Transcript, String>
                 app_context: row.get(4)?,
                 word_count: row.get(5)?,
             })
-        })
+        })?;
+
+        let term_counts = extract_term_counts(&transcript.text);
+        if let Err(e) =
+            insert_transcript_terms(conn, transcript.id, &transcript.created_at, &term_counts)
+        {
+            tracing::warn!("Failed to index transcript terms for stats: {}", e);
+        }
+
+        Ok(transcript)
     })
 }
 
 /// Get recent transcripts ordered by date descending.
 pub fn get_recent_transcripts(limit: i64, offset: i64) -> Result<Vec<Transcript>, String> {
+    let (limit, offset) = sanitize_pagination(limit, offset);
+
     with_db(|conn| {
         let mut stmt = conn.prepare(
             "SELECT id, text, created_at, duration_ms, app_context, word_count
@@ -226,9 +377,7 @@ pub fn get_recent_transcripts(limit: i64, offset: i64) -> Result<Vec<Transcript>
 
 /// Full-text search transcripts using FTS5.
 pub fn search_transcripts(query: &str, limit: i64, offset: i64) -> Result<Vec<Transcript>, String> {
-    // Validate and clamp limit/offset
-    let limit = limit.clamp(1, 1000);
-    let offset = offset.max(0);
+    let (limit, offset) = sanitize_pagination(limit, offset);
 
     // Sanitize the FTS5 query
     let sanitized_query = sanitize_fts5_query(query);
@@ -352,54 +501,17 @@ fn get_top_words(
     conn: &rusqlite::Connection,
     limit: usize,
 ) -> Result<Vec<(String, i64)>, rusqlite::Error> {
-    use std::collections::HashMap;
+    let mut stmt = conn.prepare(
+        "SELECT word, SUM(count) AS total_count
+         FROM transcript_terms
+         WHERE created_at >= datetime('now', '-30 days')
+         GROUP BY word
+         ORDER BY total_count DESC, word ASC
+         LIMIT ?1",
+    )?;
 
-    // Stop words to filter out
-    const STOP_WORDS: &[&str] = &[
-        "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by",
-        "from", "is", "it", "that", "this", "be", "are", "was", "were", "been", "have", "has",
-        "had", "do", "does", "did", "will", "would", "could", "should", "may", "might", "can",
-        "just", "so", "like", "if", "then", "than", "when", "what", "which", "who", "how", "all",
-        "each", "every", "both", "few", "more", "most", "other", "some", "such", "no", "not",
-        "only", "same", "too", "very", "as", "into", "through", "during", "before", "after",
-        "above", "below", "up", "down", "out", "off", "over", "under", "again", "further", "once",
-        "here", "there", "where", "why", "any", "about", "because", "also", "get", "got", "going",
-        "go", "know", "think", "want", "need", "make", "see", "look", "come", "back", "now", "way",
-        "well", "even", "new", "take", "use", "your", "our", "their", "my", "its", "you", "we",
-        "they", "he", "she", "him", "her", "his", "them", "i", "me", "us", "yeah", "yes", "okay",
-        "ok", "um", "uh", "ah", "oh", "hmm", "actually", "really",
-    ];
-
-    let mut stmt = conn
-        .prepare("SELECT text FROM transcripts WHERE created_at >= datetime('now', '-30 days')")?;
-
-    let mut word_counts: HashMap<String, i64> = HashMap::new();
-
-    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-
-    for text_result in rows {
-        let text = text_result?;
-        for word in text.split_whitespace() {
-            // Clean and lowercase
-            let clean: String = word
-                .chars()
-                .filter(|c| c.is_alphabetic())
-                .collect::<String>()
-                .to_lowercase();
-
-            // Skip short words and stop words
-            if clean.len() >= 3 && !STOP_WORDS.contains(&clean.as_str()) {
-                *word_counts.entry(clean).or_insert(0) += 1;
-            }
-        }
-    }
-
-    // Sort by count and take top N
-    let mut sorted: Vec<_> = word_counts.into_iter().collect();
-    sorted.sort_by(|a, b| b.1.cmp(&a.1));
-    sorted.truncate(limit);
-
-    Ok(sorted)
+    let rows = stmt.query_map([limit as i64], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    rows.collect::<Result<Vec<_>, _>>()
 }
 
 // Tauri commands
@@ -426,4 +538,30 @@ pub fn db_delete(id: i64) -> Result<(), String> {
 #[tauri::command]
 pub fn db_delete_all() -> Result<(), String> {
     delete_all_transcripts()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_term_counts, sanitize_pagination};
+
+    #[test]
+    fn sanitize_pagination_clamps_limit_and_offset() {
+        assert_eq!(sanitize_pagination(25, 0), (25, 0));
+        assert_eq!(sanitize_pagination(0, -10), (25, 0));
+        assert_eq!(sanitize_pagination(-5, 5), (25, 5));
+        assert_eq!(sanitize_pagination(10_000, 50_000), (200, 10_000));
+    }
+
+    #[test]
+    fn extract_term_counts_filters_short_words_and_stop_words() {
+        let counts = extract_term_counts("The quick brown fox and THE fox run! run, it.");
+
+        assert_eq!(counts.get("quick"), Some(&1));
+        assert_eq!(counts.get("brown"), Some(&1));
+        assert_eq!(counts.get("fox"), Some(&2));
+        assert_eq!(counts.get("run"), Some(&2));
+        assert_eq!(counts.get("the"), None);
+        assert_eq!(counts.get("and"), None);
+        assert_eq!(counts.get("it"), None);
+    }
 }
