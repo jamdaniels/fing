@@ -1866,7 +1866,7 @@ function renderAbout(el: HTMLElement): void {
       <div class="about-backend">Backend: ${info?.inferenceBackend ?? "Unknown"}</div>
       <div class="about-actions">
         <a href="https://github.com/jamdaniels/fing" target="_blank" rel="noreferrer" class="btn btn-secondary">GitHub ${createIcon(ArrowUpRight)}</a>
-        <a href="mailto:hi@cem.run?subject=Fing%20feedback" class="btn btn-secondary">Feedback ${createIcon(ArrowUpRight)}</a>
+        <a href="https://x.com/coding_jam" target="_blank" rel="noreferrer" class="btn btn-secondary">Feedback ${createIcon(ArrowUpRight)}</a>
       </div>
     </div>
   `;
