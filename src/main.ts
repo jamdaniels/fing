@@ -1858,9 +1858,7 @@ function renderAbout(el: HTMLElement): void {
 <img class="about-icon" src="/icon.png" alt="Fing" />
       <h1>Fing</h1>
       <div class="about-version">
-        Version ${info?.version ?? "0.1.0"}<br/>
-        Commit: ${info?.commit ?? "dev"}<br/>
-        Built: ${info?.buildDate ?? "unknown"}
+        Version: ${info?.version ?? "0.1.0"} (${info?.commit ?? "unknown"})
       </div>
       <p class="about-tagline">Fast, private, local speech-to-text</p>
       <div class="about-backend">Backend: ${info?.inferenceBackend ?? "Unknown"}</div>

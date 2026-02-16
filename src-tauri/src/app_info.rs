@@ -25,7 +25,7 @@ pub fn build_app_info() -> AppInfo {
     AppInfo {
         name: "Fing".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        commit: option_env!("GIT_COMMIT").unwrap_or("dev").to_string(),
+        commit: option_env!("GIT_COMMIT").unwrap_or("unknown").to_string(),
         build_date: option_env!("BUILD_DATE").unwrap_or("unknown").to_string(),
         repository: "https://github.com/your-username/fing".to_string(),
         inference_backend: inference_backend.to_string(),
