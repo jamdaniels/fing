@@ -31,7 +31,6 @@ import {
   downloadModel,
   getAppInfo,
   getAppState,
-  getAudioDevices,
   getAutoStart,
   getDownloadProgress,
   getMicTestLevel,
@@ -713,7 +712,9 @@ async function loadSettings(
     const [loadedSettings, loadedModels, devices] = await Promise.all([
       getSettings(),
       getModels(),
-      shouldRefreshDevices ? getAudioDevices() : Promise.resolve(audioDevices),
+      shouldRefreshDevices
+        ? refreshAudioDevices()
+        : Promise.resolve(audioDevices),
     ]);
     settings = loadedSettings;
     audioDevices = devices;
@@ -1782,14 +1783,24 @@ function renderSettings(el: HTMLElement): void {
   // Render immediately to keep navigation snappy.
   renderSettingsUI(el);
 
-  if (!cacheFresh) {
-    // Refresh in the background and re-render when ready.
-    loadSettings({ refreshDevices: false }).then(() => {
-      if (currentView === "settings") {
-        renderSettingsUI(el);
-      }
-    });
+  if (cacheFresh) {
+    refreshAudioDevices()
+      .then((devices) => {
+        audioDevices = devices;
+        if (currentView === "settings") {
+          renderSettingsUI(el);
+        }
+      })
+      .catch((err) => console.error("Failed to refresh devices:", err));
+    return;
   }
+
+  // Refresh in the background and re-render when ready.
+  loadSettings({ refreshDevices: true }).then(() => {
+    if (currentView === "settings") {
+      renderSettingsUI(el);
+    }
+  });
 }
 
 function updatePermissionStatus(): void {

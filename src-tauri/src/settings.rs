@@ -170,7 +170,6 @@ pub async fn get_settings() -> Result<Settings, String> {
     Ok(load_settings().await)
 }
 
-#[tauri::command]
 pub async fn update_settings(settings: Settings) -> Result<Settings, String> {
     save_settings(&settings).await?;
     Ok(settings)

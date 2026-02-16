@@ -26,7 +26,7 @@ use std::sync::Mutex;
 #[cfg(target_os = "macos")]
 use tauri::ActivationPolicy;
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     Emitter, Manager,
 };
@@ -45,8 +45,7 @@ struct MicTestState {
 #[derive(Clone)]
 struct MicMenuEntry {
     device_id: Option<String>,
-    name: String,
-    item: MenuItem<tauri::Wry>,
+    item: CheckMenuItem<tauri::Wry>,
 }
 
 lazy_static::lazy_static! {
@@ -74,9 +73,15 @@ fn get_audio_devices() -> Vec<AudioDevice> {
 }
 
 #[tauri::command]
-fn refresh_audio_devices() -> Vec<AudioDevice> {
+fn refresh_audio_devices(app: tauri::AppHandle) -> Vec<AudioDevice> {
     tracing::debug!("Refreshing audio device list");
-    AudioCapture::list_devices()
+    let devices = AudioCapture::list_devices();
+
+    if let Err(e) = rebuild_tray_menu(&app) {
+        tracing::warn!("Failed to rebuild tray menu after device refresh: {}", e);
+    }
+
+    devices
 }
 
 #[tauri::command]
@@ -402,6 +407,26 @@ fn request_permissions() -> PermissionStatus {
 }
 
 #[tauri::command]
+async fn update_settings(
+    app: tauri::AppHandle,
+    settings: settings::Settings,
+) -> Result<settings::Settings, String> {
+    let previous_selected = settings::load_settings_sync().selected_microphone_id;
+    let updated = settings::update_settings(settings).await?;
+
+    if previous_selected != updated.selected_microphone_id {
+        if let Err(e) = rebuild_tray_menu(&app) {
+            tracing::warn!(
+                "Failed to rebuild tray menu after microphone setting change: {}",
+                e
+            );
+        }
+    }
+
+    Ok(updated)
+}
+
+#[tauri::command]
 fn request_microphone_permission() {
     #[cfg(target_os = "macos")]
     platform::request_microphone_permission();
@@ -586,11 +611,10 @@ fn build_mic_menu_items(
         } else {
             device.is_default
         };
-        let label = mic_item_label(&device.name, is_selected);
-        let item = MenuItem::with_id(app, &item_id, &label, true, None::<&str>)?;
+        let item =
+            CheckMenuItem::with_id(app, &item_id, &device.name, true, is_selected, None::<&str>)?;
         mic_entries.push(MicMenuEntry {
             device_id: Some(device.id.clone()),
-            name: device.name.clone(),
             item: item.clone(),
         });
         result.push(Box::new(item));
@@ -600,14 +624,6 @@ fn build_mic_menu_items(
     *stored = mic_entries;
 
     Ok(result)
-}
-
-fn mic_item_label(name: &str, selected: bool) -> String {
-    if selected {
-        format!("✓ {name}")
-    } else {
-        name.to_string()
-    }
 }
 
 fn encode_menu_id(value: &str) -> String {
@@ -654,7 +670,7 @@ fn update_mic_menu_checks(selected_id: Option<String>) {
         } else {
             false
         };
-        let _ = entry.item.set_text(mic_item_label(&entry.name, selected));
+        let _ = entry.item.set_checked(selected);
     }
 }
 
@@ -706,6 +722,7 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
             };
             let current_selected = settings::load_settings_sync().selected_microphone_id;
             if device_id == current_selected {
+                update_mic_menu_checks(current_selected);
                 return;
             }
             tracing::info!("Microphone changed via tray: {:?}", device_id);
@@ -844,7 +861,7 @@ pub fn run() {
             app_info::get_app_info,
             // Settings
             settings::get_settings,
-            settings::update_settings,
+            update_settings,
             // Stats
             stats::get_stats,
             // Database operations
