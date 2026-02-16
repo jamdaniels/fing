@@ -117,7 +117,7 @@ export interface MicTestStartResult {
 }
 
 export interface PermissionStatus {
-  microphone: "unknown" | "granted" | "denied";
+  microphone: "unknown" | "prompt" | "granted" | "denied";
   accessibility: "unknown" | "granted" | "denied" | "not-applicable";
 }
 

@@ -943,6 +943,7 @@ function renderTestStep(): void {
           class="test-input test-input-readonly"
         >${state.testText ? escapeHtml(state.testText) : '<span class="test-input-placeholder">Your transcription will appear here...</span>'}</div>
         <p class="onboarding-hint ${hasText ? "invisible" : ""}">Complete a test transcription to continue</p>
+        <p class="onboarding-hint ${hasText ? "invisible" : ""}">First transcription may take a few seconds while the model loads.</p>
       </div>
       <div class="onboarding-footer">
         <button class="btn btn-accent btn-lg" id="finish-btn" ${hasText ? "" : "disabled"}>

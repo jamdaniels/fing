@@ -43,24 +43,14 @@ pub fn request_microphone_permission() {
         .spawn();
 }
 
-/// Check if microphone permission is granted by trying to capture audio
+/// Check if microphone permission is granted by trying to open an input stream.
+/// Successful stream setup indicates the app is authorized, even if the room is silent.
 pub fn check_microphone_permission() -> String {
     use crate::audio::AudioCapture;
 
     let mut capture = AudioCapture::new();
     match capture.test_microphone() {
-        Ok(test) => {
-            if test.is_receiving_audio || test.peak_level > 0.0 {
-                "granted".to_string()
-            } else {
-                let devices = AudioCapture::list_devices();
-                if devices.is_empty() {
-                    "denied".to_string()
-                } else {
-                    "prompt".to_string()
-                }
-            }
-        }
+        Ok(_) => "granted".to_string(),
         Err(e) => {
             tracing::warn!("Microphone check failed: {}", e);
             "denied".to_string()
