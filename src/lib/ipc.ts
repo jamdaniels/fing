@@ -28,8 +28,8 @@ export async function getSettings(): Promise<Settings> {
   return await invoke<Settings>("get_settings");
 }
 
-export async function updateSettings(settings: Settings): Promise<void> {
-  return await invoke("update_settings", { settings });
+export async function updateSettings(settings: Settings): Promise<Settings> {
+  return await invoke<Settings>("update_settings", { settings });
 }
 
 export async function getStats(): Promise<Stats> {

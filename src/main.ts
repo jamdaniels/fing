@@ -734,6 +734,21 @@ function validateDictionaryTerm(term: string): string | null {
   return null;
 }
 
+function focusDictionaryInput(): void {
+  requestAnimationFrame(() => {
+    if (currentView !== "dictionary") {
+      return;
+    }
+
+    const dictionaryInput = document.querySelector(
+      ".dictionary-input"
+    ) as HTMLInputElement | null;
+    if (dictionaryInput && !dictionaryInput.disabled) {
+      dictionaryInput.focus();
+    }
+  });
+}
+
 async function addDictionaryTerm(input: HTMLInputElement): Promise<void> {
   if (!settings) {
     return;
@@ -744,20 +759,22 @@ async function addDictionaryTerm(input: HTMLInputElement): Promise<void> {
   if (validationError) {
     dictionaryError = validationError;
     renderContent();
+    focusDictionaryInput();
     return;
   }
 
   const updatedTerms = [...getDictionaryTerms(), normalized];
   try {
     const updatedSettings = { ...settings, dictionaryTerms: updatedTerms };
-    await updateSettings(updatedSettings);
-    settings = updatedSettings;
+    settings = await updateSettings(updatedSettings);
     dictionaryError = null;
     renderContent();
+    focusDictionaryInput();
   } catch (error) {
     console.error("Failed to add dictionary term:", error);
     dictionaryError = "Failed to save term";
     renderContent();
+    focusDictionaryInput();
   }
 }
 
@@ -774,8 +791,7 @@ async function removeDictionaryTerm(index: number): Promise<void> {
   const updatedTerms = terms.filter((_, termIndex) => termIndex !== index);
   try {
     const updatedSettings = { ...settings, dictionaryTerms: updatedTerms };
-    await updateSettings(updatedSettings);
-    settings = updatedSettings;
+    settings = await updateSettings(updatedSettings);
     dictionaryError = null;
     renderContent();
   } catch (error) {
@@ -956,8 +972,7 @@ async function setHotkey(hotkey: string): Promise<boolean> {
 
   try {
     const updated = { ...settings, hotkey };
-    await updateSettings(updated);
-    settings = updated;
+    settings = await updateSettings(updated);
 
     // Re-register the hotkey in backend
     await invoke("update_hotkey", { hotkey });
@@ -1439,8 +1454,7 @@ async function handleSettingChange(
   }
   try {
     const updated = { ...settings, [key]: value };
-    await updateSettings(updated);
-    settings = updated;
+    settings = await updateSettings(updated);
   } catch (e) {
     console.error("Failed to update settings:", e);
   }
@@ -1460,8 +1474,7 @@ async function handleAutoStartToggle(
   try {
     await setAutoStart(enabled);
     const updated = { ...settings, autoStart: enabled };
-    await updateSettings(updated);
-    settings = updated;
+    settings = await updateSettings(updated);
   } catch (e) {
     toggle.classList.toggle("active", previous);
     throw e;
@@ -1772,42 +1785,46 @@ function renderDictionary(el: HTMLElement): void {
     .join("");
 
   el.innerHTML = `
-    <h1>Dictionary</h1>
-    <div class="dictionary-subtitle">
-      Add words and short phrases you use often. Fing will prefer these when transcribing.
+    <div class="dictionary-sticky-header">
+      <h1>Dictionary</h1>
+      <div class="dictionary-subtitle">
+        Add words and short phrases you use often. Fing will prefer these when transcribing.
+      </div>
+
+      <div class="dictionary-card">
+        <div class="dictionary-input-row">
+          <input
+            type="text"
+            class="dictionary-input"
+            placeholder="Add a term"
+            autocomplete="off"
+            ${atCapacity ? "disabled" : ""}
+          >
+          <button class="btn btn-accent dictionary-add-btn" ${atCapacity ? "disabled" : ""}>Add</button>
+        </div>
+        <div class="dictionary-hint">
+          ${terms.length}/${MAX_DICTIONARY_TERMS} terms used · Up to ${MAX_DICTIONARY_WORDS_PER_TERM} words each
+        </div>
+        ${
+          dictionaryError
+            ? `<div class="dictionary-error">${escapeHtml(dictionaryError)}</div>`
+            : ""
+        }
+      </div>
     </div>
 
-    <div class="dictionary-card">
-      <div class="dictionary-input-row">
-        <input
-          type="text"
-          class="dictionary-input"
-          placeholder="Add a term (up to ${MAX_DICTIONARY_WORDS_PER_TERM} words)"
-          autocomplete="off"
-          ${atCapacity ? "disabled" : ""}
-        >
-        <button class="btn btn-accent dictionary-add-btn" ${atCapacity ? "disabled" : ""}>Add</button>
+    <div class="dictionary-scrollable">
+      <div class="dictionary-list">
+        ${
+          terms.length > 0
+            ? termsHtml
+            : `<div class="empty-state">
+                 <div class="empty-state-icon">${createIcon(BookOpen)}</div>
+                 <div class="empty-state-title">No dictionary terms yet</div>
+                 <p>Add words or short phrases to improve recognition</p>
+               </div>`
+        }
       </div>
-      <div class="dictionary-hint">
-        ${terms.length}/${MAX_DICTIONARY_TERMS} terms used · Up to ${MAX_DICTIONARY_WORDS_PER_TERM} words each
-      </div>
-      ${
-        dictionaryError
-          ? `<div class="dictionary-error">${escapeHtml(dictionaryError)}</div>`
-          : ""
-      }
-    </div>
-
-    <div class="dictionary-list">
-      ${
-        terms.length > 0
-          ? termsHtml
-          : `<div class="empty-state">
-               <div class="empty-state-icon">${createIcon(BookOpen)}</div>
-               <div class="empty-state-title">No dictionary terms yet</div>
-               <p>Add words or short phrases to improve recognition</p>
-             </div>`
-      }
     </div>
   `;
 }
