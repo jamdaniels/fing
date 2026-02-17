@@ -50,6 +50,7 @@ export interface Settings {
   onboardingStep: number | null;
   activeModelVariant: ModelVariant;
   theme: Theme;
+  lazyModelLoading: boolean;
   dictionaryTerms: string[];
 }
 

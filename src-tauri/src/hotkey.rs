@@ -6,20 +6,25 @@ use tauri::{AppHandle, Emitter};
 
 use crate::audio::AudioCapture;
 use crate::db::{save_transcript, NewTranscript};
-use crate::model::model_path_for_variant;
+use crate::model::{model_path_for_variant, ModelVariant};
 use crate::paste::paste_text;
 use crate::settings::{load_settings, load_settings_sync};
 use crate::sounds;
-use crate::transcribe::{get_transcriber, init_transcriber, transcribe_audio};
+use crate::transcribe::{
+    init_transcriber, is_transcriber_loaded, transcribe_audio, unload_transcriber,
+};
 
 // Maximum recording duration (2 minutes) in milliseconds
 const MAX_RECORDING_DURATION_MS: u64 = 2 * 60 * 1000;
+const LAZY_MODEL_IDLE_UNLOAD_SECS: u64 = 10;
 
 // Track if key is currently held
 static KEY_HELD: AtomicBool = AtomicBool::new(false);
 
 // Recording session ID to track auto-stop timer validity
 static RECORDING_SESSION_ID: AtomicU64 = AtomicU64::new(0);
+static LAZY_ACTIVITY_TOKEN: AtomicU64 = AtomicU64::new(0);
+static LAZY_PRELOAD_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 // Onboarding test mode - when enabled, hotkey works even during NeedsSetup state
 static ONBOARDING_TEST_MODE: AtomicBool = AtomicBool::new(false);
@@ -123,9 +128,79 @@ fn ensure_audio_thread() {
     *thread_guard = Some(AudioThread { cmd_tx, resp_rx });
 }
 
+fn mark_lazy_activity() -> u64 {
+    LAZY_ACTIVITY_TOKEN.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+async fn init_transcriber_async(model_path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || init_transcriber(&model_path))
+        .await
+        .map_err(|e| format!("Transcriber initialization task failed: {e}"))?
+        .map_err(|e| e.to_string())
+}
+
+fn spawn_lazy_preload_if_needed(variant: ModelVariant) {
+    if is_transcriber_loaded() {
+        return;
+    }
+    if LAZY_PRELOAD_IN_FLIGHT
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    tauri::async_runtime::spawn(async move {
+        let model_path = model_path_for_variant(variant);
+        if !model_path.exists() {
+            tracing::warn!("Skipping lazy preload, model not found at {:?}", model_path);
+            LAZY_PRELOAD_IN_FLIGHT.store(false, Ordering::SeqCst);
+            return;
+        }
+
+        let model_path_str = model_path.to_string_lossy().to_string();
+        match init_transcriber_async(model_path_str).await {
+            Ok(_) => tracing::info!("Lazy preload completed"),
+            Err(err) => tracing::warn!("Lazy preload failed: {}", err),
+        }
+
+        LAZY_PRELOAD_IN_FLIGHT.store(false, Ordering::SeqCst);
+    });
+}
+
+fn schedule_lazy_unload_if_idle() {
+    let token = mark_lazy_activity();
+
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(LAZY_MODEL_IDLE_UNLOAD_SECS)).await;
+
+        if LAZY_ACTIVITY_TOKEN.load(Ordering::SeqCst) != token {
+            return;
+        }
+        if KEY_HELD.load(Ordering::SeqCst) {
+            return;
+        }
+        if crate::state::get_state() != crate::state::AppState::Ready {
+            return;
+        }
+
+        let settings = load_settings().await;
+        if !settings.lazy_model_loading {
+            return;
+        }
+
+        unload_transcriber();
+        tracing::info!(
+            "Unloaded transcriber after {} seconds of idle time",
+            LAZY_MODEL_IDLE_UNLOAD_SECS
+        );
+    });
+}
+
 /// Called when F8 is pressed down
 pub fn on_key_down(app: &AppHandle) {
     let is_test_mode = ONBOARDING_TEST_MODE.load(Ordering::SeqCst);
+    let settings_snapshot = load_settings_sync();
 
     // Check current state - only proceed if Ready (or in test mode)
     if !is_test_mode {
@@ -134,6 +209,12 @@ pub fn on_key_down(app: &AppHandle) {
             return;
         }
         drop(state);
+    }
+
+    if !is_test_mode && settings_snapshot.lazy_model_loading {
+        // Invalidate any pending lazy unload timer from older activity.
+        mark_lazy_activity();
+        spawn_lazy_preload_if_needed(settings_snapshot.active_model_variant);
     }
 
     // Capture frontmost app on a background thread to avoid delaying the UI.
@@ -187,7 +268,7 @@ pub fn on_key_down(app: &AppHandle) {
     ensure_audio_thread();
 
     if let Some(ref thread) = *AUDIO_THREAD.lock().expect("Audio thread mutex poisoned") {
-        let selected_device_id = load_settings_sync().selected_microphone_id;
+        let selected_device_id = settings_snapshot.selected_microphone_id;
         if thread
             .cmd_tx
             .send(AudioCommand::StartRecording(selected_device_id))
@@ -303,7 +384,7 @@ pub fn on_key_up(app: &AppHandle) {
         let settings = load_settings().await;
 
         // Initialize transcriber if needed
-        if get_transcriber().is_none() {
+        if !is_transcriber_loaded() {
             let model_path = model_path_for_variant(settings.active_model_variant);
             let model_path_str = model_path.to_string_lossy().to_string();
 
@@ -319,7 +400,7 @@ pub fn on_key_up(app: &AppHandle) {
                 return;
             }
 
-            if let Err(e) = init_transcriber(&model_path_str) {
+            if let Err(e) = init_transcriber_async(model_path_str).await {
                 tracing::error!("Failed to initialize transcriber: {}", e);
                 crate::notifications::show_error(
                     &app_handle,
@@ -437,6 +518,13 @@ async fn finish_transcription(
 
     if let Some(t) = text {
         app.emit("transcript-added", t).ok();
+    }
+
+    if !is_test_mode {
+        let settings = load_settings().await;
+        if settings.lazy_model_loading {
+            schedule_lazy_unload_if_idle();
+        }
     }
 }
 

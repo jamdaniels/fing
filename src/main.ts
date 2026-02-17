@@ -104,6 +104,7 @@ let modelDownloadPollInterval: number | null = null;
 const MAX_DICTIONARY_TERMS = 100;
 const MAX_DICTIONARY_WORDS_PER_TERM = 3;
 let dictionaryError: string | null = null;
+let lazyModelToggleBusy = false;
 
 interface ModelDownloadProgressState {
   variant: ModelVariant;
@@ -865,6 +866,7 @@ async function loadSettings(
     ]);
     settings = {
       ...loadedSettings,
+      lazyModelLoading: loadedSettings.lazyModelLoading ?? false,
       dictionaryTerms: loadedSettings.dictionaryTerms ?? [],
     };
     audioDevices = devices;
@@ -1481,6 +1483,40 @@ async function handleAutoStartToggle(
   }
 }
 
+async function handleLazyModelLoadingToggle(
+  toggle: HTMLElement,
+  enabled: boolean
+): Promise<void> {
+  if (!settings || lazyModelToggleBusy) {
+    return;
+  }
+
+  const previous = settings.lazyModelLoading;
+  lazyModelToggleBusy = true;
+  toggle.classList.add("disabled");
+  toggle.classList.toggle("active", enabled);
+
+  try {
+    const updated = { ...settings, lazyModelLoading: enabled };
+    settings = await updateSettings(updated);
+  } catch (e) {
+    console.error("Failed to update lazy model loading:", e);
+    toggle.classList.toggle("active", previous);
+  } finally {
+    lazyModelToggleBusy = false;
+    const currentToggle = document.querySelector(
+      '.toggle[data-setting="lazyModelLoading"]'
+    ) as HTMLElement | null;
+    if (currentToggle) {
+      currentToggle.classList.remove("disabled");
+      currentToggle.classList.toggle(
+        "active",
+        settings?.lazyModelLoading ?? previous
+      );
+    }
+  }
+}
+
 async function handleHistoryModeOff(): Promise<void> {
   const confirmed = await showConfirmDialog({
     title: "Turn Off History?",
@@ -1549,6 +1585,10 @@ function handleSettingsClick(e: MouseEvent): void {
   // Handle toggle clicks
   const toggle = target.closest(".toggle") as HTMLElement | null;
   if (toggle) {
+    if (toggle.classList.contains("disabled")) {
+      return;
+    }
+
     const setting = toggle.getAttribute("data-setting") as keyof SettingsType;
     if (!(setting && settings)) {
       return;
@@ -1558,6 +1598,12 @@ function handleSettingsClick(e: MouseEvent): void {
     if (setting === "autoStart") {
       handleAutoStartToggle(toggle, newValue as boolean).catch((err) => {
         console.error("Failed to update auto-start:", err);
+      });
+      return;
+    }
+    if (setting === "lazyModelLoading") {
+      handleLazyModelLoadingToggle(toggle, newValue as boolean).catch((err) => {
+        console.error("Failed to update lazy model loading:", err);
       });
       return;
     }
@@ -1717,8 +1763,18 @@ function formatModelSize(bytes: number): string {
 }
 
 function renderModelList(): string {
+  const lazyModelRow = `
+    <div class="model-lazy-row">
+      <div>
+        <div class="settings-row-label">Lazy model loading</div>
+        <div class="settings-row-desc">Save memory and load model on hotkey press; unloads after 10s idle</div>
+      </div>
+      <div class="toggle ${settings?.lazyModelLoading ? "active" : ""} ${lazyModelToggleBusy ? "disabled" : ""}" data-setting="lazyModelLoading"></div>
+    </div>
+  `;
+
   if (models.length === 0) {
-    return '<div class="model-empty">Loading models...</div>';
+    return `<div class="model-empty">Loading models...</div>${lazyModelRow}`;
   }
 
   const header = `
@@ -1767,7 +1823,7 @@ function renderModelList(): string {
     })
     .join("");
 
-  return header + rows;
+  return header + rows + lazyModelRow;
 }
 
 function renderDictionary(el: HTMLElement): void {

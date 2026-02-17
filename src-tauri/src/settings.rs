@@ -48,6 +48,8 @@ pub struct Settings {
     pub active_model_variant: ModelVariant,
     pub theme: Theme,
     #[serde(default)]
+    pub lazy_model_loading: bool,
+    #[serde(default)]
     pub dictionary_terms: Vec<String>,
 }
 
@@ -70,6 +72,7 @@ impl Default for Settings {
             onboarding_step: None,
             active_model_variant: ModelVariant::default(),
             theme: Theme::default(),
+            lazy_model_loading: false,
             dictionary_terms: Vec::new(),
         }
     }

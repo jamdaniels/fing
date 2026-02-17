@@ -412,8 +412,49 @@ async fn update_settings(
     app: tauri::AppHandle,
     settings: settings::Settings,
 ) -> Result<settings::Settings, String> {
-    let previous_selected = settings::load_settings_sync().selected_microphone_id;
+    let previous_settings = settings::load_settings_sync();
+    let previous_selected = previous_settings.selected_microphone_id.clone();
+    let previous_lazy_mode = previous_settings.lazy_model_loading;
     let updated = settings::update_settings(settings).await?;
+
+    if previous_lazy_mode != updated.lazy_model_loading {
+        if updated.lazy_model_loading {
+            transcribe::unload_transcriber();
+            tracing::info!("Lazy model loading enabled, transcriber unloaded");
+        } else {
+            let model_path = model::model_path_for_variant(updated.active_model_variant);
+            if !model_path.exists() {
+                let mut rollback = updated.clone();
+                rollback.lazy_model_loading = true;
+                if let Err(save_err) = settings::save_settings(&rollback).await {
+                    tracing::error!(
+                        "Failed to roll back lazy model loading setting after missing model: {}",
+                        save_err
+                    );
+                }
+                return Err("Model not found. Please download the model in settings.".to_string());
+            }
+
+            let model_path_str = model_path.to_string_lossy().to_string();
+            let load_result = tauri::async_runtime::spawn_blocking(move || {
+                transcribe::init_transcriber(&model_path_str)
+            })
+            .await
+            .map_err(|e| format!("Transcriber initialization task failed: {e}"))?;
+
+            if let Err(load_err) = load_result {
+                let mut rollback = updated.clone();
+                rollback.lazy_model_loading = true;
+                if let Err(save_err) = settings::save_settings(&rollback).await {
+                    tracing::error!(
+                        "Failed to roll back lazy model loading setting after load error: {}",
+                        save_err
+                    );
+                }
+                return Err(format!("Failed to load model: {load_err}"));
+            }
+        }
+    }
 
     if previous_selected != updated.selected_microphone_id {
         if let Err(e) = rebuild_tray_menu(&app) {
@@ -482,10 +523,16 @@ async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
         ));
     }
 
-    // Initialize the transcriber
-    let model_path_str = model_path.to_string_lossy().to_string();
-    transcribe::init_transcriber(&model_path_str)
-        .map_err(|e| format!("Failed to initialize transcriber: {e:?}"))?;
+    if !current_settings.lazy_model_loading {
+        let model_path_str = model_path.to_string_lossy().to_string();
+        let init_result = tauri::async_runtime::spawn_blocking(move || {
+            transcribe::init_transcriber(&model_path_str)
+        })
+        .await
+        .map_err(|e| format!("Transcriber initialization task failed: {e}"))?;
+
+        init_result.map_err(|e| format!("Failed to initialize transcriber: {e}"))?;
+    }
 
     // Save onboarding_completed to settings
     current_settings.onboarding_completed = true;
@@ -787,11 +834,30 @@ pub fn run() {
                 let verification = model::verify_for_variant(&model_path, variant);
 
                 if verification.is_valid {
-                    // Initialize transcriber
-                    let model_path_str = model_path.to_string_lossy().to_string();
-                    if let Err(e) = transcribe::init_transcriber(&model_path_str) {
-                        tracing::error!("Failed to init transcriber: {:?}", e);
+                    let transcriber_ready = if saved_settings.lazy_model_loading {
+                        true
                     } else {
+                        let model_path_str = model_path.to_string_lossy().to_string();
+                        match tauri::async_runtime::block_on(async move {
+                            tauri::async_runtime::spawn_blocking(move || {
+                                transcribe::init_transcriber(&model_path_str)
+                            })
+                            .await
+                            .map_err(|e| format!("Transcriber initialization task failed: {e}"))
+                        }) {
+                            Ok(Ok(())) => true,
+                            Ok(Err(e)) => {
+                                tracing::error!("Failed to init transcriber: {}", e);
+                                false
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to init transcriber: {}", e);
+                                false
+                            }
+                        }
+                    };
+
+                    if transcriber_ready {
                         // Set hotkey from settings before registering
                         if let Err(e) = hotkey_config::set_hotkey_from_string(&saved_settings.hotkey) {
                             tracing::warn!("Failed to parse hotkey from settings: {}", e);

@@ -1,8 +1,9 @@
 // Whisper transcription wrapper
 
 use crate::engine::{TranscribeError, TranscriptionEngine};
+use once_cell::sync::Lazy;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 const MAX_PROMPT_TOKENS: usize = 256;
@@ -88,24 +89,46 @@ impl TranscriptionEngine for Transcriber {
     }
 }
 
-// Global transcriber instance (loaded once on startup)
-static TRANSCRIBER: once_cell::sync::OnceCell<Transcriber> = once_cell::sync::OnceCell::new();
+// Global transcriber instance (can be loaded/unloaded at runtime).
+static TRANSCRIBER: Lazy<Mutex<Option<Arc<Transcriber>>>> = Lazy::new(|| Mutex::new(None));
 
 /// Initialize the global transcriber with the given model file.
-/// Safe to call multiple times - only the first call loads the model.
+/// Safe to call multiple times.
 pub fn init_transcriber(model_path: &str) -> Result<(), TranscribeError> {
-    // Use get_or_try_init for atomic initialization - prevents race condition
-    // where multiple threads try to load the model simultaneously
-    TRANSCRIBER.get_or_try_init(|| {
-        tracing::info!("Initializing transcriber from {}", model_path);
-        Transcriber::new(model_path)
-    })?;
+    let mut guard = TRANSCRIBER
+        .lock()
+        .map_err(|_| TranscribeError::ModelLoadFailed("Transcriber lock poisoned".to_string()))?;
+    if guard.is_some() {
+        return Ok(());
+    }
+
+    tracing::info!("Initializing transcriber from {}", model_path);
+    *guard = Some(Arc::new(Transcriber::new(model_path)?));
+
     Ok(())
 }
 
 /// Get the global transcriber instance (None if not initialized).
-pub fn get_transcriber() -> Option<&'static Transcriber> {
-    TRANSCRIBER.get()
+pub fn get_transcriber() -> Option<Arc<Transcriber>> {
+    match TRANSCRIBER.lock() {
+        Ok(guard) => guard.clone(),
+        Err(_) => None,
+    }
+}
+
+/// Whether the global transcriber is currently loaded.
+pub fn is_transcriber_loaded() -> bool {
+    match TRANSCRIBER.lock() {
+        Ok(guard) => guard.is_some(),
+        Err(_) => false,
+    }
+}
+
+/// Unload the global transcriber.
+pub fn unload_transcriber() {
+    if let Ok(mut guard) = TRANSCRIBER.lock() {
+        *guard = None;
+    }
 }
 
 /// Transcribe audio using the global transcriber.

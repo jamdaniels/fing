@@ -306,6 +306,11 @@ body[data-platform="windows"] .titlebar {
   background-color: var(--accent);
 }
 
+.toggle.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 .toggle::after {
   content: "";
   width: 20px;
@@ -2187,6 +2192,30 @@ body[data-platform="windows"] .titlebar {
 .model-row .model-col-name {
   font-size: 13px;
   font-weight: 600;
+}
+
+.model-lazy-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  position: relative;
+}
+
+.model-lazy-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 16px;
+  right: 16px;
+  height: 1px;
+  background-color: color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.model-lazy-row > div:first-child {
+  min-width: 0;
+  flex-shrink: 1;
 }
 
 .model-col-desc {
