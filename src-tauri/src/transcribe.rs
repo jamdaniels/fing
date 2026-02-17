@@ -5,6 +5,8 @@ use std::path::Path;
 use std::sync::Mutex;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
+const MAX_PROMPT_TOKENS: usize = 256;
+
 /// Whisper-based transcription engine using whisper-rs.
 pub struct Transcriber {
     ctx: Mutex<WhisperContext>,
@@ -28,7 +30,12 @@ impl Transcriber {
 }
 
 impl TranscriptionEngine for Transcriber {
-    fn transcribe(&self, audio: &[f32], language: Option<&str>) -> Result<String, TranscribeError> {
+    fn transcribe(
+        &self,
+        audio: &[f32],
+        language: Option<&str>,
+        dictionary_prompt: Option<&str>,
+    ) -> Result<String, TranscribeError> {
         if audio.is_empty() {
             return Err(TranscribeError::EmptyAudio);
         }
@@ -48,6 +55,21 @@ impl TranscriptionEngine for Transcriber {
         params.set_print_timestamps(false);
         params.set_single_segment(true);
         params.set_no_context(true);
+
+        let prompt_tokens = dictionary_prompt
+            .map(str::trim)
+            .filter(|prompt| !prompt.is_empty())
+            .map(|prompt| {
+                ctx.tokenize(prompt, MAX_PROMPT_TOKENS)
+                    .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))
+            })
+            .transpose()?;
+
+        if let Some(tokens) = prompt_tokens.as_ref() {
+            if !tokens.is_empty() {
+                params.set_tokens(tokens);
+            }
+        }
 
         state
             .full(params, audio)
@@ -87,9 +109,13 @@ pub fn get_transcriber() -> Option<&'static Transcriber> {
 }
 
 /// Transcribe audio using the global transcriber.
-pub fn transcribe_audio(audio: &[f32], language: Option<&str>) -> Result<String, TranscribeError> {
+pub fn transcribe_audio(
+    audio: &[f32],
+    language: Option<&str>,
+    dictionary_prompt: Option<&str>,
+) -> Result<String, TranscribeError> {
     match get_transcriber() {
-        Some(t) => t.transcribe(audio, language),
+        Some(t) => t.transcribe(audio, language, dictionary_prompt),
         None => Err(TranscribeError::ModelNotFound),
     }
 }

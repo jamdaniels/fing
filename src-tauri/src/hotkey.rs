@@ -340,23 +340,29 @@ pub fn on_key_up(app: &AppHandle) {
             None
         };
 
-        // Transcribe
-        let text = match transcribe_audio(&audio_buffer, lang.as_deref()) {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::error!("Transcription failed: {}", e);
-                crate::notifications::show_error(
-                    &app_handle,
-                    "Transcription Error",
-                    &format!("{e}"),
-                );
-                finish_transcription(&app_handle, None, duration_ms, test_mode).await;
-                return;
-            }
-        };
+        let dictionary_terms = crate::dictionary::sanitize_terms(&settings.dictionary_terms);
+        let dictionary_prompt = crate::dictionary::build_prompt(&dictionary_terms);
 
-        // Handle empty or whitespace-only transcription
-        let text = text.trim().to_string();
+        // Transcribe
+        let text =
+            match transcribe_audio(&audio_buffer, lang.as_deref(), dictionary_prompt.as_deref()) {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::error!("Transcription failed: {}", e);
+                    crate::notifications::show_error(
+                        &app_handle,
+                        "Transcription Error",
+                        &format!("{e}"),
+                    );
+                    finish_transcription(&app_handle, None, duration_ms, test_mode).await;
+                    return;
+                }
+            };
+
+        // Apply user dictionary corrections and normalize whitespace edges.
+        let text = crate::dictionary::apply_dictionary_corrections(text.trim(), &dictionary_terms)
+            .trim()
+            .to_string();
 
         // Filter out whisper special tokens indicating no speech
         if text.is_empty() || is_blank_audio(&text) {

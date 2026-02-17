@@ -47,6 +47,8 @@ pub struct Settings {
     #[serde(default)]
     pub active_model_variant: ModelVariant,
     pub theme: Theme,
+    #[serde(default)]
+    pub dictionary_terms: Vec<String>,
 }
 
 fn default_languages() -> Vec<String> {
@@ -68,6 +70,7 @@ impl Default for Settings {
             onboarding_step: None,
             active_model_variant: ModelVariant::default(),
             theme: Theme::default(),
+            dictionary_terms: Vec::new(),
         }
     }
 }
@@ -98,7 +101,7 @@ async fn load_settings_from_disk() -> Settings {
     };
 
     if let Ok(contents) = fs::read_to_string(&path).await {
-        serde_json::from_str(&contents).unwrap_or_default()
+        sanitize_settings(serde_json::from_str(&contents).unwrap_or_default())
     } else {
         Settings::default()
     }
@@ -118,7 +121,7 @@ pub fn load_settings_sync() -> Settings {
         return Settings::default();
     };
     let settings = if let Ok(contents) = std::fs::read_to_string(&path) {
-        serde_json::from_str(&contents).unwrap_or_default()
+        sanitize_settings(serde_json::from_str(&contents).unwrap_or_default())
     } else {
         Settings::default()
     };
@@ -132,6 +135,7 @@ pub fn load_settings_sync() -> Settings {
 }
 
 pub async fn save_settings(settings: &Settings) -> Result<(), String> {
+    let sanitized = sanitize_settings(settings.clone());
     let path =
         crate::paths::settings_path().ok_or_else(|| "App paths not initialized".to_string())?;
 
@@ -142,7 +146,7 @@ pub async fn save_settings(settings: &Settings) -> Result<(), String> {
             .map_err(|e| format!("Failed to create settings directory: {e}"))?;
     }
 
-    let json = serde_json::to_string_pretty(settings)
+    let json = serde_json::to_string_pretty(&sanitized)
         .map_err(|e| format!("Failed to serialize settings: {e}"))?;
 
     fs::write(&path, json)
@@ -151,7 +155,7 @@ pub async fn save_settings(settings: &Settings) -> Result<(), String> {
 
     // Update cache with new settings
     if let Ok(mut cache) = SETTINGS_CACHE.write() {
-        *cache = Some(settings.clone());
+        *cache = Some(sanitized);
     }
 
     Ok(())
@@ -171,6 +175,12 @@ pub async fn get_settings() -> Result<Settings, String> {
 }
 
 pub async fn update_settings(settings: Settings) -> Result<Settings, String> {
-    save_settings(&settings).await?;
-    Ok(settings)
+    let sanitized = sanitize_settings(settings);
+    save_settings(&sanitized).await?;
+    Ok(sanitized)
+}
+
+fn sanitize_settings(mut settings: Settings) -> Settings {
+    settings.dictionary_terms = crate::dictionary::sanitize_terms(&settings.dictionary_terms);
+    settings
 }

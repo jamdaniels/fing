@@ -3,6 +3,7 @@
 mod app_info;
 mod audio;
 mod db;
+mod dictionary;
 mod engine;
 mod hotkey;
 mod hotkey_config;

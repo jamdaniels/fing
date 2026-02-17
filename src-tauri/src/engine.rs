@@ -31,5 +31,10 @@ impl std::error::Error for TranscribeError {}
 /// Trait for speech-to-text engines (currently whisper-rs).
 pub trait TranscriptionEngine: Send + Sync {
     /// Transcribe 16kHz mono f32 audio samples to text.
-    fn transcribe(&self, audio: &[f32], language: Option<&str>) -> Result<String, TranscribeError>;
+    fn transcribe(
+        &self,
+        audio: &[f32],
+        language: Option<&str>,
+        dictionary_prompt: Option<&str>,
+    ) -> Result<String, TranscribeError>;
 }

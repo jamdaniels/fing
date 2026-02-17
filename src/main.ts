@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ArrowUpRight,
+  BookOpen,
   Check,
   CheckCircle,
   Copy,
@@ -100,6 +101,10 @@ let sidebarListenerAttached = false;
 let contentListenerAttached = false;
 let models: ModelInfo[] = [];
 let modelDownloadPollInterval: number | null = null;
+const MAX_DICTIONARY_TERMS = 100;
+const MAX_DICTIONARY_WORDS_PER_TERM = 3;
+let dictionaryError: string | null = null;
+
 interface ModelDownloadProgressState {
   variant: ModelVariant;
   percentage: number;
@@ -165,7 +170,7 @@ function updateInlineModelDownloadProgress(
 }
 
 function navigateToTab(tab: SidebarItem): void {
-  if (!["home", "history", "settings", "about"].includes(tab)) {
+  if (!["home", "history", "dictionary", "settings", "about"].includes(tab)) {
     return;
   }
 
@@ -211,6 +216,7 @@ function renderSidebar(): void {
   const items: { id: SidebarItem; label: string; icon: IconNode }[] = [
     { id: "home", label: "Home", icon: Home },
     { id: "history", label: "History", icon: History },
+    { id: "dictionary", label: "Dictionary", icon: BookOpen },
     { id: "settings", label: "Settings", icon: Settings },
     { id: "about", label: "About", icon: Info },
   ];
@@ -249,6 +255,9 @@ function renderContent(): void {
     case "history":
       transcriptOffset = 0;
       renderHistory(content);
+      break;
+    case "dictionary":
+      renderDictionary(content);
       break;
     case "settings":
       renderSettings(content);
@@ -691,6 +700,128 @@ function renderHistory(
   }
 }
 
+function normalizeDictionaryTerm(term: string): string {
+  return term.trim().replace(/\s+/g, " ");
+}
+
+function dictionaryWordCount(term: string): number {
+  if (!term) {
+    return 0;
+  }
+  return term.split(" ").filter(Boolean).length;
+}
+
+function getDictionaryTerms(): string[] {
+  return settings?.dictionaryTerms ?? [];
+}
+
+function validateDictionaryTerm(term: string): string | null {
+  if (!term) {
+    return "Enter a word or short phrase";
+  }
+  if (dictionaryWordCount(term) > MAX_DICTIONARY_WORDS_PER_TERM) {
+    return `Terms can be up to ${MAX_DICTIONARY_WORDS_PER_TERM} words`;
+  }
+
+  const existing = getDictionaryTerms();
+  if (existing.length >= MAX_DICTIONARY_TERMS) {
+    return `Dictionary is full (${MAX_DICTIONARY_TERMS} terms)`;
+  }
+  if (existing.some((value) => value.toLowerCase() === term.toLowerCase())) {
+    return "That term is already in your dictionary";
+  }
+
+  return null;
+}
+
+async function addDictionaryTerm(input: HTMLInputElement): Promise<void> {
+  if (!settings) {
+    return;
+  }
+
+  const normalized = normalizeDictionaryTerm(input.value);
+  const validationError = validateDictionaryTerm(normalized);
+  if (validationError) {
+    dictionaryError = validationError;
+    renderContent();
+    return;
+  }
+
+  const updatedTerms = [...getDictionaryTerms(), normalized];
+  try {
+    const updatedSettings = { ...settings, dictionaryTerms: updatedTerms };
+    await updateSettings(updatedSettings);
+    settings = updatedSettings;
+    dictionaryError = null;
+    renderContent();
+  } catch (error) {
+    console.error("Failed to add dictionary term:", error);
+    dictionaryError = "Failed to save term";
+    renderContent();
+  }
+}
+
+async function removeDictionaryTerm(index: number): Promise<void> {
+  if (!(settings && Number.isInteger(index))) {
+    return;
+  }
+
+  const terms = getDictionaryTerms();
+  if (index < 0 || index >= terms.length) {
+    return;
+  }
+
+  const updatedTerms = terms.filter((_, termIndex) => termIndex !== index);
+  try {
+    const updatedSettings = { ...settings, dictionaryTerms: updatedTerms };
+    await updateSettings(updatedSettings);
+    settings = updatedSettings;
+    dictionaryError = null;
+    renderContent();
+  } catch (error) {
+    console.error("Failed to remove dictionary term:", error);
+    dictionaryError = "Failed to update dictionary";
+    renderContent();
+  }
+}
+
+function handleDictionaryClick(e: MouseEvent): void {
+  const target = e.target as HTMLElement;
+
+  const removeButton = target.closest(
+    ".dictionary-remove-btn"
+  ) as HTMLButtonElement | null;
+  if (removeButton?.dataset.index) {
+    removeDictionaryTerm(Number(removeButton.dataset.index));
+    return;
+  }
+
+  if (target.closest(".dictionary-add-btn")) {
+    const input = document.querySelector(
+      ".dictionary-input"
+    ) as HTMLInputElement | null;
+    if (input) {
+      addDictionaryTerm(input);
+    }
+  }
+}
+
+function handleDictionaryKeydown(e: KeyboardEvent): void {
+  const target = e.target as HTMLElement;
+  if (!(target instanceof HTMLInputElement)) {
+    return;
+  }
+  if (!target.classList.contains("dictionary-input")) {
+    return;
+  }
+  if (e.key !== "Enter") {
+    return;
+  }
+
+  e.preventDefault();
+  addDictionaryTerm(target);
+}
+
 const SETTINGS_CACHE_TTL = 5000; // 5 seconds
 
 async function loadSettings(
@@ -716,7 +847,10 @@ async function loadSettings(
         ? refreshAudioDevices()
         : Promise.resolve(audioDevices),
     ]);
-    settings = loadedSettings;
+    settings = {
+      ...loadedSettings,
+      dictionaryTerms: loadedSettings.dictionaryTerms ?? [],
+    };
     audioDevices = devices;
     models = loadedModels;
 
@@ -1623,6 +1757,61 @@ function renderModelList(): string {
   return header + rows;
 }
 
+function renderDictionary(el: HTMLElement): void {
+  const terms = getDictionaryTerms();
+  const atCapacity = terms.length >= MAX_DICTIONARY_TERMS;
+  const termsHtml = terms
+    .map(
+      (term, index) => `
+      <div class="dictionary-item">
+        <span class="dictionary-term">${escapeHtml(term)}</span>
+        <button class="btn btn-secondary btn-sm dictionary-remove-btn" data-index="${index}">Remove</button>
+      </div>
+    `
+    )
+    .join("");
+
+  el.innerHTML = `
+    <h1>Dictionary</h1>
+    <div class="dictionary-subtitle">
+      Add words and short phrases you use often. Fing will prefer these when transcribing.
+    </div>
+
+    <div class="dictionary-card">
+      <div class="dictionary-input-row">
+        <input
+          type="text"
+          class="dictionary-input"
+          placeholder="Add a term (up to ${MAX_DICTIONARY_WORDS_PER_TERM} words)"
+          autocomplete="off"
+          ${atCapacity ? "disabled" : ""}
+        >
+        <button class="btn btn-accent dictionary-add-btn" ${atCapacity ? "disabled" : ""}>Add</button>
+      </div>
+      <div class="dictionary-hint">
+        ${terms.length}/${MAX_DICTIONARY_TERMS} terms used · Up to ${MAX_DICTIONARY_WORDS_PER_TERM} words each
+      </div>
+      ${
+        dictionaryError
+          ? `<div class="dictionary-error">${escapeHtml(dictionaryError)}</div>`
+          : ""
+      }
+    </div>
+
+    <div class="dictionary-list">
+      ${
+        terms.length > 0
+          ? termsHtml
+          : `<div class="empty-state">
+               <div class="empty-state-icon">${createIcon(BookOpen)}</div>
+               <div class="empty-state-title">No dictionary terms yet</div>
+               <p>Add words or short phrases to improve recognition</p>
+             </div>`
+      }
+    </div>
+  `;
+}
+
 function renderSettingsUI(el: HTMLElement): void {
   const micOptions = audioDevices
     .map(
@@ -1922,6 +2111,8 @@ function setupContentListener(): void {
   content.addEventListener("click", (e) => {
     if (currentView === "history") {
       handleHistoryClick(e, content);
+    } else if (currentView === "dictionary") {
+      handleDictionaryClick(e);
     } else if (currentView === "settings") {
       handleSettingsClick(e);
     }
@@ -1936,6 +2127,12 @@ function setupContentListener(): void {
   content.addEventListener("change", (e) => {
     if (currentView === "settings") {
       handleSettingsChange(e);
+    }
+  });
+
+  content.addEventListener("keydown", (e) => {
+    if (currentView === "dictionary") {
+      handleDictionaryKeydown(e as KeyboardEvent);
     }
   });
 }

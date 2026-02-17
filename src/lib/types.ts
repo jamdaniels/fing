@@ -50,6 +50,7 @@ export interface Settings {
   onboardingStep: number | null;
   activeModelVariant: ModelVariant;
   theme: Theme;
+  dictionaryTerms: string[];
 }
 
 export interface UpdateInfo {
@@ -84,7 +85,12 @@ export interface Stats {
   topWords: WordCount[];
 }
 
-export type SidebarItem = "home" | "history" | "settings" | "about";
+export type SidebarItem =
+  | "home"
+  | "history"
+  | "dictionary"
+  | "settings"
+  | "about";
 
 export interface DownloadProgress {
   variant: ModelVariant | null;
