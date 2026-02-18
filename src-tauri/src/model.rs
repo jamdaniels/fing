@@ -319,7 +319,8 @@ fn compute_file_sha256(path: &Path) -> Result<String, String> {
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    // Keep the I/O buffer on the heap to avoid a large stack frame on UI-thread calls.
+    let mut buffer = vec![0_u8; 1024 * 1024];
 
     loop {
         let bytes_read = reader.read(&mut buffer).map_err(|e| e.to_string())?;
