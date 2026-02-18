@@ -30,6 +30,7 @@ static LAZY_PRELOAD_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 static ONBOARDING_TEST_MODE: AtomicBool = AtomicBool::new(false);
 
 /// Whether onboarding test mode is currently active
+#[cfg(target_os = "macos")]
 pub(crate) fn is_onboarding_test_mode() -> bool {
     ONBOARDING_TEST_MODE.load(Ordering::SeqCst)
 }
