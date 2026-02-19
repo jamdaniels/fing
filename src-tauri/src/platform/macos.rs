@@ -2,7 +2,6 @@
 // Uses native APIs instead of AppleScript to avoid Automation permission
 
 use enigo::{Enigo, Keyboard, Settings};
-use smappservice_rs::{AppService, ServiceStatus, ServiceType};
 use std::ffi::c_void;
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -84,34 +83,6 @@ pub fn type_text(text: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to type text: {e:?}"))?;
 
     Ok(())
-}
-
-/// Enable auto-start on login using SMAppService (no Automation permission)
-pub fn enable_auto_start() -> Result<(), String> {
-    let service = AppService::new(ServiceType::MainApp);
-    service
-        .register()
-        .map_err(|e| format!("Failed to enable auto-start: {e:?}"))?;
-
-    tracing::info!("Auto-start enabled via SMAppService");
-    Ok(())
-}
-
-/// Disable auto-start on login using SMAppService
-pub fn disable_auto_start() -> Result<(), String> {
-    let service = AppService::new(ServiceType::MainApp);
-    service
-        .unregister()
-        .map_err(|e| format!("Failed to disable auto-start: {e:?}"))?;
-
-    tracing::info!("Auto-start disabled");
-    Ok(())
-}
-
-/// Check if auto-start is enabled using SMAppService
-pub fn is_auto_start_enabled() -> bool {
-    let service = AppService::new(ServiceType::MainApp);
-    service.status() == ServiceStatus::Enabled
 }
 
 /// Get the bundle identifier of the frontmost application using NSWorkspace

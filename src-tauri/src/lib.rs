@@ -31,6 +31,7 @@ use tauri::{
     tray::TrayIconBuilder,
     Emitter, Manager,
 };
+use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 
 /// Consolidated mic test state to prevent race conditions
 /// All state changes go through a single lock acquisition
@@ -347,17 +348,18 @@ fn quit_app(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
-fn set_auto_start(enabled: bool) -> Result<(), String> {
+fn set_auto_start(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let autostart = app.autolaunch();
     if enabled {
-        platform::enable_auto_start()
+        autostart.enable().map_err(|e| e.to_string())
     } else {
-        platform::disable_auto_start()
+        autostart.disable().map_err(|e| e.to_string())
     }
 }
 
 #[tauri::command]
-fn get_auto_start() -> bool {
-    platform::is_auto_start_enabled()
+fn get_auto_start(app: tauri::AppHandle) -> bool {
+    app.autolaunch().is_enabled().unwrap_or(false)
 }
 
 #[tauri::command]
@@ -801,6 +803,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
