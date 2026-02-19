@@ -724,17 +724,17 @@ fn update_mic_menu_checks(selected_id: Option<String>) {
     }
 }
 
-fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
-    fn show_window_for_tab(app: &tauri::AppHandle, tab: &str) {
-        if let Some(window) = app.get_webview_window("main") {
-            let tab_json = serde_json::to_string(tab).unwrap_or_else(|_| "\"home\"".to_string());
-            let script = format!("window.__navigateTo && window.__navigateTo({tab_json});");
-            let _ = window.eval(&script);
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
+fn show_window_for_tab(app: &tauri::AppHandle, tab: &str) {
+    if let Some(window) = app.get_webview_window("main") {
+        let tab_json = serde_json::to_string(tab).unwrap_or_else(|_| "\"home\"".to_string());
+        let script = format!("window.__navigateTo && window.__navigateTo({tab_json});");
+        let _ = window.eval(&script);
+        let _ = window.show();
+        let _ = window.set_focus();
     }
+}
 
+fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
     match event_id {
         "quit" => {
             tracing::info!("Quit requested from tray");
@@ -800,6 +800,10 @@ pub fn run() {
     let _ = tracing_subscriber::fmt::try_init();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tracing::info!("Second launch detected, focusing existing window");
+            show_window_for_tab(app, "home");
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
