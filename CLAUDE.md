@@ -27,7 +27,7 @@ Hotkey only active when `Ready`. Model must be downloaded before transitioning o
 ## Core Pipeline (hotkey.rs)
 1. F9 down → init mic, show indicator, start capture
 2. F9 up → stop capture, resample 16kHz, transcribe via whisper-rs
-3. Done → clipboard + paste, save to DB, hide indicator
+3. Done → direct text input (no clipboard), optional DB save, hide indicator
 
 ## Project Structure
 ```
@@ -42,7 +42,7 @@ src-tauri/src/
 ├── model.rs            # Model download + SHA256 verify
 ├── settings.rs         # Settings struct + persistence
 ├── db.rs               # SQLite FTS5 history
-├── platform/macos.rs   # CGEventTap for global hotkey
+├── platform/macos.rs   # macOS permissions + direct text input/focus helpers
 └── indicator.rs        # Recording overlay window
 
 src/
@@ -54,8 +54,9 @@ src/
 
 ## IPC Pattern
 - Frontend calls Rust via `invoke()`, types in `lib/types.ts` mirror Rust structs
-- Events from Rust via `app.emit()`: `app-state-changed`, `transcript-added`, `download-progress`
-- Event delegation on `#sidebar` and `#content` to avoid listener leaks
+- Events from Rust via `app.emit()`: `app-state-changed`, `transcript-added`
+- Model download progress is retrieved via IPC polling (`get_download_progress`)
+- Root listeners are attached once on `#sidebar` and `#content`; `#content` routes handling by current view to avoid listener leaks
 
 ## Async (Rust)
 Use `tauri::async_runtime::spawn` for async, `tauri::async_runtime::block_on` for sync contexts. No ad-hoc tokio runtimes.
