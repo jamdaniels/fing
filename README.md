@@ -25,10 +25,30 @@ Hold your hotkey, speak, release — transcribed text is pasted instantly. Your 
 - **Auto-start** — Launch on login
 - **Usage stats** — Dashboard with word counts, speaking speed, most used words
 
-## Platforms
+## Requirements
 
-macOS and Windows.
+Windows 10+ / macOS 10.15+
 
+## Install
+
+Download the latest release from [Releases](https://github.com/jamdaniels/fing/releases).
+
+### macOS
+
+The app is not notarized with Apple, so macOS will block it on first launch. After installing, either:
+
+**Option A** — Right-click the app > Open, then click "Open" in the dialog.
+
+**Option B** — Go to System Settings > Privacy & Security, scroll down and click "Open Anyway".
+
+**Option C** — Run in Terminal:
+```bash
+xattr -cr /Applications/Fing.app
+```
+
+### Windows
+
+Windows SmartScreen may show a warning. Click "More info" then "Run anyway" to proceed.
 
 ## License
 

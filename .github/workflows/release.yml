@@ -48,10 +48,11 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Configure macOS native build stability
+      - name: Configure macOS build
         if: runner.os == 'macOS'
         shell: bash
         run: |
+          echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
           echo "WHISPER_NATIVE=OFF" >> "$GITHUB_ENV"
           echo "CMAKE_CROSSCOMPILING=ON" >> "$GITHUB_ENV"
           echo "WHISPER_CCACHE=OFF" >> "$GITHUB_ENV"
