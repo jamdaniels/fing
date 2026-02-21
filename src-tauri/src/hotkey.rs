@@ -8,7 +8,7 @@ use crate::audio::AudioCapture;
 use crate::db::{save_transcript, NewTranscript};
 use crate::model::{model_path_for_variant, ModelVariant};
 use crate::paste::paste_text;
-use crate::settings::{load_settings, load_settings_sync};
+use crate::settings::{load_settings, load_settings_sync, save_settings};
 use crate::sounds;
 use crate::transcribe::{
     init_transcriber, is_transcriber_loaded, transcribe_audio, unload_transcriber,
@@ -77,7 +77,7 @@ static RECORDING_START: Mutex<Option<Instant>> = Mutex::new(None);
 static FRONTMOST_APP: Mutex<Option<String>> = Mutex::new(None);
 
 /// Initialize the audio thread (call once at startup or before first recording)
-fn ensure_audio_thread() {
+fn ensure_audio_thread(app: &AppHandle) {
     let mut thread_guard = match AUDIO_THREAD.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
@@ -91,6 +91,7 @@ fn ensure_audio_thread() {
 
     let (cmd_tx, cmd_rx) = mpsc::channel::<AudioCommand>();
     let (resp_tx, resp_rx) = mpsc::channel::<AudioResponse>();
+    let app_handle = app.clone();
 
     std::thread::spawn(move || {
         let mut capture = AudioCapture::new();
@@ -98,16 +99,33 @@ fn ensure_audio_thread() {
         loop {
             match cmd_rx.recv() {
                 Ok(AudioCommand::StartRecording(device_id)) => {
-                    capture.set_device(device_id);
+                    capture.set_device(device_id.clone());
                     // Initialize capture if not already
-                    if let Err(e) = capture.init_capture() {
-                        tracing::error!("Failed to init audio capture: {}", e);
-                        // Send empty response on error
-                        let _ = resp_tx.send(AudioResponse { buffer: Vec::new() });
-                        continue;
-                    }
+                    let match_result = match capture.init_capture() {
+                        Ok(result) => result,
+                        Err(e) => {
+                            tracing::error!("Failed to init audio capture: {}", e);
+                            // Send empty response on error
+                            let _ = resp_tx.send(AudioResponse { buffer: Vec::new() });
+                            continue;
+                        }
+                    };
+
                     capture.begin_recording();
                     tracing::info!("Audio recording started");
+
+                    if !match_result.matched {
+                        tracing::warn!(
+                            "Requested microphone {:?} unavailable, recording with '{}'",
+                            match_result.requested,
+                            match_result.actual
+                        );
+                        persist_fallback_microphone_selection(
+                            app_handle.clone(),
+                            device_id,
+                            match_result.actual,
+                        );
+                    }
                 }
                 Ok(AudioCommand::StopRecording) => {
                     let buffer = capture.end_recording();
@@ -131,6 +149,50 @@ fn ensure_audio_thread() {
     });
 
     *thread_guard = Some(AudioThread { cmd_tx, resp_rx });
+}
+
+fn persist_fallback_microphone_selection(
+    app: AppHandle,
+    requested_device: Option<String>,
+    actual_device: String,
+) {
+    tauri::async_runtime::spawn(async move {
+        let mut current_settings = load_settings().await;
+
+        if current_settings.selected_microphone_id.as_ref() != requested_device.as_ref() {
+            tracing::debug!(
+                "Skipping microphone auto-update; selection changed from {:?} to {:?}",
+                requested_device,
+                current_settings.selected_microphone_id
+            );
+            return;
+        }
+
+        if current_settings.selected_microphone_id.as_ref() == Some(&actual_device) {
+            return;
+        }
+
+        let previous_selected = current_settings.selected_microphone_id.clone();
+        current_settings.selected_microphone_id = Some(actual_device.clone());
+
+        if let Err(e) = save_settings(&current_settings).await {
+            tracing::error!("Failed to persist fallback microphone selection: {}", e);
+            return;
+        }
+
+        tracing::info!(
+            "Auto-updated microphone selection from {:?} to '{}'",
+            previous_selected,
+            actual_device
+        );
+
+        if let Err(e) = crate::rebuild_tray_menu(&app) {
+            tracing::warn!(
+                "Failed to rebuild tray menu after fallback microphone update: {}",
+                e
+            );
+        }
+    });
 }
 
 fn mark_lazy_activity() -> u64 {
@@ -280,7 +342,7 @@ pub fn on_key_down(app: &AppHandle) {
     });
 
     // Ensure audio thread is running and start recording
-    ensure_audio_thread();
+    ensure_audio_thread(app);
 
     let thread_guard = match AUDIO_THREAD.lock() {
         Ok(guard) => guard,

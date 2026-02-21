@@ -620,7 +620,7 @@ fn build_tray_menu_for_state(
 const TRAY_ID: &str = "fing-tray";
 
 /// Rebuild the tray menu based on current app state
-fn rebuild_tray_menu(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn rebuild_tray_menu(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let current_state = state::get_state();
     let menu = build_tray_menu_for_state(app, current_state)?;
 
