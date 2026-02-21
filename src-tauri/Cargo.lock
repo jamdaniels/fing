@@ -3783,7 +3783,7 @@ checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
 [[package]]
 name = "rdev"
 version = "0.5.0-2"
-source = "git+https://github.com/rustdesk-org/rdev#a90dbe1172f8832f54c97c62e823c5a34af5fdfe"
+source = "git+https://github.com/rustdesk-org/rdev?rev=a90dbe1172f8832f54c97c62e823c5a34af5fdfe#a90dbe1172f8832f54c97c62e823c5a34af5fdfe"
 dependencies = [
  "cocoa",
  "core-foundation 0.9.4",

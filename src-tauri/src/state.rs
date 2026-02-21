@@ -36,7 +36,13 @@ pub static APP_STATE: Lazy<RwLock<AppState>> = Lazy::new(|| RwLock::new(AppState
 
 /// Transition to a new state without emitting frontend events.
 pub fn transition_to(new_state: AppState) -> Result<(), &'static str> {
-    let mut state = APP_STATE.write().unwrap();
+    let mut state = match APP_STATE.write() {
+        Ok(state) => state,
+        Err(poisoned) => {
+            tracing::warn!("App state write lock poisoned in transition_to, recovering");
+            poisoned.into_inner()
+        }
+    };
     *state = new_state;
     Ok(())
 }
@@ -45,7 +51,13 @@ pub fn transition_to(new_state: AppState) -> Result<(), &'static str> {
 pub fn set_state(app: &tauri::AppHandle, new_state: AppState) -> Result<(), String> {
     use tauri::Emitter;
 
-    let mut state = APP_STATE.write().unwrap();
+    let mut state = match APP_STATE.write() {
+        Ok(state) => state,
+        Err(poisoned) => {
+            tracing::warn!("App state write lock poisoned in set_state, recovering");
+            poisoned.into_inner()
+        }
+    };
     let old_state = *state;
     *state = new_state;
     drop(state);
@@ -60,5 +72,11 @@ pub fn set_state(app: &tauri::AppHandle, new_state: AppState) -> Result<(), Stri
 
 /// Get current state
 pub fn get_state() -> AppState {
-    *APP_STATE.read().unwrap()
+    match APP_STATE.read() {
+        Ok(state) => *state,
+        Err(poisoned) => {
+            tracing::warn!("App state read lock poisoned in get_state, recovering");
+            *poisoned.into_inner()
+        }
+    }
 }

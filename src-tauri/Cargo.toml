@@ -34,7 +34,7 @@ futures-util = "0.3"
 tauri-plugin-process = "2"
 tauri-plugin-single-instance = "2"
 rodio = "0.20"
-rdev = { git = "https://github.com/rustdesk-org/rdev", default-features = false }
+rdev = { git = "https://github.com/rustdesk-org/rdev", rev = "a90dbe1172f8832f54c97c62e823c5a34af5fdfe", default-features = false }
 sha2 = "0.10"
 
 # macOS: Metal for Apple GPUs

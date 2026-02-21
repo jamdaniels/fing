@@ -78,9 +78,13 @@ static FRONTMOST_APP: Mutex<Option<String>> = Mutex::new(None);
 
 /// Initialize the audio thread (call once at startup or before first recording)
 fn ensure_audio_thread() {
-    let mut thread_guard = AUDIO_THREAD
-        .lock()
-        .expect("Audio thread mutex poisoned - audio subsystem crashed");
+    let mut thread_guard = match AUDIO_THREAD.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!("Audio thread mutex poisoned in ensure_audio_thread, recovering");
+            poisoned.into_inner()
+        }
+    };
     if thread_guard.is_some() {
         return;
     }
@@ -205,11 +209,10 @@ pub fn on_key_down(app: &AppHandle) {
 
     // Check current state - only proceed if Ready (or in test mode)
     if !is_test_mode {
-        let state = crate::state::APP_STATE.read().unwrap();
+        let state = crate::state::get_state();
         if !state.can_record() {
             return;
         }
-        drop(state);
     }
 
     if !is_test_mode && settings_snapshot.lazy_model_loading {
@@ -223,7 +226,14 @@ pub fn on_key_down(app: &AppHandle) {
     {
         std::thread::spawn(|| {
             if let Some(bundle_id) = crate::platform::get_frontmost_app() {
-                *FRONTMOST_APP.lock().expect("Frontmost app mutex poisoned") = Some(bundle_id);
+                let mut frontmost_app = match FRONTMOST_APP.lock() {
+                    Ok(app) => app,
+                    Err(poisoned) => {
+                        tracing::warn!("Frontmost app mutex poisoned on capture, recovering");
+                        poisoned.into_inner()
+                    }
+                };
+                *frontmost_app = Some(bundle_id);
             }
         });
     }
@@ -240,9 +250,13 @@ pub fn on_key_down(app: &AppHandle) {
 
     // Store recording start time
     {
-        let mut start = RECORDING_START
-            .lock()
-            .expect("Recording start mutex poisoned");
+        let mut start = match RECORDING_START.lock() {
+            Ok(start) => start,
+            Err(poisoned) => {
+                tracing::warn!("Recording start mutex poisoned on key down, recovering");
+                poisoned.into_inner()
+            }
+        };
         *start = Some(Instant::now());
     }
 
@@ -268,7 +282,14 @@ pub fn on_key_down(app: &AppHandle) {
     // Ensure audio thread is running and start recording
     ensure_audio_thread();
 
-    if let Some(ref thread) = *AUDIO_THREAD.lock().expect("Audio thread mutex poisoned") {
+    let thread_guard = match AUDIO_THREAD.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!("Audio thread mutex poisoned on key down, recovering");
+            poisoned.into_inner()
+        }
+    };
+    if let Some(ref thread) = *thread_guard {
         let selected_device_id = settings_snapshot.selected_microphone_id;
         if thread
             .cmd_tx
@@ -299,18 +320,21 @@ pub fn on_key_up(app: &AppHandle) {
 
     // Check we're in Recording state (skip in test mode)
     if !is_test_mode {
-        let state = crate::state::APP_STATE.read().unwrap();
-        if !matches!(*state, crate::state::AppState::Recording) {
+        let state = crate::state::get_state();
+        if !matches!(state, crate::state::AppState::Recording) {
             return;
         }
-        drop(state);
     }
 
     // Calculate recording duration
     let duration_ms = {
-        let start = RECORDING_START
-            .lock()
-            .expect("Recording start mutex poisoned");
+        let start = match RECORDING_START.lock() {
+            Ok(start) => start,
+            Err(poisoned) => {
+                tracing::warn!("Recording start mutex poisoned on key up, recovering");
+                poisoned.into_inner()
+            }
+        };
         start.map(|s| s.elapsed().as_millis() as u64).unwrap_or(0)
     };
 
@@ -328,7 +352,13 @@ pub fn on_key_up(app: &AppHandle) {
     // Stop recording and get audio buffer
     // We need to send command and then receive response
     let cmd_sent = {
-        let thread_guard = AUDIO_THREAD.lock().expect("Audio thread mutex poisoned");
+        let thread_guard = match AUDIO_THREAD.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::warn!("Audio thread mutex poisoned on stop, recovering");
+                poisoned.into_inner()
+            }
+        };
         if let Some(ref thread) = *thread_guard {
             thread.cmd_tx.send(AudioCommand::StopRecording).is_ok()
         } else {
@@ -343,9 +373,13 @@ pub fn on_key_up(app: &AppHandle) {
         // Wait for audio response (blocking recv in async context via spawn_blocking)
         let audio_buffer = if cmd_sent {
             tokio::task::spawn_blocking(|| {
-                let thread_guard = AUDIO_THREAD
-                    .lock()
-                    .expect("Audio thread mutex poisoned in recv task");
+                let thread_guard = match AUDIO_THREAD.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => {
+                        tracing::warn!("Audio thread mutex poisoned in recv task, recovering");
+                        poisoned.into_inner()
+                    }
+                };
                 if let Some(ref thread) = *thread_guard {
                     thread.resp_rx.recv().ok().map(|r| r.buffer)
                 } else {
@@ -464,10 +498,14 @@ pub fn on_key_up(app: &AppHandle) {
             // Restore focus to the app that was active when recording started
             #[cfg(target_os = "macos")]
             {
-                let frontmost_app = FRONTMOST_APP
-                    .lock()
-                    .expect("Frontmost app mutex poisoned")
-                    .take();
+                let frontmost_app = match FRONTMOST_APP.lock() {
+                    Ok(app) => app,
+                    Err(poisoned) => {
+                        tracing::warn!("Frontmost app mutex poisoned on restore, recovering");
+                        poisoned.into_inner()
+                    }
+                }
+                .take();
                 if let Some(bundle_id) = frontmost_app {
                     // Small delay for macOS to settle
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;

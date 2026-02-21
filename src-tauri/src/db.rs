@@ -33,12 +33,13 @@ static STOP_WORD_SET: Lazy<HashSet<&'static str>> =
 
 /// Sanitize FTS5 search query to prevent injection
 fn sanitize_fts5_query(query: &str) -> String {
-    // Truncate to max length
-    let truncated = if query.len() > MAX_FTS_QUERY_LENGTH {
-        &query[..MAX_FTS_QUERY_LENGTH]
-    } else {
-        query
-    };
+    // Truncate by character index to avoid splitting UTF-8 code points.
+    let truncate_at = query
+        .char_indices()
+        .nth(MAX_FTS_QUERY_LENGTH)
+        .map(|(idx, _)| idx)
+        .unwrap_or(query.len());
+    let truncated = &query[..truncate_at];
 
     // Remove FTS5 special operators and escape quotes
     let mut result = String::with_capacity(truncated.len());

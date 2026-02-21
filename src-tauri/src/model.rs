@@ -222,6 +222,16 @@ lazy_static::lazy_static! {
 
 const HASH_CACHE_MAX_ENTRIES: usize = 64;
 
+fn lock_download_state() -> std::sync::MutexGuard<'static, InternalDownloadState> {
+    match DOWNLOAD_STATE.lock() {
+        Ok(state) => state,
+        Err(poisoned) => {
+            tracing::warn!("Download state mutex poisoned, recovering");
+            poisoned.into_inner()
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct HashCacheEntry {
     size: u64,
@@ -379,6 +389,32 @@ fn verify_sha256_with_cache(path: &Path, expected_sha256: &str) -> bool {
     computed == normalized_expected
 }
 
+fn move_hash_cache_entry(from: &Path, to: &Path) {
+    // Downloads verify the `.part` file first; preserve the computed hash cache after rename.
+    let Some((size, modified)) = metadata_signature(to) else {
+        return;
+    };
+
+    if let Ok(mut cache) = HASH_CACHE.lock() {
+        let Some(entry) = cache.remove(from) else {
+            return;
+        };
+
+        if cache.len() >= HASH_CACHE_MAX_ENTRIES && !cache.contains_key(to) {
+            cache.clear();
+        }
+
+        cache.insert(
+            to.to_path_buf(),
+            HashCacheEntry {
+                size,
+                modified,
+                sha256: entry.sha256,
+            },
+        );
+    }
+}
+
 /// Validate GGML file magic bytes
 fn validate_ggml_magic(path: &std::path::Path) -> bool {
     use std::io::Read;
@@ -406,6 +442,7 @@ pub async fn download() -> Result<PathBuf, String> {
 pub async fn download_variant(variant: ModelVariant) -> Result<PathBuf, String> {
     let def = get_definition(variant);
     let path = model_path_for_variant(variant);
+    let part_path = path.with_extension("part");
     tracing::info!("Starting {} model download to {:?}", def.display_name, path);
 
     // Create directory if needed
@@ -415,10 +452,13 @@ pub async fn download_variant(variant: ModelVariant) -> Result<PathBuf, String> 
             e.to_string()
         })?;
     }
+    if part_path.exists() {
+        let _ = std::fs::remove_file(&part_path);
+    }
 
     // Reset progress
     {
-        let mut state = DOWNLOAD_STATE.lock().unwrap();
+        let mut state = lock_download_state();
         *state = InternalDownloadState {
             variant: Some(variant),
             bytes_downloaded: 0,
@@ -436,7 +476,7 @@ pub async fn download_variant(variant: ModelVariant) -> Result<PathBuf, String> 
     let response = client.get(def.url).send().await.map_err(|e| {
         let err_msg = format!("Network error: {e}");
         tracing::error!("{}", err_msg);
-        let mut state = DOWNLOAD_STATE.lock().unwrap();
+        let mut state = lock_download_state();
         state.status = DownloadStatus::Failed(err_msg.clone());
         err_msg
     })?;
@@ -444,7 +484,7 @@ pub async fn download_variant(variant: ModelVariant) -> Result<PathBuf, String> 
     if !response.status().is_success() {
         let err_msg = format!("HTTP error: {}", response.status());
         tracing::error!("{}", err_msg);
-        let mut state = DOWNLOAD_STATE.lock().unwrap();
+        let mut state = lock_download_state();
         state.status = DownloadStatus::Failed(err_msg.clone());
         return Err(err_msg);
     }
@@ -452,10 +492,10 @@ pub async fn download_variant(variant: ModelVariant) -> Result<PathBuf, String> 
     let total_size = response.content_length().unwrap_or(def.size_bytes);
     tracing::info!("Model size: {} bytes", total_size);
 
-    let mut file = std::fs::File::create(&path).map_err(|e| {
+    let mut file = std::fs::File::create(&part_path).map_err(|e| {
         let err_msg = format!("Failed to create file: {e}");
         tracing::error!("{}", err_msg);
-        let mut state = DOWNLOAD_STATE.lock().unwrap();
+        let mut state = lock_download_state();
         state.status = DownloadStatus::Failed(err_msg.clone());
         err_msg
     })?;
@@ -468,51 +508,83 @@ pub async fn download_variant(variant: ModelVariant) -> Result<PathBuf, String> 
         let chunk = chunk.map_err(|e| {
             let err_msg = format!("Download error: {e}");
             tracing::error!("{}", err_msg);
-            let mut state = DOWNLOAD_STATE.lock().unwrap();
+            let mut state = lock_download_state();
             state.status = DownloadStatus::Failed(err_msg.clone());
+            let _ = std::fs::remove_file(&part_path);
             err_msg
         })?;
 
         file.write_all(&chunk).map_err(|e| {
             let err_msg = format!("Write error: {e}");
             tracing::error!("{}", err_msg);
-            let mut state = DOWNLOAD_STATE.lock().unwrap();
+            let mut state = lock_download_state();
             state.status = DownloadStatus::Failed(err_msg.clone());
+            let _ = std::fs::remove_file(&part_path);
             err_msg
         })?;
 
         downloaded += chunk.len() as u64;
 
         // Update progress
-        let mut state = DOWNLOAD_STATE.lock().unwrap();
+        let mut state = lock_download_state();
         state.bytes_downloaded = downloaded;
         state.total_bytes = total_size;
         state.percentage = (downloaded as f32 / total_size as f32) * 100.0;
     }
 
+    if let Err(e) = file.sync_all() {
+        let err_msg = format!("Failed to sync download to disk: {e}");
+        tracing::error!("{}", err_msg);
+        let mut state = lock_download_state();
+        state.status = DownloadStatus::Failed(err_msg.clone());
+        let _ = std::fs::remove_file(&part_path);
+        return Err(err_msg);
+    }
+    drop(file);
+
     tracing::info!("Download complete, verifying...");
 
     // Verify
     {
-        let mut state = DOWNLOAD_STATE.lock().unwrap();
+        let mut state = lock_download_state();
         state.status = DownloadStatus::Verifying;
     }
 
-    let verification = verify_for_variant(&path, variant);
+    let verification = verify_for_variant(&part_path, variant);
 
     if verification.is_valid {
-        let mut state = DOWNLOAD_STATE.lock().unwrap();
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| {
+                let err_msg = format!("Failed to replace existing model file: {e}");
+                tracing::error!("{}", err_msg);
+                let mut state = lock_download_state();
+                state.status = DownloadStatus::Failed(err_msg.clone());
+                err_msg
+            })?;
+        }
+
+        std::fs::rename(&part_path, &path).map_err(|e| {
+            let err_msg = format!("Failed to finalize model file: {e}");
+            tracing::error!("{}", err_msg);
+            let mut state = lock_download_state();
+            state.status = DownloadStatus::Failed(err_msg.clone());
+            let _ = std::fs::remove_file(&part_path);
+            err_msg
+        })?;
+        move_hash_cache_entry(&part_path, &path);
+
+        let mut state = lock_download_state();
         state.status = DownloadStatus::Complete;
         state.percentage = 100.0;
         tracing::info!("{} model verified successfully", def.display_name);
         Ok(path)
     } else {
         // Delete invalid file
-        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&part_path);
 
         let err_msg = "Model verification failed".to_string();
         tracing::error!("{}", err_msg);
-        let mut state = DOWNLOAD_STATE.lock().unwrap();
+        let mut state = lock_download_state();
         state.status = DownloadStatus::Failed(err_msg.clone());
         Err(err_msg)
     }
@@ -540,6 +612,6 @@ pub fn delete_model(variant: ModelVariant) -> Result<(), String> {
 
 /// Get current download progress.
 pub fn get_progress() -> DownloadProgress {
-    let state = DOWNLOAD_STATE.lock().unwrap();
+    let state = lock_download_state();
     DownloadProgress::from(&*state)
 }

@@ -281,7 +281,15 @@ impl AudioCapture {
             cpal::SampleFormat::F32 => device.build_input_stream(
                 &stream_config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    let mut buf = buffer.lock().unwrap();
+                    let mut buf = match buffer.lock() {
+                        Ok(buf) => buf,
+                        Err(poisoned) => {
+                            tracing::warn!(
+                                "Audio buffer mutex poisoned in f32 callback, recovering"
+                            );
+                            poisoned.into_inner()
+                        }
+                    };
                     // Convert to mono by averaging channels
                     for chunk in data.chunks(channels) {
                         let mono: f32 = chunk.iter().sum::<f32>() / channels as f32;
@@ -300,7 +308,15 @@ impl AudioCapture {
                 device.build_input_stream(
                     &stream_config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        let mut buf = buffer.lock().unwrap();
+                        let mut buf = match buffer.lock() {
+                            Ok(buf) => buf,
+                            Err(poisoned) => {
+                                tracing::warn!(
+                                    "Audio buffer mutex poisoned in i16 callback, recovering"
+                                );
+                                poisoned.into_inner()
+                            }
+                        };
                         for chunk in data.chunks(channels) {
                             let mono: f32 = chunk.iter().map(|&s| s as f32 / 32768.0).sum::<f32>()
                                 / channels as f32;
@@ -320,7 +336,15 @@ impl AudioCapture {
                 device.build_input_stream(
                     &stream_config,
                     move |data: &[u16], _: &cpal::InputCallbackInfo| {
-                        let mut buf = buffer.lock().unwrap();
+                        let mut buf = match buffer.lock() {
+                            Ok(buf) => buf,
+                            Err(poisoned) => {
+                                tracing::warn!(
+                                    "Audio buffer mutex poisoned in u16 callback, recovering"
+                                );
+                                poisoned.into_inner()
+                            }
+                        };
                         for chunk in data.chunks(channels) {
                             let mono: f32 = chunk
                                 .iter()
@@ -377,7 +401,13 @@ impl AudioCapture {
         }
 
         // Extract buffer
-        let mut buf = self.buffer.lock().unwrap();
+        let mut buf = match self.buffer.lock() {
+            Ok(buf) => buf,
+            Err(poisoned) => {
+                tracing::warn!("Audio buffer mutex poisoned in end_recording, recovering");
+                poisoned.into_inner()
+            }
+        };
         std::mem::take(&mut *buf)
     }
 
@@ -502,7 +532,13 @@ impl AudioCapture {
         }
 
         // Analyze buffer
-        let buf = self.buffer.lock().unwrap();
+        let buf = match self.buffer.lock() {
+            Ok(buf) => buf,
+            Err(poisoned) => {
+                tracing::warn!("Audio buffer mutex poisoned in test_microphone, recovering");
+                poisoned.into_inner()
+            }
+        };
         let peak_level = buf.iter().map(|&s| s.abs()).fold(0.0f32, f32::max);
         let is_receiving_audio = !buf.is_empty() && peak_level > 0.001;
 
@@ -537,7 +573,13 @@ impl AudioCapture {
 
     /// Get current audio level during mic test and clear old samples
     pub fn get_mic_level(&mut self) -> MicrophoneTest {
-        let mut buf = self.buffer.lock().unwrap();
+        let mut buf = match self.buffer.lock() {
+            Ok(buf) => buf,
+            Err(poisoned) => {
+                tracing::warn!("Audio buffer mutex poisoned in get_mic_level, recovering");
+                poisoned.into_inner()
+            }
+        };
         let buf_len = buf.len();
 
         // Calculate peak from all samples
