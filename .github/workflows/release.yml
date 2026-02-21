@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-15
+          - platform: macos-14
           - platform: windows-2022
 
     runs-on: ${{ matrix.platform }}
@@ -53,6 +53,7 @@ jobs:
         shell: bash
         run: |
           echo "WHISPER_NATIVE=OFF" >> "$GITHUB_ENV"
+          echo "CMAKE_CROSSCOMPILING=ON" >> "$GITHUB_ENV"
           echo "WHISPER_CCACHE=OFF" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=1" >> "$GITHUB_ENV"
           echo "NUM_JOBS=1" >> "$GITHUB_ENV"
@@ -60,10 +61,14 @@ jobs:
 
       - name: Install Vulkan SDK
         if: runner.os == 'Windows'
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          version: 1.4.309.0
-          cache: true
+        shell: pwsh
+        run: |
+          $ver = "1.4.309.0"
+          $installer = "$env:TEMP\VulkanSDK-Installer.exe"
+          Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/$ver/windows/VulkanSDK-$ver-Installer.exe" -OutFile $installer
+          Start-Process -FilePath $installer -Args "--accept-licenses --default-answer --confirm-command install" -Wait
+          echo "VULKAN_SDK=C:\VulkanSDK\$ver" >> $env:GITHUB_ENV
+          echo "C:\VulkanSDK\$ver\Bin" >> $env:GITHUB_PATH
 
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
