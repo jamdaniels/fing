@@ -18,7 +18,8 @@ Hold your hotkey, speak, release — transcribed text is pasted instantly. Your 
 - **Tray app** — Lives in system tray, stays out of your way
 - **Multi-language** — English, German, Spanish, French with auto-detection
 - **Custom hotkey** — Bind any key or modifier combination
-- **Searchable history** — Full-text search across all transcripts
+- **Dictionary** — Add custom words and short phrases to improve recognition
+- **Optional local history** — Transcripts are searchable and auto-cleared after 30 days
 - **Copy & reuse** — One-click copy of any previous transcription
 - **Sound feedback** — Optional audio cues for start
 - **Auto-start** — Launch on login
@@ -26,7 +27,8 @@ Hold your hotkey, speak, release — transcribed text is pasted instantly. Your 
 
 ## Platforms
 
-macOS and Windows. Linux planned.
+macOS and Windows.
+
 
 ## License
 

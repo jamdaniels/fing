@@ -54,14 +54,6 @@ export interface Settings {
   dictionaryTerms: string[];
 }
 
-export interface UpdateInfo {
-  currentVersion: string;
-  latestVersion: string;
-  updateAvailable: boolean;
-  downloadUrl?: string;
-  releaseNotes?: string;
-}
-
 export interface AppInfo {
   name: string;
   version: string;

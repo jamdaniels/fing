@@ -13,7 +13,6 @@ import type {
   Settings,
   Stats,
   Transcript,
-  UpdateInfo,
 } from "./types";
 
 export async function getAppState(): Promise<AppState> {
@@ -69,10 +68,6 @@ export async function refreshAudioDevices(): Promise<AudioDevice[]> {
 
 export async function setAudioDevice(deviceId: string | null): Promise<void> {
   return await invoke("set_audio_device", { deviceId });
-}
-
-export async function checkForUpdates(): Promise<UpdateInfo> {
-  return await invoke<UpdateInfo>("check_for_updates");
 }
 
 export async function downloadModel(variant: ModelVariant): Promise<void> {

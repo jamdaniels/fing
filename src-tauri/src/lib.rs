@@ -19,7 +19,6 @@ mod sounds;
 mod state;
 mod stats;
 mod transcribe;
-mod updates;
 
 use audio::{AudioCapture, AudioDevice, MicrophoneTest};
 use state::AppState;
@@ -757,8 +756,9 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
             }
         }
         "check_updates" => {
-            // Open main window and navigate to settings/updates
+            // Open main window and trigger the settings update flow.
             show_window_for_tab(app, "settings");
+            let _ = app.emit("check-for-updates", ());
         }
         id if id.starts_with("mic_") => {
             tracing::debug!("Mic menu event: {}", id);
@@ -807,10 +807,12 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
@@ -979,8 +981,6 @@ pub fn run() {
             set_active_model,
             // Setup
             complete_setup,
-            // Updates
-            updates::check_for_updates_cmd,
             // Auto-start
             set_auto_start,
             get_auto_start,

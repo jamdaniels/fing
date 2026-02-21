@@ -105,6 +105,7 @@ const MAX_DICTIONARY_TERMS = 100;
 const MAX_DICTIONARY_WORDS_PER_TERM = 3;
 let dictionaryError: string | null = null;
 let lazyModelToggleBusy = false;
+let updateCheckInProgress = false;
 
 interface ModelDownloadProgressState {
   variant: ModelVariant;
@@ -1447,6 +1448,104 @@ function showConfirmDialog(options: ConfirmDialogOptions): Promise<boolean> {
   });
 }
 
+function formatErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim().length > 0) {
+    return error;
+  }
+
+  return "Unknown error";
+}
+
+function getUpdateNotesPreview(
+  notes: string | null | undefined
+): string | null {
+  if (!(notes && notes.trim().length > 0)) {
+    return null;
+  }
+
+  const trimmed = notes.trim();
+  if (trimmed.length <= 320) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, 320)}...`;
+}
+
+function setUpdateButtonBusy(isBusy: boolean): void {
+  const button = document.querySelector(
+    ".check-updates-btn"
+  ) as HTMLButtonElement | null;
+  if (!button) {
+    return;
+  }
+
+  button.disabled = isBusy;
+  button.textContent = isBusy ? "Checking..." : "Check for Updates";
+}
+
+async function runManualUpdateCheck(): Promise<void> {
+  if (updateCheckInProgress) {
+    return;
+  }
+
+  updateCheckInProgress = true;
+  setUpdateButtonBusy(true);
+
+  try {
+    const [{ ask, message }, { check }] = await Promise.all([
+      import("@tauri-apps/plugin-dialog"),
+      import("@tauri-apps/plugin-updater"),
+    ]);
+    const update = await check();
+
+    if (!update) {
+      await message("Fing is up to date.", {
+        title: "No Updates Available",
+        kind: "info",
+      });
+      return;
+    }
+
+    const notesPreview = getUpdateNotesPreview(update.body);
+    const prompt = notesPreview
+      ? `Version ${update.version} is available.\n\nRelease notes:\n${notesPreview}\n\nInstall now?`
+      : `Version ${update.version} is available.\n\nInstall now?`;
+    const shouldInstall = await ask(prompt, {
+      title: "Update Available",
+      kind: "info",
+      okLabel: "Install Update",
+      cancelLabel: "Later",
+    });
+    if (!shouldInstall) {
+      return;
+    }
+
+    await update.downloadAndInstall();
+    await message("The update was installed. Fing will now restart.", {
+      title: "Update Installed",
+      kind: "info",
+    });
+    await relaunchApp();
+  } catch (error) {
+    console.error("Failed to check for updates:", error);
+    const { message } = await import("@tauri-apps/plugin-dialog");
+    await message(
+      `Could not complete update check.\n\n${formatErrorMessage(error)}`,
+      {
+        title: "Update Check Failed",
+        kind: "error",
+      }
+    );
+  } finally {
+    updateCheckInProgress = false;
+    setUpdateButtonBusy(false);
+  }
+}
+
 async function handleSettingChange(
   key: keyof SettingsType,
   value: unknown
@@ -1622,6 +1721,13 @@ function handleSettingsClick(e: MouseEvent): void {
   // Handle mic test button
   if (target.closest(".mic-test-btn")) {
     showMicTestModal();
+    return;
+  }
+
+  if (target.closest(".check-updates-btn")) {
+    runManualUpdateCheck().catch((err) => {
+      console.error("Update check flow failed:", err);
+    });
     return;
   }
 
@@ -2024,6 +2130,15 @@ function renderSettingsUI(el: HTMLElement): void {
     <div class="settings-section">
       <div class="settings-section-title">System</div>
       <div class="settings-card">
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Application updates</div>
+            <div class="settings-row-desc">Check for and install the latest version</div>
+          </div>
+          <button class="btn btn-secondary check-updates-btn" ${updateCheckInProgress ? "disabled" : ""}>
+            ${updateCheckInProgress ? "Checking..." : "Check for Updates"}
+          </button>
+        </div>
         <div class="settings-row">
           <div>
             <div class="settings-row-label">Start on login</div>
@@ -2461,6 +2576,15 @@ async function init(): Promise<void> {
   // Listen for navigation events from tray menu
   listen<string>("navigate-to-tab", (event) => {
     navigateToTab(event.payload as SidebarItem);
+  });
+
+  listen("check-for-updates", () => {
+    if (currentView !== "settings") {
+      navigateToTab("settings");
+    }
+    runManualUpdateCheck().catch((err) => {
+      console.error("Update check flow failed:", err);
+    });
   });
 }
 
