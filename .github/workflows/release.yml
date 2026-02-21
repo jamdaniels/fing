@@ -20,8 +20,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
-          - platform: windows-latest
+          - platform: macos-15
+          - platform: windows-2022
 
     runs-on: ${{ matrix.platform }}
 
@@ -47,6 +47,45 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Configure macOS native build stability
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          echo "WHISPER_NATIVE=OFF" >> "$GITHUB_ENV"
+          echo "CMAKE_BUILD_PARALLEL_LEVEL=1" >> "$GITHUB_ENV"
+
+      - name: Install Vulkan SDK
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          choco install vulkan-sdk --yes --no-progress --limit-output
+
+          $searchRoots = @(
+            "C:\\VulkanSDK",
+            "$env:ProgramFiles\\VulkanSDK",
+            "${env:ProgramFiles(x86)}\\VulkanSDK"
+          )
+
+          $versionDirs = @()
+          foreach ($root in $searchRoots) {
+            if (Test-Path $root) {
+              $versionDirs += Get-ChildItem $root -Directory -ErrorAction SilentlyContinue
+            }
+          }
+
+          if ($versionDirs.Count -eq 0) {
+            throw "Could not find an installed Vulkan SDK directory."
+          }
+
+          $sdkRoot = ($versionDirs | Sort-Object Name -Descending | Select-Object -First 1).FullName
+
+          if (-not (Test-Path (Join-Path $sdkRoot "Lib"))) {
+            throw "Vulkan SDK found at '$sdkRoot' but missing Lib directory."
+          }
+
+          "VULKAN_SDK=$sdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
