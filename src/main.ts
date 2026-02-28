@@ -1986,7 +1986,6 @@ function renderDictionary(el: HTMLElement): void {
             : `<div class="empty-state">
                  <div class="empty-state-icon">${createIcon(BookOpen)}</div>
                  <div class="empty-state-title">No dictionary terms yet</div>
-                 <p>Add words or short phrases to improve recognition</p>
                </div>`
         }
       </div>

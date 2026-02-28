@@ -76,12 +76,14 @@ impl TranscriptionEngine for Transcriber {
             .full(params, audio)
             .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
 
-        let num_segments = state.full_n_segments().unwrap_or(0);
+        let num_segments = state.full_n_segments();
         let mut text = String::new();
 
         for i in 0..num_segments {
-            if let Ok(segment) = state.full_get_segment_text(i) {
-                text.push_str(&segment);
+            if let Some(segment) = state.get_segment(i) {
+                if let Ok(segment_text) = segment.to_str_lossy() {
+                    text.push_str(segment_text.as_ref());
+                }
             }
         }
 

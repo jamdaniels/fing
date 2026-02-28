@@ -116,9 +116,13 @@ fn grab_callback(event: Event) -> Option<Event> {
 
             if is_base_key(&key, &config.key) && modifiers_match(&state.mod_state, &config) {
                 if !state.hotkey_active {
-                    state.hotkey_active = true;
-                    if let Some(app) = APP_HANDLE.get() {
-                        crate::hotkey::on_key_down(app);
+                    if test_mode || crate::state::get_state().can_record() {
+                        state.hotkey_active = true;
+                    }
+                    if state.hotkey_active {
+                        if let Some(app) = APP_HANDLE.get() {
+                            crate::hotkey::on_key_down(app);
+                        }
                     }
                 }
                 passthrough(event)
@@ -199,9 +203,13 @@ fn listen_callback(event: Event) {
                 && modifiers_match(&state.mod_state, &config)
                 && !state.hotkey_active
             {
-                state.hotkey_active = true;
-                if let Some(app) = APP_HANDLE.get() {
-                    crate::hotkey::on_key_down(app);
+                if crate::state::get_state().can_record() {
+                    state.hotkey_active = true;
+                }
+                if state.hotkey_active {
+                    if let Some(app) = APP_HANDLE.get() {
+                        crate::hotkey::on_key_down(app);
+                    }
                 }
             }
         }

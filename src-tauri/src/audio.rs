@@ -1,8 +1,9 @@
 // Audio capture with cpal
 
+use audioadapter_buffers::direct::InterleavedSlice;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream, StreamConfig};
-use rubato::{FftFixedIn, Resampler};
+use rubato::{Fft, FixedSync, Resampler};
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -99,13 +100,18 @@ impl AudioCapture {
     pub fn list_devices() -> Vec<AudioDevice> {
         let host = cpal::default_host();
         let default_device = host.default_input_device();
-        let default_name = default_device.as_ref().and_then(|d| d.name().ok());
+        let default_name = default_device.as_ref().and_then(|d| {
+            d.description()
+                .ok()
+                .map(|description| description.name().to_string())
+        });
 
         let mut devices = Vec::new();
 
         if let Ok(input_devices) = host.input_devices() {
             for device in input_devices {
-                if let Ok(name) = device.name() {
+                if let Ok(description) = device.description() {
+                    let name = description.name().to_string();
                     let is_default = default_name.as_ref() == Some(&name);
                     devices.push(AudioDevice {
                         id: name.clone(),
@@ -131,7 +137,11 @@ impl AudioCapture {
                 let devices: Vec<_> = host
                     .input_devices()
                     .map_err(|_| AudioError::NoDevicesFound)?
-                    .filter_map(|d| d.name().ok().map(|n| (d, n)))
+                    .filter_map(|d| {
+                        d.description()
+                            .ok()
+                            .map(|description| (d, description.name().to_string()))
+                    })
                     .collect();
 
                 // Log available devices for debugging
@@ -210,7 +220,8 @@ impl AudioCapture {
                     .default_input_device()
                     .ok_or(AudioError::NoDevicesFound)?;
                 let default_name = default_device
-                    .name()
+                    .description()
+                    .map(|description| description.name().to_string())
                     .unwrap_or_else(|_| "Unknown".to_string());
                 Ok((
                     default_device,
@@ -225,7 +236,10 @@ impl AudioCapture {
                 let device = host
                     .default_input_device()
                     .ok_or(AudioError::NoDevicesFound)?;
-                let name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+                let name = device
+                    .description()
+                    .map(|description| description.name().to_string())
+                    .unwrap_or_else(|_| "Unknown".to_string());
                 Ok((
                     device,
                     DeviceMatchResult {
@@ -246,7 +260,7 @@ impl AudioCapture {
             .default_input_config()
             .map_err(|e| AudioError::DeviceInitFailed(e.to_string()))?;
 
-        self.native_sample_rate = config.sample_rate().0;
+        self.native_sample_rate = config.sample_rate();
         let max_buffer_size = max_buffer_size_for_sample_rate(self.native_sample_rate);
 
         tracing::info!(
@@ -254,7 +268,7 @@ impl AudioCapture {
             device_name,
             config.sample_format(),
             config.channels(),
-            config.sample_rate().0
+            config.sample_rate()
         );
 
         if let Ok(mut buf) = self.buffer.lock() {
@@ -430,17 +444,15 @@ impl AudioCapture {
             return buffer;
         }
 
-        let expected_output_len = (buffer.len() as usize * WHISPER_SAMPLE_RATE as usize)
-            / self.native_sample_rate as usize;
-
         // Use rubato for high-quality resampling
         let chunk_size = 1024;
-        let mut resampler = match FftFixedIn::<f32>::new(
+        let mut resampler = match Fft::<f32>::new(
             self.native_sample_rate as usize,
             WHISPER_SAMPLE_RATE as usize,
             chunk_size,
             2,
             1,
+            FixedSync::Input,
         ) {
             Ok(r) => r,
             Err(e) => {
@@ -454,82 +466,45 @@ impl AudioCapture {
             }
         };
 
-        let output_delay = resampler.output_delay();
-        let required_output_len = output_delay + expected_output_len;
-        let mut output = Vec::with_capacity(required_output_len + resampler.output_frames_max());
-        let mut pos = 0;
-
-        while buffer.len().saturating_sub(pos) >= chunk_size {
-            let end = pos + chunk_size;
-            let chunk = &buffer[pos..end];
-
-            match resampler.process(&[chunk], None) {
-                Ok(resampled) => {
-                    if !resampled.is_empty() {
-                        output.extend_from_slice(&resampled[0]);
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("Resampling error: {}", e);
-                    break;
-                }
+        let input_frames = buffer.len();
+        let input_adapter = match InterleavedSlice::new(&buffer, 1, input_frames) {
+            Ok(adapter) => adapter,
+            Err(e) => {
+                tracing::error!("Failed to create input adapter: {}", e);
+                return Self::simple_resample(
+                    &buffer,
+                    self.native_sample_rate,
+                    WHISPER_SAMPLE_RATE,
+                );
             }
+        };
 
-            pos += chunk_size;
-        }
+        let mut output = vec![0.0f32; resampler.process_all_needed_output_len(input_frames)];
+        let output_capacity = output.len();
+        let mut output_adapter = match InterleavedSlice::new_mut(&mut output, 1, output_capacity) {
+            Ok(adapter) => adapter,
+            Err(e) => {
+                tracing::error!("Failed to create output adapter: {}", e);
+                return Self::simple_resample(
+                    &buffer,
+                    self.native_sample_rate,
+                    WHISPER_SAMPLE_RATE,
+                );
+            }
+        };
 
-        if pos < buffer.len() {
-            let chunk = &buffer[pos..];
-
-            match resampler.process_partial(Some(&[chunk]), None) {
-                Ok(resampled) => {
-                    if !resampled.is_empty() {
-                        output.extend_from_slice(&resampled[0]);
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("Resampling error: {}", e);
-                    return Self::simple_resample(
-                        &buffer,
-                        self.native_sample_rate,
-                        WHISPER_SAMPLE_RATE,
-                    );
-                }
+        match resampler.process_all_into_buffer(
+            &input_adapter,
+            &mut output_adapter,
+            input_frames,
+            None,
+        ) {
+            Ok((_, output_frames)) => output[..output_frames].to_vec(),
+            Err(e) => {
+                tracing::error!("Resampling error: {}", e);
+                Self::simple_resample(&buffer, self.native_sample_rate, WHISPER_SAMPLE_RATE)
             }
         }
-
-        while output.len() < required_output_len {
-            match resampler.process_partial::<&[f32]>(None, None) {
-                Ok(resampled) => {
-                    let Some(channel) = resampled.first() else {
-                        break;
-                    };
-                    if channel.is_empty() {
-                        break;
-                    }
-                    output.extend_from_slice(channel);
-                }
-                Err(e) => {
-                    tracing::error!("Resampling flush error: {}", e);
-                    return Self::simple_resample(
-                        &buffer,
-                        self.native_sample_rate,
-                        WHISPER_SAMPLE_RATE,
-                    );
-                }
-            }
-        }
-
-        if required_output_len == 0 || output.len() <= output_delay {
-            tracing::warn!(
-                "Resampler produced insufficient output for {} input samples",
-                buffer.len()
-            );
-            return Self::simple_resample(&buffer, self.native_sample_rate, WHISPER_SAMPLE_RATE);
-        }
-
-        let trimmed_end = (output_delay + expected_output_len).min(output.len());
-        output[output_delay..trimmed_end].to_vec()
     }
 
     fn simple_resample(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {

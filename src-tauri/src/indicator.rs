@@ -1,6 +1,8 @@
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
+pub const HIDE_ANIMATION_MS: u64 = 200;
+
 #[derive(Clone, serde::Serialize)]
 pub struct IndicatorStatePayload {
     pub state: String,
@@ -51,7 +53,7 @@ pub fn hide(app: &AppHandle) -> Result<(), String> {
     // Delay hide to allow shrink animation
     let app_handle = app.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(200));
+        std::thread::sleep(Duration::from_millis(HIDE_ANIMATION_MS));
         if let Some(window) = app_handle.get_webview_window("indicator") {
             let _ = window.hide();
         }

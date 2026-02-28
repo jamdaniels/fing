@@ -685,6 +685,7 @@ async fn finish_transcription(
 
     // Return to Ready (skip state events in test mode)
     if !is_test_mode {
+        tokio::time::sleep(Duration::from_millis(crate::indicator::HIDE_ANIMATION_MS)).await;
         crate::state::transition_to(crate::state::AppState::Ready).ok();
         app.emit("app-state-changed", "ready").ok();
     }
