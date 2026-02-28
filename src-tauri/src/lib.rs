@@ -300,10 +300,7 @@ async fn set_active_model(
     variant: model::ModelVariant,
     _app: tauri::AppHandle,
 ) -> Result<bool, String> {
-    // Check if model is downloaded
-    if !model::is_variant_downloaded(variant) {
-        return Err("Model is not downloaded".to_string());
-    }
+    model::ensure_variant_verified(variant)?;
 
     // Get current settings
     let mut current_settings = settings::load_settings().await;
@@ -423,18 +420,20 @@ async fn update_settings(
             transcribe::unload_transcriber();
             tracing::info!("Lazy model loading enabled, transcriber unloaded");
         } else {
-            let model_path = model::model_path_for_variant(updated.active_model_variant);
-            if !model_path.exists() {
-                let mut rollback = updated.clone();
-                rollback.lazy_model_loading = true;
-                if let Err(save_err) = settings::save_settings(&rollback).await {
-                    tracing::error!(
-                        "Failed to roll back lazy model loading setting after missing model: {}",
-                        save_err
-                    );
+            let model_path = match model::ensure_variant_verified(updated.active_model_variant) {
+                Ok(path) => path,
+                Err(load_err) => {
+                    let mut rollback = updated.clone();
+                    rollback.lazy_model_loading = true;
+                    if let Err(save_err) = settings::save_settings(&rollback).await {
+                        tracing::error!(
+                                "Failed to roll back lazy model loading setting after invalid model: {}",
+                                save_err
+                            );
+                    }
+                    return Err(load_err);
                 }
-                return Err("Model not found. Please download the model in settings.".to_string());
-            }
+            };
 
             let model_path_str = model_path.to_string_lossy().to_string();
             let load_result = tauri::async_runtime::spawn_blocking(move || {
@@ -509,20 +508,7 @@ async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
     let mut current_settings = settings::load_settings().await;
     let variant = current_settings.active_model_variant;
 
-    // Verify model exists for the active variant
-    let model_path = model::model_path_for_variant(variant);
-    let verification = model::verify_for_variant(&model_path, variant);
-
-    if !verification.is_valid {
-        return Err(format!(
-            "Model not valid at {}: exists={}, size_valid={}, format_valid={}, hash_valid={}",
-            verification.path,
-            verification.exists,
-            verification.size_valid,
-            verification.format_valid,
-            verification.hash_valid
-        ));
-    }
+    let model_path = model::ensure_variant_verified(variant)?;
 
     if !current_settings.lazy_model_loading {
         let model_path_str = model_path.to_string_lossy().to_string();
@@ -840,10 +826,14 @@ pub fn run() {
             let mut show_setup_window = false;
 
             if saved_settings.onboarding_completed {
-                // User already completed onboarding - verify model and init
+                // User already completed onboarding - check model and init if needed
                 let variant = saved_settings.active_model_variant;
                 let model_path = model::model_path_for_variant(variant);
-                let verification = model::verify_for_variant(&model_path, variant);
+                let verification = if saved_settings.lazy_model_loading {
+                    model::inspect_for_variant(&model_path, variant)
+                } else {
+                    model::verify_for_variant(&model_path, variant)
+                };
 
                 if verification.is_valid {
                     let transcriber_ready = if saved_settings.lazy_model_loading {

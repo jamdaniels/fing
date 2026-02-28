@@ -858,9 +858,12 @@ async function loadSettings(
 
   try {
     const shouldRefreshDevices = refreshDevices || audioDevices.length === 0;
-    const [loadedSettings, loadedModels, devices] = await Promise.all([
+    const loadedModelsPromise = getModels().catch((err) => {
+      console.error("Failed to load models:", err);
+      return models;
+    });
+    const [loadedSettings, devices] = await Promise.all([
       getSettings(),
-      getModels(),
       shouldRefreshDevices
         ? refreshAudioDevices()
         : Promise.resolve(audioDevices),
@@ -871,12 +874,12 @@ async function loadSettings(
       dictionaryTerms: loadedSettings.dictionaryTerms ?? [],
     };
     audioDevices = devices;
-    models = loadedModels;
 
     const autoStart = await getAutoStart().catch(() => null);
     if (autoStart !== null && settings) {
       settings = { ...settings, autoStart };
     }
+    models = await loadedModelsPromise;
     settingsLoadedAt = Date.now();
   } catch {
     settings = null;

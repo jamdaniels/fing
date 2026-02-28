@@ -83,17 +83,17 @@ pub fn model_path_for_variant(variant: ModelVariant) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(def.filename))
 }
 
-/// Check if a model variant is downloaded and valid
+/// Check if a model variant is installed and structurally valid.
 pub fn is_variant_downloaded(variant: ModelVariant) -> bool {
     let path = model_path_for_variant(variant);
-    verify_for_variant(&path, variant).is_valid
+    inspect_for_variant(&path, variant).is_valid
 }
 
 // GGML file magic bytes (little-endian): "ggml" = 0x6c6d6767 or "ggjt" = 0x746a6767
 const GGML_MAGIC_GGML: u32 = 0x67676d6c;
 const GGML_MAGIC_GGJT: u32 = 0x67676a74;
 
-/// Result of model file verification (size + GGML magic bytes).
+/// Result of model file verification (size + GGML magic bytes, plus optional SHA-256).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelVerification {
@@ -245,10 +245,52 @@ pub fn verify(path: &std::path::Path) -> ModelVerification {
     verify_with_expected_size(path, None, None)
 }
 
+/// Inspect a model file for a specific variant without hashing it.
+pub fn inspect_for_variant(path: &std::path::Path, variant: ModelVariant) -> ModelVerification {
+    let def = get_definition(variant);
+    inspect_with_expected_size(path, Some(def.size_bytes))
+}
+
 /// Verify a model file for a specific variant.
 pub fn verify_for_variant(path: &std::path::Path, variant: ModelVariant) -> ModelVerification {
     let def = get_definition(variant);
     verify_with_expected_size(path, Some(def.size_bytes), Some(def.sha256))
+}
+
+/// Ensure a model variant is fully verified before the app uses it.
+pub fn ensure_variant_verified(variant: ModelVariant) -> Result<PathBuf, String> {
+    let path = model_path_for_variant(variant);
+    let verification = verify_for_variant(&path, variant);
+
+    if verification.is_valid {
+        return Ok(path);
+    }
+
+    Err(format!(
+        "Model not valid at {}: exists={}, size_valid={}, format_valid={}, hash_valid={}",
+        verification.path,
+        verification.exists,
+        verification.size_valid,
+        verification.format_valid,
+        verification.hash_valid
+    ))
+}
+
+/// Inspect a model file with optional expected size, without hashing it.
+fn inspect_with_expected_size(
+    path: &std::path::Path,
+    expected_size: Option<u64>,
+) -> ModelVerification {
+    let (exists, size_valid, format_valid) = inspect_model_file(path, expected_size);
+
+    ModelVerification {
+        path: path.to_string_lossy().to_string(),
+        exists,
+        size_valid,
+        format_valid,
+        hash_valid: true,
+        is_valid: exists && size_valid && format_valid,
+    }
 }
 
 /// Internal verify function with optional expected size.
@@ -257,10 +299,26 @@ fn verify_with_expected_size(
     expected_size: Option<u64>,
     expected_sha256: Option<&str>,
 ) -> ModelVerification {
+    let mut verification = inspect_with_expected_size(path, expected_size);
+    verification.hash_valid = expected_sha256.is_none();
+
+    if verification.is_valid {
+        if let Some(expected_hash) = expected_sha256 {
+            verification.hash_valid = verify_sha256_with_cache(path, expected_hash);
+            if !verification.hash_valid {
+                tracing::warn!("Model file SHA256 mismatch: {:?}", path);
+            }
+        }
+    }
+
+    verification.is_valid = verification.is_valid && verification.hash_valid;
+    verification
+}
+
+fn inspect_model_file(path: &Path, expected_size: Option<u64>) -> (bool, bool, bool) {
     let exists = path.exists();
     let mut size_valid = false;
     let mut format_valid = false;
-    let mut hash_valid = expected_sha256.is_none();
 
     if exists {
         // Check file size
@@ -287,37 +345,16 @@ fn verify_with_expected_size(
             }
         }
 
-        // Verify GGML magic bytes - this is the primary validation
-        if size_valid && !validate_ggml_magic(path) {
-            tracing::warn!("Model file has invalid GGML magic bytes: {:?}", path);
-            size_valid = false;
-        }
-
         if size_valid {
-            if let Some(expected_hash) = expected_sha256 {
-                hash_valid = verify_sha256_with_cache(path, expected_hash);
-                if !hash_valid {
-                    tracing::warn!("Model file SHA256 mismatch: {:?}", path);
-                }
-            } else {
-                hash_valid = true;
+            format_valid = validate_ggml_magic(path);
+            if !format_valid {
+                tracing::warn!("Model file has invalid GGML magic bytes: {:?}", path);
+                size_valid = false;
             }
         }
-
-        // Model format is valid if size, magic bytes, and hash checks pass.
-        if size_valid {
-            format_valid = hash_valid;
-        }
     }
 
-    ModelVerification {
-        path: path.to_string_lossy().to_string(),
-        exists,
-        size_valid,
-        format_valid,
-        hash_valid,
-        is_valid: exists && size_valid && format_valid && hash_valid,
-    }
+    (exists, size_valid, format_valid)
 }
 
 fn metadata_signature(path: &Path) -> Option<(u64, Option<SystemTime>)> {

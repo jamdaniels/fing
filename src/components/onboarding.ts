@@ -17,7 +17,6 @@ import {
 } from "lucide";
 import { createIcon, escapeHtml } from "../lib/icons";
 import {
-  checkModelExistsForVariant,
   completeSetup,
   disableOnboardingTestMode,
   downloadModel,
@@ -1332,23 +1331,18 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     return;
   }
 
-  // Check if the selected model variant already exists
-  try {
-    const modelStatus = await checkModelExistsForVariant(
-      state.selectedModelVariant
-    );
-    if (modelStatus.isValid) {
-      state.downloadProgress = {
-        variant: state.selectedModelVariant,
-        bytesDownloaded: 0,
-        totalBytes: 0,
-        percentage: 100,
-        status: "complete",
-      };
-      state.step = 3;
-    }
-  } catch (e) {
-    console.error("Failed to check model status:", e);
+  const selectedModel = models.find(
+    (model) => model.variant === state.selectedModelVariant
+  );
+  if (selectedModel?.isDownloaded) {
+    state.downloadProgress = {
+      variant: state.selectedModelVariant,
+      bytesDownloaded: 0,
+      totalBytes: 0,
+      percentage: 100,
+      status: "complete",
+    };
+    state.step = 3;
   }
 
   render();

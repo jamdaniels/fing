@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::audio::AudioCapture;
 use crate::db::{save_transcript, NewTranscript};
-use crate::model::{model_path_for_variant, ModelVariant};
+use crate::model::{ensure_variant_verified, model_path_for_variant, ModelVariant};
 use crate::paste::paste_text;
 use crate::settings::{load_settings, load_settings_sync, save_settings};
 use crate::sounds;
@@ -265,6 +265,16 @@ async fn init_transcriber_async(model_path: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+async fn init_transcriber_for_variant_async(variant: ModelVariant) -> Result<(), String> {
+    let model_path_str = tauri::async_runtime::spawn_blocking(move || {
+        ensure_variant_verified(variant).map(|path| path.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| format!("Model verification task failed: {e}"))??;
+
+    init_transcriber_async(model_path_str).await
+}
+
 fn spawn_lazy_preload_if_needed(variant: ModelVariant) {
     if is_transcriber_loaded() {
         return;
@@ -277,15 +287,7 @@ fn spawn_lazy_preload_if_needed(variant: ModelVariant) {
     }
 
     tauri::async_runtime::spawn(async move {
-        let model_path = model_path_for_variant(variant);
-        if !model_path.exists() {
-            tracing::warn!("Skipping lazy preload, model not found at {:?}", model_path);
-            LAZY_PRELOAD_IN_FLIGHT.store(false, Ordering::SeqCst);
-            return;
-        }
-
-        let model_path_str = model_path.to_string_lossy().to_string();
-        match init_transcriber_async(model_path_str).await {
+        match init_transcriber_for_variant_async(variant).await {
             Ok(_) => tracing::info!("Lazy preload completed"),
             Err(err) => tracing::warn!("Lazy preload failed: {}", err),
         }
@@ -565,21 +567,9 @@ pub fn on_key_up(app: &AppHandle) {
         // Initialize transcriber if needed
         if !is_transcriber_loaded() {
             let model_path = model_path_for_variant(settings.active_model_variant);
-            let model_path_str = model_path.to_string_lossy().to_string();
 
-            // Check if model exists
-            if !model_path.exists() {
-                tracing::error!("Model not found at {:?}", model_path);
-                crate::notifications::show_error(
-                    &app_handle,
-                    "Model Not Found",
-                    "Please download the model in settings",
-                );
-                finish_transcription(&app_handle, None, duration_ms, test_mode).await;
-                return;
-            }
-
-            if let Err(e) = init_transcriber_async(model_path_str).await {
+            if let Err(e) = init_transcriber_for_variant_async(settings.active_model_variant).await
+            {
                 tracing::error!("Failed to initialize transcriber: {}", e);
                 crate::notifications::show_error(
                     &app_handle,
