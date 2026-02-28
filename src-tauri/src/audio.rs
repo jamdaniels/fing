@@ -430,6 +430,9 @@ impl AudioCapture {
             return buffer;
         }
 
+        let expected_output_len = (buffer.len() as usize * WHISPER_SAMPLE_RATE as usize)
+            / self.native_sample_rate as usize;
+
         // Use rubato for high-quality resampling
         let chunk_size = 1024;
         let mut resampler = match FftFixedIn::<f32>::new(
@@ -451,17 +454,14 @@ impl AudioCapture {
             }
         };
 
-        let mut output = Vec::new();
+        let output_delay = resampler.output_delay();
+        let required_output_len = output_delay + expected_output_len;
+        let mut output = Vec::with_capacity(required_output_len + resampler.output_frames_max());
         let mut pos = 0;
 
-        while pos < buffer.len() {
-            let end = (pos + chunk_size).min(buffer.len());
-            let mut chunk = buffer[pos..end].to_vec();
-
-            // Pad last chunk if needed
-            if chunk.len() < chunk_size {
-                chunk.resize(chunk_size, 0.0);
-            }
+        while buffer.len().saturating_sub(pos) >= chunk_size {
+            let end = pos + chunk_size;
+            let chunk = &buffer[pos..end];
 
             match resampler.process(&[chunk], None) {
                 Ok(resampled) => {
@@ -478,7 +478,58 @@ impl AudioCapture {
             pos += chunk_size;
         }
 
-        output
+        if pos < buffer.len() {
+            let chunk = &buffer[pos..];
+
+            match resampler.process_partial(Some(&[chunk]), None) {
+                Ok(resampled) => {
+                    if !resampled.is_empty() {
+                        output.extend_from_slice(&resampled[0]);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Resampling error: {}", e);
+                    return Self::simple_resample(
+                        &buffer,
+                        self.native_sample_rate,
+                        WHISPER_SAMPLE_RATE,
+                    );
+                }
+            }
+        }
+
+        while output.len() < required_output_len {
+            match resampler.process_partial::<&[f32]>(None, None) {
+                Ok(resampled) => {
+                    let Some(channel) = resampled.first() else {
+                        break;
+                    };
+                    if channel.is_empty() {
+                        break;
+                    }
+                    output.extend_from_slice(channel);
+                }
+                Err(e) => {
+                    tracing::error!("Resampling flush error: {}", e);
+                    return Self::simple_resample(
+                        &buffer,
+                        self.native_sample_rate,
+                        WHISPER_SAMPLE_RATE,
+                    );
+                }
+            }
+        }
+
+        if required_output_len == 0 || output.len() <= output_delay {
+            tracing::warn!(
+                "Resampler produced insufficient output for {} input samples",
+                buffer.len()
+            );
+            return Self::simple_resample(&buffer, self.native_sample_rate, WHISPER_SAMPLE_RATE);
+        }
+
+        let trimmed_end = (output_delay + expected_output_len).min(output.len());
+        output[output_delay..trimmed_end].to_vec()
     }
 
     fn simple_resample(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
