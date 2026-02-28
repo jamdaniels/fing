@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Sender};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
@@ -52,22 +52,29 @@ fn is_blank_audio(text: &str) -> bool {
 
 // Commands sent to the audio thread
 enum AudioCommand {
-    StartRecording(Option<String>),
-    StopRecording,
+    StartRecording {
+        device_id: Option<String>,
+        reply_tx: Sender<Result<(), String>>,
+    },
+    StopRecording {
+        reply_tx: Sender<Result<Vec<f32>, String>>,
+    },
 }
 
-// Response from the audio thread
-struct AudioResponse {
-    buffer: Vec<f32>,
+#[derive(Clone, Debug)]
+enum RecordingStartStatus {
+    Idle,
+    Started { session_id: u64 },
+    Failed { session_id: u64, message: String },
 }
 
 // Global audio thread handle
 struct AudioThread {
     cmd_tx: Sender<AudioCommand>,
-    resp_rx: Receiver<AudioResponse>,
 }
 
 static AUDIO_THREAD: Mutex<Option<AudioThread>> = Mutex::new(None);
+static RECORDING_START_STATUS: Mutex<RecordingStartStatus> = Mutex::new(RecordingStartStatus::Idle);
 
 // Recording start time for duration tracking
 static RECORDING_START: Mutex<Option<Instant>> = Mutex::new(None);
@@ -90,7 +97,6 @@ fn ensure_audio_thread(app: &AppHandle) {
     }
 
     let (cmd_tx, cmd_rx) = mpsc::channel::<AudioCommand>();
-    let (resp_tx, resp_rx) = mpsc::channel::<AudioResponse>();
     let app_handle = app.clone();
 
     std::thread::spawn(move || {
@@ -98,21 +104,24 @@ fn ensure_audio_thread(app: &AppHandle) {
 
         loop {
             match cmd_rx.recv() {
-                Ok(AudioCommand::StartRecording(device_id)) => {
+                Ok(AudioCommand::StartRecording {
+                    device_id,
+                    reply_tx,
+                }) => {
                     capture.set_device(device_id.clone());
                     // Initialize capture if not already
                     let match_result = match capture.init_capture() {
                         Ok(result) => result,
                         Err(e) => {
                             tracing::error!("Failed to init audio capture: {}", e);
-                            // Send empty response on error
-                            let _ = resp_tx.send(AudioResponse { buffer: Vec::new() });
+                            let _ = reply_tx.send(Err(format!("Unable to start recording: {e}")));
                             continue;
                         }
                     };
 
                     capture.begin_recording();
                     tracing::info!("Audio recording started");
+                    let _ = reply_tx.send(Ok(()));
 
                     if !match_result.matched {
                         tracing::warn!(
@@ -127,7 +136,7 @@ fn ensure_audio_thread(app: &AppHandle) {
                         );
                     }
                 }
-                Ok(AudioCommand::StopRecording) => {
+                Ok(AudioCommand::StopRecording { reply_tx }) => {
                     let buffer = capture.end_recording();
                     let resampled = capture.resample_to_16k(buffer);
                     capture.close_capture();
@@ -137,7 +146,7 @@ fn ensure_audio_thread(app: &AppHandle) {
                         resampled.len()
                     );
 
-                    let _ = resp_tx.send(AudioResponse { buffer: resampled });
+                    let _ = reply_tx.send(Ok(resampled));
                 }
                 Err(_) => {
                     tracing::info!("Audio thread shutting down");
@@ -148,7 +157,57 @@ fn ensure_audio_thread(app: &AppHandle) {
         }
     });
 
-    *thread_guard = Some(AudioThread { cmd_tx, resp_rx });
+    *thread_guard = Some(AudioThread { cmd_tx });
+}
+
+fn set_recording_start_status(status: RecordingStartStatus) {
+    let mut start_status = match RECORDING_START_STATUS.lock() {
+        Ok(status_guard) => status_guard,
+        Err(poisoned) => {
+            tracing::warn!("Recording start status mutex poisoned, recovering");
+            poisoned.into_inner()
+        }
+    };
+    *start_status = status;
+}
+
+fn current_recording_start_status() -> RecordingStartStatus {
+    let start_status = match RECORDING_START_STATUS.lock() {
+        Ok(status_guard) => status_guard,
+        Err(poisoned) => {
+            tracing::warn!("Recording start status mutex poisoned on read, recovering");
+            poisoned.into_inner()
+        }
+    };
+    start_status.clone()
+}
+
+fn send_start_recording_command(
+    cmd_tx: &Sender<AudioCommand>,
+    device_id: Option<String>,
+) -> Result<(), String> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    cmd_tx
+        .send(AudioCommand::StartRecording {
+            device_id,
+            reply_tx,
+        })
+        .map_err(|_| "Failed to send StartRecording command".to_string())?;
+
+    reply_rx
+        .recv()
+        .map_err(|_| "Audio thread dropped StartRecording response".to_string())?
+}
+
+fn send_stop_recording_command(cmd_tx: &Sender<AudioCommand>) -> Result<Vec<f32>, String> {
+    let (reply_tx, reply_rx) = mpsc::channel();
+    cmd_tx
+        .send(AudioCommand::StopRecording { reply_tx })
+        .map_err(|_| "Failed to send StopRecording command".to_string())?;
+
+    reply_rx
+        .recv()
+        .map_err(|_| "Audio thread dropped StopRecording response".to_string())?
 }
 
 fn persist_fallback_microphone_selection(
@@ -324,6 +383,7 @@ pub fn on_key_down(app: &AppHandle) {
 
     // Increment session ID and start auto-stop timer (2 min max)
     let session_id = RECORDING_SESSION_ID.fetch_add(1, Ordering::SeqCst) + 1;
+    set_recording_start_status(RecordingStartStatus::Idle);
     let app_for_timer = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_millis(MAX_RECORDING_DURATION_MS)).await;
@@ -344,21 +404,37 @@ pub fn on_key_down(app: &AppHandle) {
     // Ensure audio thread is running and start recording
     ensure_audio_thread(app);
 
-    let thread_guard = match AUDIO_THREAD.lock() {
+    let cmd_tx = match AUDIO_THREAD.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
             tracing::warn!("Audio thread mutex poisoned on key down, recovering");
             poisoned.into_inner()
         }
+    }
+    .as_ref()
+    .map(|thread| thread.cmd_tx.clone());
+
+    let start_result = if let Some(cmd_tx) = cmd_tx {
+        send_start_recording_command(&cmd_tx, settings_snapshot.selected_microphone_id)
+    } else {
+        Err("Audio thread unavailable".to_string())
     };
-    if let Some(ref thread) = *thread_guard {
-        let selected_device_id = settings_snapshot.selected_microphone_id;
-        if thread
-            .cmd_tx
-            .send(AudioCommand::StartRecording(selected_device_id))
-            .is_err()
-        {
-            tracing::error!("Failed to send StartRecording command");
+
+    match start_result {
+        Ok(()) => {
+            set_recording_start_status(RecordingStartStatus::Started { session_id });
+        }
+        Err(message) => {
+            tracing::error!(
+                "StartRecording failed for session {}: {}",
+                session_id,
+                message
+            );
+            set_recording_start_status(RecordingStartStatus::Failed {
+                session_id,
+                message,
+            });
+            return;
         }
     }
 
@@ -400,6 +476,33 @@ pub fn on_key_up(app: &AppHandle) {
         start.map(|s| s.elapsed().as_millis() as u64).unwrap_or(0)
     };
 
+    let session_id = RECORDING_SESSION_ID.load(Ordering::SeqCst);
+    let start_failure = match current_recording_start_status() {
+        RecordingStartStatus::Started {
+            session_id: started_session_id,
+        } if started_session_id == session_id => None,
+        RecordingStartStatus::Failed {
+            session_id: failed_session_id,
+            message,
+        } if failed_session_id == session_id => Some(message),
+        _ => Some("Recording never started for this session".to_string()),
+    };
+
+    if let Some(message) = start_failure {
+        set_recording_start_status(RecordingStartStatus::Idle);
+
+        let app_handle = app.clone();
+        let test_mode = is_test_mode;
+        let duration_ms = duration_ms as i64;
+        tauri::async_runtime::spawn(async move {
+            crate::notifications::show_error(&app_handle, "Microphone Error", &message);
+            finish_transcription(&app_handle, None, duration_ms, test_mode).await;
+        });
+        return;
+    }
+
+    set_recording_start_status(RecordingStartStatus::Idle);
+
     // Transition to Processing (skip state events in test mode)
     if !is_test_mode {
         crate::state::transition_to(crate::state::AppState::Processing).ok();
@@ -411,55 +514,34 @@ pub fn on_key_up(app: &AppHandle) {
 
     let duration_ms = duration_ms as i64;
 
-    // Stop recording and get audio buffer
-    // We need to send command and then receive response
-    let cmd_sent = {
-        let thread_guard = match AUDIO_THREAD.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                tracing::warn!("Audio thread mutex poisoned on stop, recovering");
-                poisoned.into_inner()
-            }
-        };
-        if let Some(ref thread) = *thread_guard {
-            thread.cmd_tx.send(AudioCommand::StopRecording).is_ok()
-        } else {
-            false
+    let cmd_tx = match AUDIO_THREAD.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!("Audio thread mutex poisoned on stop, recovering");
+            poisoned.into_inner()
         }
-    };
+    }
+    .as_ref()
+    .map(|thread| thread.cmd_tx.clone());
 
     // Spawn async task for transcription
     let app_handle = app.clone();
     let test_mode = is_test_mode;
     tauri::async_runtime::spawn(async move {
-        // Wait for audio response (blocking recv in async context via spawn_blocking)
-        let audio_buffer = if cmd_sent {
-            tokio::task::spawn_blocking(|| {
-                let thread_guard = match AUDIO_THREAD.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => {
-                        tracing::warn!("Audio thread mutex poisoned in recv task, recovering");
-                        poisoned.into_inner()
-                    }
-                };
-                if let Some(ref thread) = *thread_guard {
-                    thread.resp_rx.recv().ok().map(|r| r.buffer)
-                } else {
-                    None
-                }
-            })
-            .await
-            .ok()
-            .flatten()
+        let stop_result = if let Some(cmd_tx) = cmd_tx {
+            match tokio::task::spawn_blocking(move || send_stop_recording_command(&cmd_tx)).await {
+                Ok(result) => result,
+                Err(e) => Err(format!("StopRecording task failed: {e}")),
+            }
         } else {
-            None
+            Err("Audio thread unavailable".to_string())
         };
 
         // Get the audio buffer
-        let audio_buffer = match audio_buffer {
-            Some(buf) => buf,
-            None => {
-                tracing::error!("No audio buffer received");
+        let audio_buffer = match stop_result {
+            Ok(buf) => buf,
+            Err(e) => {
+                tracing::error!("No audio buffer received: {}", e);
                 finish_transcription(&app_handle, None, duration_ms, test_mode).await;
                 return;
             }
@@ -683,4 +765,57 @@ pub fn disable_onboarding_test_mode() -> Result<(), String> {
     tracing::info!("Disabling onboarding test mode");
     ONBOARDING_TEST_MODE.store(false, Ordering::SeqCst);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::thread;
+
+    #[test]
+    fn failed_start_does_not_leak_into_next_stop_response() {
+        let (cmd_tx, cmd_rx) = mpsc::channel::<AudioCommand>();
+
+        let worker = thread::spawn(move || {
+            match cmd_rx.recv().expect("first command should arrive") {
+                AudioCommand::StartRecording { reply_tx, .. } => {
+                    let _ = reply_tx.send(Err("mic init failed".to_string()));
+                }
+                AudioCommand::StopRecording { .. } => {
+                    panic!("first command should be StartRecording");
+                }
+            }
+
+            match cmd_rx.recv().expect("second command should arrive") {
+                AudioCommand::StartRecording { reply_tx, .. } => {
+                    let _ = reply_tx.send(Ok(()));
+                }
+                AudioCommand::StopRecording { .. } => {
+                    panic!("second command should be StartRecording");
+                }
+            }
+
+            match cmd_rx.recv().expect("third command should arrive") {
+                AudioCommand::StopRecording { reply_tx } => {
+                    let _ = reply_tx.send(Ok(vec![0.25, 0.5]));
+                }
+                AudioCommand::StartRecording { .. } => {
+                    panic!("third command should be StopRecording");
+                }
+            }
+        });
+
+        assert_eq!(
+            send_start_recording_command(&cmd_tx, Some("Broken Mic".to_string())),
+            Err("mic init failed".to_string())
+        );
+        assert_eq!(
+            send_start_recording_command(&cmd_tx, Some("Working Mic".to_string())),
+            Ok(())
+        );
+        assert_eq!(send_stop_recording_command(&cmd_tx), Ok(vec![0.25, 0.5]));
+
+        worker.join().expect("worker thread should complete");
+    }
 }
