@@ -176,27 +176,20 @@ function formatKeyForDisplay(hotkey: string): string {
   return formatted.join(" + ");
 }
 
-const FUNCTION_KEY_REGEX = /^F\d+$/;
+const FUNCTION_KEY_REGEX = /^F\d+$/i;
+const SINGLE_KEY_REGEX = /^[A-Z0-9]$/;
+const MODIFIER_EVENT_KEYS = ["Control", "Alt", "Shift", "Meta"];
+const SPACE_EVENT_KEYS = [" ", "Space", "Spacebar"];
 
-function keyEventToHotkey(e: KeyboardEvent): string | null {
-  let key = e.key;
+type ParsedHotkeyConfig = {
+  key: string | null;
+  ctrl: boolean;
+  alt: boolean;
+  shift: boolean;
+  meta: boolean;
+};
 
-  if (["Control", "Alt", "Shift", "Meta"].includes(key)) {
-    return null;
-  }
-
-  if (key === "Escape") {
-    return null;
-  }
-
-  if (FUNCTION_KEY_REGEX.test(key)) {
-    // Keep as-is
-  } else if (key === " ") {
-    key = "Space";
-  } else if (key.length === 1) {
-    key = key.toUpperCase();
-  }
-
+function getHotkeyModifiers(e: KeyboardEvent): string[] {
   const modifiers: string[] = [];
   if (e.ctrlKey) {
     modifiers.push("Ctrl");
@@ -210,12 +203,227 @@ function keyEventToHotkey(e: KeyboardEvent): string | null {
   if (e.metaKey) {
     modifiers.push("Cmd");
   }
+  return modifiers;
+}
 
-  if (modifiers.length === 0) {
-    return key;
+function normalizeHotkeyBase(key: string): string | null {
+  if (FUNCTION_KEY_REGEX.test(key)) {
+    return key.toUpperCase();
+  }
+  if (key.length === 1 && SINGLE_KEY_REGEX.test(key.toUpperCase())) {
+    return key.toUpperCase();
+  }
+  return null;
+}
+
+function isSpaceKeyEvent(e: KeyboardEvent): boolean {
+  return e.code === "Space" || SPACE_EVENT_KEYS.includes(e.key);
+}
+
+function keyEventToHotkey(e: KeyboardEvent): string | null {
+  if (e.key === "Escape") {
+    return null;
   }
 
-  return [...modifiers, key].join("+");
+  const modifiers = getHotkeyModifiers(e);
+
+  if (MODIFIER_EVENT_KEYS.includes(e.key)) {
+    return modifiers.length === 2 ? modifiers.join("+") : null;
+  }
+
+  if (isSpaceKeyEvent(e)) {
+    return modifiers.length === 1 ? [...modifiers, "Space"].join("+") : null;
+  }
+
+  const key = normalizeHotkeyBase(e.key);
+  if (!key || modifiers.length !== 0) {
+    return null;
+  }
+
+  return key;
+}
+
+function parseHotkeyString(hotkey: string): ParsedHotkeyConfig | null {
+  const parts = hotkey.split("+");
+  if (parts.length === 0 || parts.length > 2) {
+    return null;
+  }
+
+  let key: string | null = null;
+  let ctrl = false;
+  let alt = false;
+  let shift = false;
+  let meta = false;
+
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const lower = trimmed.toLowerCase();
+    if (lower === "ctrl" || lower === "control") {
+      ctrl = true;
+    } else if (lower === "alt" || lower === "option") {
+      alt = true;
+    } else if (lower === "shift") {
+      shift = true;
+    } else if (lower === "meta" || lower === "cmd" || lower === "command") {
+      meta = true;
+    } else if (lower === "space") {
+      if (key !== null) {
+        return null;
+      }
+      key = "Space";
+    } else if (lower === "fn") {
+      if (key !== null) {
+        return null;
+      }
+      key = "Fn";
+    } else {
+      const normalized = normalizeHotkeyBase(trimmed);
+      if (!normalized || key !== null) {
+        return null;
+      }
+      key = normalized;
+    }
+  }
+
+  const config = { key, ctrl, alt, shift, meta };
+  const modifierCount = getParsedModifierCount(config);
+
+  if (parts.length === 1) {
+    if (key === "Fn") {
+      return modifierCount === 0 ? config : null;
+    }
+    if (key === "Space" || key === null) {
+      return null;
+    }
+    return modifierCount === 0 ? config : null;
+  }
+
+  if (key === null) {
+    return modifierCount === 2 ? config : null;
+  }
+
+  if (key === "Space") {
+    return modifierCount === 1 ? config : null;
+  }
+
+  return null;
+}
+
+function getParsedModifierCount(config: ParsedHotkeyConfig): number {
+  return Number(config.ctrl) + Number(config.alt) + Number(config.shift) + Number(config.meta);
+}
+
+function matchesModifierFlags(
+  e: KeyboardEvent,
+  config: ParsedHotkeyConfig
+): boolean {
+  return (
+    e.ctrlKey === config.ctrl &&
+    e.altKey === config.alt &&
+    e.shiftKey === config.shift &&
+    e.metaKey === config.meta
+  );
+}
+
+function isConfiguredModifierKey(
+  key: string,
+  config: ParsedHotkeyConfig
+): boolean {
+  if (key === "Control") {
+    return config.ctrl;
+  }
+  if (key === "Alt") {
+    return config.alt;
+  }
+  if (key === "Shift") {
+    return config.shift;
+  }
+  if (key === "Meta") {
+    return config.meta;
+  }
+  return false;
+}
+
+function shouldReleaseOnKeydown(
+  e: KeyboardEvent,
+  config: ParsedHotkeyConfig
+): boolean {
+  if (!matchesModifierFlags(e, config)) {
+    return true;
+  }
+
+  if (config.key === null) {
+    return !isConfiguredModifierKey(e.key, config);
+  }
+
+  return false;
+}
+
+function matchesHotkey(
+  e: KeyboardEvent,
+  config: ParsedHotkeyConfig
+): boolean {
+  if (!matchesModifierFlags(e, config)) {
+    return false;
+  }
+
+  if (config.key === null) {
+    return isConfiguredModifierKey(e.key, config);
+  }
+
+  const key = config.key.toLowerCase();
+  const eventKey = e.key.toLowerCase();
+
+  if (key.startsWith("f") && key.length <= 3) {
+    return eventKey === key;
+  }
+
+  if (key === "space") {
+    return isSpaceKeyEvent(e);
+  }
+
+  return eventKey === key;
+}
+
+function matchesHotkeyRelease(
+  e: KeyboardEvent,
+  config: ParsedHotkeyConfig
+): boolean {
+  if (!matchesModifierFlags(e, config)) {
+    return true;
+  }
+
+  if (config.key === null) {
+    return false;
+  }
+
+  const key = config.key.toLowerCase();
+  const eventKey = e.key.toLowerCase();
+
+  if (key.startsWith("f") && key.length <= 3) {
+    return eventKey === key;
+  }
+
+  if (key === "space") {
+    return isSpaceKeyEvent(e);
+  }
+
+  return eventKey === key;
+}
+
+function normalizeStoredHotkey(hotkey?: string | null): string {
+  if (hotkey) {
+    const parsed = parseHotkeyString(hotkey);
+    if (parsed) {
+      return parsed.key === "Fn" ? "Fn" : hotkey;
+    }
+  }
+
+  return "F9";
 }
 
 function getDownloadStatusText(progress: DownloadProgress | null): string {
@@ -1044,49 +1252,50 @@ async function goToStep(step: OnboardingStep): Promise<void> {
       }
     );
 
-    // Set up frontend hotkey listener (WebView2 workaround for Windows)
-    const hotkey = state.selectedHotkey;
-    const hotkeyLower = hotkey.toLowerCase();
-    console.log(
-      "[onboarding] Setting up frontend hotkey listener for:",
-      hotkey
-    );
-
-    testHotkeyKeydown = (e: KeyboardEvent) => {
-      if (testHotkeyPressed) {
+    if (!navigator.userAgent.includes("Mac")) {
+      // WebView2 only: Windows needs a frontend fallback while the onboarding
+      // window is focused. macOS uses the native listener directly.
+      const hotkey = state.selectedHotkey;
+      const parsedHotkey = parseHotkeyString(hotkey);
+      if (!parsedHotkey) {
         return;
       }
-      const keyLower = e.key.toLowerCase();
-      // Simple match for function keys and single keys
-      if (
-        keyLower === hotkeyLower ||
-        (hotkeyLower.startsWith("f") && keyLower === hotkeyLower)
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-        testHotkeyPressed = true;
-        hotkeyPress().catch(console.error);
-      }
-    };
+      console.log(
+        "[onboarding] Setting up frontend hotkey listener for:",
+        hotkey
+      );
 
-    testHotkeyKeyup = (e: KeyboardEvent) => {
-      if (!testHotkeyPressed) {
-        return;
-      }
-      const keyLower = e.key.toLowerCase();
-      if (
-        keyLower === hotkeyLower ||
-        (hotkeyLower.startsWith("f") && keyLower === hotkeyLower)
-      ) {
-        e.preventDefault();
-        e.stopPropagation();
-        testHotkeyPressed = false;
-        hotkeyRelease().catch(console.error);
-      }
-    };
+      testHotkeyKeydown = (e: KeyboardEvent) => {
+        if (testHotkeyPressed) {
+          if (shouldReleaseOnKeydown(e, parsedHotkey)) {
+            testHotkeyPressed = false;
+            hotkeyRelease().catch(console.error);
+          }
+          return;
+        }
+        if (matchesHotkey(e, parsedHotkey)) {
+          e.preventDefault();
+          e.stopPropagation();
+          testHotkeyPressed = true;
+          hotkeyPress().catch(console.error);
+        }
+      };
 
-    document.addEventListener("keydown", testHotkeyKeydown);
-    document.addEventListener("keyup", testHotkeyKeyup);
+      testHotkeyKeyup = (e: KeyboardEvent) => {
+        if (!testHotkeyPressed) {
+          return;
+        }
+        if (matchesHotkeyRelease(e, parsedHotkey)) {
+          e.preventDefault();
+          e.stopPropagation();
+          testHotkeyPressed = false;
+          hotkeyRelease().catch(console.error);
+        }
+      };
+
+      document.addEventListener("keydown", testHotkeyKeydown);
+      document.addEventListener("keyup", testHotkeyKeyup);
+    }
   }
 
   render();
@@ -1301,7 +1510,7 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     audioDevices: [],
     selectedDeviceId: null,
     selectedLanguages: savedSettings?.languages ?? ["en"],
-    selectedHotkey: savedSettings?.hotkey ?? "F9",
+    selectedHotkey: normalizeStoredHotkey(savedSettings?.hotkey),
     capturedHotkey: null,
     testText: "",
     selectedModelVariant: savedSettings?.activeModelVariant ?? "small",

@@ -22,7 +22,7 @@ mod transcribe;
 
 use audio::{AudioCapture, AudioDevice, MicrophoneTest};
 use state::AppState;
-use std::sync::Mutex;
+use std::sync::{mpsc, Mutex, OnceLock};
 #[cfg(target_os = "macos")]
 use tauri::ActivationPolicy;
 use tauri::{
@@ -60,6 +60,30 @@ pub struct MicTestStartResult {
     pub requested_device: Option<String>,
     pub actual_device: String,
     pub device_matched: bool,
+}
+
+enum FrontendHotkeyCommand {
+    Press(tauri::AppHandle),
+    Release(tauri::AppHandle),
+}
+
+static FRONTEND_HOTKEY_TX: OnceLock<mpsc::Sender<FrontendHotkeyCommand>> = OnceLock::new();
+
+fn frontend_hotkey_sender() -> &'static mpsc::Sender<FrontendHotkeyCommand> {
+    FRONTEND_HOTKEY_TX.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<FrontendHotkeyCommand>();
+
+        std::thread::spawn(move || {
+            while let Ok(command) = rx.recv() {
+                match command {
+                    FrontendHotkeyCommand::Press(app) => hotkey::on_key_down(&app),
+                    FrontendHotkeyCommand::Release(app) => hotkey::on_key_up(&app),
+                }
+            }
+        });
+
+        tx
+    })
 }
 
 #[tauri::command]
@@ -484,17 +508,41 @@ fn update_hotkey(hotkey: String) -> Result<(), String> {
     hotkey_config::set_hotkey_from_string(&hotkey)
 }
 
+fn apply_saved_hotkey_with_fallback(app: &tauri::AppHandle, hotkey: &str, warning: &str) {
+    if let Err(e) = hotkey_config::set_hotkey_from_string_or_default(hotkey) {
+        tracing::warn!(
+            "{}: {} - falling back to {}",
+            warning,
+            e,
+            hotkey_config::DEFAULT_HOTKEY
+        );
+    }
+
+    if let Err(e) = hotkey::register_hotkey(app) {
+        tracing::warn!(
+            "Failed to register hotkey: {} - hotkey will work after app restart with proper permissions",
+            e
+        );
+    }
+}
+
 // Frontend hotkey handling for Windows WebView2 workaround
 // WebView2 doesn't properly propagate keyboard events to WH_KEYBOARD_LL hooks
 // so we need to handle hotkeys from JavaScript when the window is focused
 #[tauri::command]
 fn hotkey_press(app: tauri::AppHandle) {
-    hotkey::on_key_down(&app);
+    if let Err(e) = frontend_hotkey_sender().send(FrontendHotkeyCommand::Press(app.clone())) {
+        tracing::warn!("Frontend hotkey press worker unavailable: {}", e);
+        hotkey::on_key_down(&app);
+    }
 }
 
 #[tauri::command]
 fn hotkey_release(app: tauri::AppHandle) {
-    hotkey::on_key_up(&app);
+    if let Err(e) = frontend_hotkey_sender().send(FrontendHotkeyCommand::Release(app.clone())) {
+        tracing::warn!("Frontend hotkey release worker unavailable: {}", e);
+        hotkey::on_key_up(&app);
+    }
 }
 
 #[tauri::command]
@@ -526,12 +574,12 @@ async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
     settings::save_settings(&current_settings).await?;
 
     // Set hotkey from settings and register listener.
-    if let Err(e) = hotkey_config::set_hotkey_from_string(&current_settings.hotkey) {
-        tracing::warn!("Failed to parse hotkey from settings: {}", e);
-    } else if let Err(e) = hotkey::register_hotkey(&app) {
-        // Don't fail setup if this fails - user can fix permissions and restart
-        tracing::warn!("Failed to register hotkey: {} - hotkey will work after app restart with proper permissions", e);
-    }
+    // Don't fail setup if this fails - user can fix permissions and restart
+    apply_saved_hotkey_with_fallback(
+        &app,
+        &current_settings.hotkey,
+        "Failed to parse hotkey from settings",
+    );
 
     // Transition to Ready state (this also emits app-state-changed event)
     state::set_state(&app, AppState::Ready)?;
@@ -861,12 +909,12 @@ pub fn run() {
 
                     if transcriber_ready {
                         // Set hotkey from settings before registering
-                        if let Err(e) = hotkey_config::set_hotkey_from_string(&saved_settings.hotkey) {
-                            tracing::warn!("Failed to parse hotkey from settings: {}", e);
-                        } else if let Err(e) = hotkey::register_hotkey(&app_handle) {
-                            // Don't block Ready state if this fails
-                            tracing::warn!("Failed to register hotkey: {} - will work after restart with permissions", e);
-                        }
+                        // Don't block Ready state if this fails
+                        apply_saved_hotkey_with_fallback(
+                            &app_handle,
+                            &saved_settings.hotkey,
+                            "Failed to parse hotkey from settings",
+                        );
                         // Transition to Ready before building tray menu
                         state::set_state(&app_handle, AppState::Ready).ok();
                         tracing::info!("Restored to Ready state from saved settings");

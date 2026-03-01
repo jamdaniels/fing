@@ -11,7 +11,7 @@ use rdev::listen;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use rdev::{Event, EventType, Key};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-use std::sync::{Mutex, OnceLock};
+use std::sync::{mpsc, Mutex, OnceLock};
 
 static LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
 
@@ -19,6 +19,15 @@ static LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 static HOTKEY_STATE: Lazy<Mutex<HotkeyState>> = Lazy::new(|| Mutex::new(HotkeyState::default()));
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+static HOTKEY_EVENT_TX: OnceLock<mpsc::Sender<HotkeyEvent>> = OnceLock::new();
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[derive(Clone, Copy)]
+enum HotkeyEvent {
+    Press,
+    Release,
+}
 
 pub fn start_hotkey_listener(app: AppHandle) -> Result<(), String> {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -61,6 +70,25 @@ fn start_hotkey_listener_impl(app: AppHandle) -> Result<(), String> {
         .set(app)
         .map_err(|_| "Hotkey listener already initialized".to_string())?;
 
+    HOTKEY_EVENT_TX.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<HotkeyEvent>();
+
+        std::thread::spawn(move || {
+            while let Ok(event) = rx.recv() {
+                let Some(app) = APP_HANDLE.get() else {
+                    continue;
+                };
+
+                match event {
+                    HotkeyEvent::Press => crate::hotkey::on_key_down(app),
+                    HotkeyEvent::Release => crate::hotkey::on_key_up(app),
+                }
+            }
+        });
+
+        tx
+    });
+
     std::thread::spawn(|| {
         #[cfg(target_os = "macos")]
         {
@@ -80,6 +108,29 @@ fn start_hotkey_listener_impl(app: AppHandle) -> Result<(), String> {
     });
 
     Ok(())
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn dispatch_hotkey_event(event: HotkeyEvent) {
+    let Some(tx) = HOTKEY_EVENT_TX.get() else {
+        if let Some(app) = APP_HANDLE.get() {
+            match event {
+                HotkeyEvent::Press => crate::hotkey::on_key_down(app),
+                HotkeyEvent::Release => crate::hotkey::on_key_up(app),
+            }
+        }
+        return;
+    };
+
+    if let Err(error) = tx.send(event) {
+        tracing::warn!("Hotkey worker unavailable: {}", error);
+        if let Some(app) = APP_HANDLE.get() {
+            match event {
+                HotkeyEvent::Press => crate::hotkey::on_key_down(app),
+                HotkeyEvent::Release => crate::hotkey::on_key_up(app),
+            }
+        }
+    }
 }
 
 // macOS uses grab() which can intercept and block key events
@@ -114,21 +165,46 @@ fn grab_callback(event: Event) -> Option<Event> {
         EventType::KeyPress(key) => {
             update_mod_state(&key, true, &mut state.mod_state);
 
-            if is_base_key(&key, &config.key) && modifiers_match(&state.mod_state, &config) {
-                if !state.hotkey_active {
-                    if test_mode || crate::state::get_state().can_record() {
-                        state.hotkey_active = true;
-                    }
-                    if state.hotkey_active {
-                        if let Some(app) = APP_HANDLE.get() {
-                            crate::hotkey::on_key_down(app);
+            if let Some(base_key) = config.key.as_ref() {
+                if is_base_key(&key, base_key) && modifiers_match(&state.mod_state, &config) {
+                    if !state.hotkey_active {
+                        if test_mode || crate::state::get_state().can_record() {
+                            state.hotkey_active = true;
+                        }
+                        if state.hotkey_active {
+                            dispatch_hotkey_event(HotkeyEvent::Press);
                         }
                     }
+                    passthrough(event)
+                } else if state.hotkey_active {
+                    if !modifiers_match(&state.mod_state, &config) {
+                        state.hotkey_active = false;
+                        dispatch_hotkey_event(HotkeyEvent::Release);
+                    }
+                    // While the hotkey is held, swallow all other key presses so
+                    // system shortcuts (Mission Control, etc.) don't interfere.
+                    passthrough(event)
+                } else {
+                    Some(event)
+                }
+            } else if !state.hotkey_active
+                && is_required_modifier(&key, &config)
+                && modifiers_match(&state.mod_state, &config)
+            {
+                if test_mode || crate::state::get_state().can_record() {
+                    state.hotkey_active = true;
+                }
+                if state.hotkey_active {
+                    dispatch_hotkey_event(HotkeyEvent::Press);
                 }
                 passthrough(event)
             } else if state.hotkey_active {
-                // While the hotkey is held, swallow all other key presses so
-                // system shortcuts (Mission Control, etc.) don't interfere.
+                if !modifiers_match(&state.mod_state, &config)
+                    || !is_required_modifier(&key, &config)
+                {
+                    state.hotkey_active = false;
+                    dispatch_hotkey_event(HotkeyEvent::Release);
+                }
                 passthrough(event)
             } else {
                 Some(event)
@@ -137,39 +213,43 @@ fn grab_callback(event: Event) -> Option<Event> {
         EventType::KeyRelease(key) => {
             update_mod_state(&key, false, &mut state.mod_state);
 
-            if is_base_key(&key, &config.key) {
-                if state.hotkey_active {
-                    state.hotkey_active = false;
-                    if let Some(app) = APP_HANDLE.get() {
-                        crate::hotkey::on_key_up(app);
+            if let Some(base_key) = config.key.as_ref() {
+                if is_base_key(&key, base_key) {
+                    if state.hotkey_active {
+                        state.hotkey_active = false;
+                        dispatch_hotkey_event(HotkeyEvent::Release);
                     }
+                    passthrough(event)
+                } else if state.hotkey_active {
+                    if !modifiers_match(&state.mod_state, &config) {
+                        // A required modifier was released while base key still held
+                        state.hotkey_active = false;
+                        dispatch_hotkey_event(HotkeyEvent::Release);
+                        return passthrough(event);
+                    }
+
+                    if !is_modifier_key(&key) {
+                        // Safety net: a non-modifier, non-base-key release while
+                        // hotkey is active likely means macOS delivered the base
+                        // key release under a different Key variant. Treat it as
+                        // the hotkey release to avoid getting stuck.
+                        tracing::warn!(
+                            "Unexpected KeyRelease {:?} while hotkey active — treating as hotkey release",
+                            key
+                        );
+                        state.hotkey_active = false;
+                        dispatch_hotkey_event(HotkeyEvent::Release);
+                    }
+
+                    passthrough(event)
+                } else {
+                    Some(event)
                 }
-                passthrough(event)
             } else if state.hotkey_active {
                 if !modifiers_match(&state.mod_state, &config) {
-                    // A required modifier was released while base key still held
                     state.hotkey_active = false;
-                    if let Some(app) = APP_HANDLE.get() {
-                        crate::hotkey::on_key_up(app);
-                    }
-                    return passthrough(event);
+                    dispatch_hotkey_event(HotkeyEvent::Release);
                 }
-
-                if !is_modifier_key(&key) {
-                    // Safety net: a non-modifier, non-base-key release while
-                    // hotkey is active likely means macOS delivered the base
-                    // key release under a different Key variant. Treat it as
-                    // the hotkey release to avoid getting stuck.
-                    tracing::warn!(
-                        "Unexpected KeyRelease {:?} while hotkey active — treating as hotkey release",
-                        key
-                    );
-                    state.hotkey_active = false;
-                    if let Some(app) = APP_HANDLE.get() {
-                        crate::hotkey::on_key_up(app);
-                    }
-                }
-
                 passthrough(event)
             } else {
                 Some(event)
@@ -199,37 +279,57 @@ fn listen_callback(event: Event) {
         EventType::KeyPress(key) => {
             update_mod_state(&key, true, &mut state.mod_state);
 
-            if is_base_key(&key, &config.key)
+            if let Some(base_key) = config.key.as_ref() {
+                if is_base_key(&key, base_key)
+                    && modifiers_match(&state.mod_state, &config)
+                    && !state.hotkey_active
+                {
+                    if crate::state::get_state().can_record() {
+                        state.hotkey_active = true;
+                    }
+                    if state.hotkey_active {
+                        dispatch_hotkey_event(HotkeyEvent::Press);
+                    }
+                } else if state.hotkey_active && !modifiers_match(&state.mod_state, &config) {
+                    state.hotkey_active = false;
+                    dispatch_hotkey_event(HotkeyEvent::Release);
+                }
+            } else if !state.hotkey_active
+                && is_required_modifier(&key, &config)
                 && modifiers_match(&state.mod_state, &config)
-                && !state.hotkey_active
             {
                 if crate::state::get_state().can_record() {
                     state.hotkey_active = true;
                 }
                 if state.hotkey_active {
-                    if let Some(app) = APP_HANDLE.get() {
-                        crate::hotkey::on_key_down(app);
-                    }
+                    dispatch_hotkey_event(HotkeyEvent::Press);
                 }
+            } else if state.hotkey_active
+                && (!modifiers_match(&state.mod_state, &config)
+                    || !is_required_modifier(&key, &config))
+            {
+                state.hotkey_active = false;
+                dispatch_hotkey_event(HotkeyEvent::Release);
             }
         }
         EventType::KeyRelease(key) => {
             update_mod_state(&key, false, &mut state.mod_state);
 
-            if is_base_key(&key, &config.key) {
-                if state.hotkey_active {
-                    state.hotkey_active = false;
-                    if let Some(app) = APP_HANDLE.get() {
-                        crate::hotkey::on_key_up(app);
+            if let Some(base_key) = config.key.as_ref() {
+                if is_base_key(&key, base_key) {
+                    if state.hotkey_active {
+                        state.hotkey_active = false;
+                        dispatch_hotkey_event(HotkeyEvent::Release);
                     }
+                } else if state.hotkey_active && !modifiers_match(&state.mod_state, &config) {
+                    // If a required modifier is released while the base key is still held,
+                    // treat it as hotkey release.
+                    state.hotkey_active = false;
+                    dispatch_hotkey_event(HotkeyEvent::Release);
                 }
             } else if state.hotkey_active && !modifiers_match(&state.mod_state, &config) {
-                // If a required modifier is released while the base key is still held,
-                // treat it as hotkey release.
                 state.hotkey_active = false;
-                if let Some(app) = APP_HANDLE.get() {
-                    crate::hotkey::on_key_up(app);
-                }
+                dispatch_hotkey_event(HotkeyEvent::Release);
             }
         }
         _ => {}
@@ -272,7 +372,7 @@ fn modifiers_match(state: &ModState, config: &crate::hotkey_config::HotkeyConfig
     // When the base key is an F-key and Fn is NOT explicitly required, ignore Fn state.
     // This allows "F9" hotkey to work whether user presses F9 directly (external kbd)
     // or Fn+F9 (MacBook with media key defaults).
-    let fn_matches = if !config.require_fn && matches!(config.key, HotkeyKey::F(_)) {
+    let fn_matches = if !config.require_fn && matches!(config.key, Some(HotkeyKey::F(_))) {
         // Ignore Fn state for F-key hotkeys that don't explicitly require Fn
         true
     } else {
@@ -322,6 +422,18 @@ fn is_base_key(key: &Key, base: &HotkeyKey) -> bool {
             Some(expected) => *key == expected,
             None => false,
         },
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn is_required_modifier(key: &Key, config: &crate::hotkey_config::HotkeyConfig) -> bool {
+    match key {
+        Key::ControlLeft | Key::ControlRight => config.require_ctrl,
+        Key::Alt | Key::AltGr => config.require_alt,
+        Key::ShiftLeft | Key::ShiftRight => config.require_shift,
+        Key::MetaLeft | Key::MetaRight => config.require_meta,
+        Key::Function => config.require_fn,
+        _ => false,
     }
 }
 

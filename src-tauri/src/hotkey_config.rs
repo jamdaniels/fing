@@ -1,10 +1,12 @@
 use once_cell::sync::Lazy;
 use std::sync::RwLock;
 
-/// Parsed hotkey configuration with modifiers and base key.
-#[derive(Clone, Debug)]
+pub const DEFAULT_HOTKEY: &str = "F9";
+
+/// Parsed hotkey configuration with modifiers and optional base key.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HotkeyConfig {
-    pub key: HotkeyKey,
+    pub key: Option<HotkeyKey>,
     pub require_ctrl: bool,
     pub require_alt: bool,
     pub require_shift: bool,
@@ -13,7 +15,7 @@ pub struct HotkeyConfig {
 }
 
 /// The base key in a hotkey combination.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HotkeyKey {
     Function,
     F(u8),
@@ -24,8 +26,10 @@ pub enum HotkeyKey {
 static HOTKEY_CONFIG: Lazy<RwLock<Option<HotkeyConfig>>> = Lazy::new(|| RwLock::new(None));
 
 const MAX_HOTKEY_LENGTH: usize = 50;
-const MAX_HOTKEY_PARTS: usize = 5;
+const MAX_HOTKEY_PARTS: usize = 2;
 const MAX_HOTKEY_PART_LENGTH: usize = 10;
+const INVALID_HOTKEY_MESSAGE: &str =
+    "Hotkey must be a single non-space key, a pair of modifiers, or one modifier plus Space";
 
 fn set_base_key(
     current: &mut Option<HotkeyKey>,
@@ -151,18 +155,44 @@ pub fn parse_hotkey_string(raw: &str) -> Result<HotkeyConfig, String> {
         return Err(format!("Unknown key: {trimmed}"));
     }
 
-    let require_fn = saw_fn;
+    let modifier_count = usize::from(require_ctrl)
+        + usize::from(require_alt)
+        + usize::from(require_shift)
+        + usize::from(require_meta);
 
-    let key = match base_key {
-        Some(k) => k,
-        None => {
-            if require_fn && !require_ctrl && !require_alt && !require_shift && !require_meta {
-                HotkeyKey::Function
-            } else {
-                return Err("Hotkey must include a base key".to_string());
+    let key = if saw_fn {
+        if modifier_count == 0 && base_key.is_none() {
+            Some(HotkeyKey::Function)
+        } else {
+            return Err(INVALID_HOTKEY_MESSAGE.to_string());
+        }
+    } else {
+        match base_key {
+            Some(HotkeyKey::Space) => {
+                if modifier_count == 1 {
+                    Some(HotkeyKey::Space)
+                } else {
+                    return Err(INVALID_HOTKEY_MESSAGE.to_string());
+                }
+            }
+            Some(key) => {
+                if modifier_count == 0 {
+                    Some(key)
+                } else {
+                    return Err(INVALID_HOTKEY_MESSAGE.to_string());
+                }
+            }
+            None => {
+                if modifier_count == 2 {
+                    None
+                } else {
+                    return Err(INVALID_HOTKEY_MESSAGE.to_string());
+                }
             }
         }
     };
+
+    let require_fn = saw_fn;
 
     Ok(HotkeyConfig {
         key,
@@ -187,6 +217,16 @@ pub fn set_hotkey_from_string(raw: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn set_hotkey_from_string_or_default(raw: &str) -> Result<String, String> {
+    match set_hotkey_from_string(raw) {
+        Ok(()) => Ok(raw.trim().to_string()),
+        Err(error) => {
+            set_hotkey_from_string(DEFAULT_HOTKEY)?;
+            Err(error)
+        }
+    }
+}
+
 pub fn get_hotkey_config() -> Option<HotkeyConfig> {
     HOTKEY_CONFIG
         .read()
@@ -198,34 +238,83 @@ pub fn get_hotkey_config() -> Option<HotkeyConfig> {
 pub fn get_hotkey_string() -> String {
     let config = match get_hotkey_config() {
         Some(c) => c,
-        None => return "F9".to_string(), // Default
+        None => return DEFAULT_HOTKEY.to_string(),
     };
 
-    let mut parts = Vec::new();
+    let mut parts: Vec<String> = Vec::new();
 
     if config.require_ctrl {
-        parts.push("Ctrl");
+        parts.push("Ctrl".to_string());
     }
     if config.require_alt {
-        parts.push("Alt");
+        parts.push("Alt".to_string());
     }
     if config.require_shift {
-        parts.push("Shift");
+        parts.push("Shift".to_string());
     }
     if config.require_meta {
-        parts.push("Meta");
+        parts.push("Meta".to_string());
     }
-    if config.require_fn {
-        parts.push("Fn");
+    if config.require_fn && config.key != Some(HotkeyKey::Function) {
+        parts.push("Fn".to_string());
     }
 
-    let key_str = match config.key {
-        HotkeyKey::Function => "Fn".to_string(),
-        HotkeyKey::F(n) => format!("F{n}"),
-        HotkeyKey::Space => "Space".to_string(),
-        HotkeyKey::Char(c) => c.to_string(),
-    };
-    parts.push(&key_str);
+    if let Some(key) = &config.key {
+        let key_str = match key {
+            HotkeyKey::Function => "Fn".to_string(),
+            HotkeyKey::F(n) => format!("F{n}"),
+            HotkeyKey::Space => "Space".to_string(),
+            HotkeyKey::Char(c) => c.to_string(),
+        };
+        parts.push(key_str);
+    }
 
     parts.join("+")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_single_non_space_keys() {
+        let f9 = parse_hotkey_string("F9").unwrap();
+        assert_eq!(f9.key, Some(HotkeyKey::F(9)));
+
+        let a = parse_hotkey_string("A").unwrap();
+        assert_eq!(a.key, Some(HotkeyKey::Char('A')));
+    }
+
+    #[test]
+    fn accepts_modifier_pairs() {
+        let config = parse_hotkey_string("Ctrl+Option").unwrap();
+        assert_eq!(config.key, None);
+        assert!(config.require_ctrl);
+        assert!(config.require_alt);
+    }
+
+    #[test]
+    fn accepts_modifier_plus_space() {
+        let config = parse_hotkey_string("Cmd+Space").unwrap();
+        assert_eq!(config.key, Some(HotkeyKey::Space));
+        assert!(config.require_meta);
+    }
+
+    #[test]
+    fn rejects_space_only() {
+        let error = parse_hotkey_string("Space").unwrap_err();
+        assert_eq!(error, INVALID_HOTKEY_MESSAGE);
+    }
+
+    #[test]
+    fn rejects_modifier_plus_non_space_key() {
+        let error = parse_hotkey_string("Ctrl+F9").unwrap_err();
+        assert_eq!(error, INVALID_HOTKEY_MESSAGE);
+    }
+
+    #[test]
+    fn serializes_modifier_pair_without_phantom_key() {
+        set_hotkey_from_string("Ctrl+Option").unwrap();
+        assert_eq!(get_hotkey_string(), "Ctrl+Alt");
+    }
 }

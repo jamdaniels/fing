@@ -7,11 +7,44 @@ const SHORT_SHA_LEN: usize = 7;
 
 fn main() {
     emit_rerun_hints();
+    link_macos_clang_runtime();
 
     let commit = resolve_commit_sha().unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=GIT_COMMIT={commit}");
 
     tauri_build::build();
+}
+
+fn link_macos_clang_runtime() {
+    #[cfg(target_os = "macos")]
+    {
+        println!("cargo:rerun-if-env-changed=DEVELOPER_DIR");
+
+        let Ok(output) = Command::new("xcrun")
+            .args(["clang", "--print-resource-dir"])
+            .output()
+        else {
+            return;
+        };
+
+        if !output.status.success() {
+            return;
+        }
+
+        let Ok(resource_dir) = String::from_utf8(output.stdout) else {
+            return;
+        };
+
+        let runtime_dir = PathBuf::from(resource_dir.trim())
+            .join("lib")
+            .join("darwin");
+        if !runtime_dir.join("libclang_rt.osx.a").exists() {
+            return;
+        }
+
+        println!("cargo:rustc-link-search=native={}", runtime_dir.display());
+        println!("cargo:rustc-link-lib=static=clang_rt.osx");
+    }
 }
 
 fn emit_rerun_hints() {

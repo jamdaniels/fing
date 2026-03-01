@@ -743,7 +743,13 @@ pub fn enable_onboarding_test_mode(app: AppHandle) -> Result<(), String> {
 
     // Set the hotkey from settings
     let settings = load_settings_sync();
-    crate::hotkey_config::set_hotkey_from_string(&settings.hotkey)?;
+    if let Err(e) = crate::hotkey_config::set_hotkey_from_string_or_default(&settings.hotkey) {
+        tracing::warn!(
+            "Failed to parse hotkey from settings: {} - falling back to {}",
+            e,
+            crate::hotkey_config::DEFAULT_HOTKEY
+        );
+    }
 
     // Register the hotkey listener (idempotent)
     register_hotkey(&app)?;
