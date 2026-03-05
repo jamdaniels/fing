@@ -84,7 +84,7 @@ static RECORDING_START: Mutex<Option<Instant>> = Mutex::new(None);
 static FRONTMOST_APP: Mutex<Option<String>> = Mutex::new(None);
 
 /// Initialize the audio thread (call once at startup or before first recording)
-fn ensure_audio_thread(app: &AppHandle) {
+fn ensure_audio_thread() {
     let mut thread_guard = match AUDIO_THREAD.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
@@ -97,7 +97,6 @@ fn ensure_audio_thread(app: &AppHandle) {
     }
 
     let (cmd_tx, cmd_rx) = mpsc::channel::<AudioCommand>();
-    let app_handle = app.clone();
 
     std::thread::spawn(move || {
         let mut capture = AudioCapture::new();
@@ -129,11 +128,7 @@ fn ensure_audio_thread(app: &AppHandle) {
                             match_result.requested,
                             match_result.actual
                         );
-                        persist_fallback_microphone_selection(
-                            app_handle.clone(),
-                            device_id,
-                            match_result.actual,
-                        );
+                        persist_fallback_microphone_selection(device_id, match_result.actual);
                     }
                 }
                 Ok(AudioCommand::StopRecording { reply_tx }) => {
@@ -210,11 +205,7 @@ fn send_stop_recording_command(cmd_tx: &Sender<AudioCommand>) -> Result<Vec<f32>
         .map_err(|_| "Audio thread dropped StopRecording response".to_string())?
 }
 
-fn persist_fallback_microphone_selection(
-    app: AppHandle,
-    requested_device: Option<String>,
-    actual_device: String,
-) {
+fn persist_fallback_microphone_selection(requested_device: Option<String>, actual_device: String) {
     tauri::async_runtime::spawn(async move {
         let mut current_settings = load_settings().await;
 
@@ -244,13 +235,6 @@ fn persist_fallback_microphone_selection(
             previous_selected,
             actual_device
         );
-
-        if let Err(e) = crate::rebuild_tray_menu(&app) {
-            tracing::warn!(
-                "Failed to rebuild tray menu after fallback microphone update: {}",
-                e
-            );
-        }
     });
 }
 
@@ -404,7 +388,7 @@ pub fn on_key_down(app: &AppHandle) {
     });
 
     // Ensure audio thread is running and start recording
-    ensure_audio_thread(app);
+    ensure_audio_thread();
 
     let cmd_tx = match AUDIO_THREAD.lock() {
         Ok(guard) => guard,

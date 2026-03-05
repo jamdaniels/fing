@@ -652,9 +652,14 @@ body[data-platform="windows"] .titlebar {
 }
 
 .dictionary-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+  align-content: start;
+}
+
+.dictionary-list .empty-state {
+  grid-column: 1 / -1;
 }
 
 .dictionary-scrollable {
@@ -675,9 +680,17 @@ body[data-platform="windows"] .titlebar {
 }
 
 .dictionary-term {
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   font-weight: 500;
   word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  .dictionary-list {
+    grid-template-columns: 1fr;
+  }
 }
 
 .permission-badge {

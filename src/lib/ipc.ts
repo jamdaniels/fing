@@ -66,10 +66,6 @@ export async function refreshAudioDevices(): Promise<AudioDevice[]> {
   return await invoke<AudioDevice[]>("refresh_audio_devices");
 }
 
-export async function setAudioDevice(deviceId: string | null): Promise<void> {
-  return await invoke("set_audio_device", { deviceId });
-}
-
 export async function downloadModel(variant: ModelVariant): Promise<void> {
   return await invoke("download_model", { variant });
 }

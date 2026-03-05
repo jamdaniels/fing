@@ -2065,12 +2065,6 @@ function renderSettingsUI(el: HTMLElement): void {
       </div>
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">Models</div>
-      <div class="model-list">
-        ${renderModelList()}
-      </div>
-    </div>
-    <div class="settings-section">
       <div class="settings-section-title">Audio</div>
       <div class="settings-card">
         <div class="settings-row">
@@ -2099,6 +2093,12 @@ function renderSettingsUI(el: HTMLElement): void {
           </div>
           <button class="btn btn-secondary mic-test-btn">Test</button>
         </div>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Models</div>
+      <div class="model-list">
+        ${renderModelList()}
       </div>
     </div>
     <div class="settings-section">

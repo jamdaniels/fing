@@ -26,7 +26,7 @@ use std::sync::{mpsc, Mutex, OnceLock};
 #[cfg(target_os = "macos")]
 use tauri::ActivationPolicy;
 use tauri::{
-    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     Emitter, Manager,
 };
@@ -43,15 +43,8 @@ struct MicTestState {
     device_id: Option<String>,
 }
 
-#[derive(Clone)]
-struct MicMenuEntry {
-    device_id: Option<String>,
-    item: CheckMenuItem<tauri::Wry>,
-}
-
 lazy_static::lazy_static! {
     static ref MIC_TEST_STATE: Mutex<MicTestState> = Mutex::new(MicTestState::default());
-    static ref MIC_MENU_ITEMS: Mutex<Vec<MicMenuEntry>> = Mutex::new(Vec::new());
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -98,22 +91,9 @@ fn get_audio_devices() -> Vec<AudioDevice> {
 }
 
 #[tauri::command]
-fn refresh_audio_devices(app: tauri::AppHandle) -> Vec<AudioDevice> {
+fn refresh_audio_devices() -> Vec<AudioDevice> {
     tracing::debug!("Refreshing audio device list");
-    let devices = AudioCapture::list_devices();
-
-    if let Err(e) = rebuild_tray_menu(&app) {
-        tracing::warn!("Failed to rebuild tray menu after device refresh: {}", e);
-    }
-
-    devices
-}
-
-#[tauri::command]
-fn set_audio_device(_device_id: Option<String>) -> Result<(), String> {
-    // TODO: Store device preference in settings
-    // Device selection will be used when initializing capture on recording
-    Ok(())
+    AudioCapture::list_devices()
 }
 
 #[tauri::command]
@@ -430,12 +410,8 @@ fn request_permissions() -> PermissionStatus {
 }
 
 #[tauri::command]
-async fn update_settings(
-    app: tauri::AppHandle,
-    settings: settings::Settings,
-) -> Result<settings::Settings, String> {
+async fn update_settings(settings: settings::Settings) -> Result<settings::Settings, String> {
     let previous_settings = settings::load_settings_sync();
-    let previous_selected = previous_settings.selected_microphone_id.clone();
     let previous_lazy_mode = previous_settings.lazy_model_loading;
     let updated = settings::update_settings(settings).await?;
 
@@ -477,15 +453,6 @@ async fn update_settings(
                 }
                 return Err(format!("Failed to load model: {load_err}"));
             }
-        }
-    }
-
-    if previous_selected != updated.selected_microphone_id {
-        if let Err(e) = rebuild_tray_menu(&app) {
-            tracing::warn!(
-                "Failed to rebuild tray menu after microphone setting change: {}",
-                e
-            );
         }
     }
 
@@ -619,9 +586,6 @@ fn build_tray_menu_for_state(
         let history = MenuItem::with_id(app, "history", "History", true, None::<&str>)?;
         let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
         let separator1 = PredefinedMenuItem::separator(app)?;
-
-        let mic_items = build_mic_menu_items(app)?;
-
         let separator2 = PredefinedMenuItem::separator(app)?;
         let updates = MenuItem::with_id(
             app,
@@ -630,22 +594,19 @@ fn build_tray_menu_for_state(
             true,
             None::<&str>,
         )?;
-        let separator3 = PredefinedMenuItem::separator(app)?;
         let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-
-        let mut items: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
-            vec![&open, &history, &settings, &separator1];
-        for item in &mic_items {
-            items.push(item.as_ref());
-        }
-        items.extend([
-            &separator2 as &dyn tauri::menu::IsMenuItem<tauri::Wry>,
-            &updates,
-            &separator3,
-            &quit,
-        ]);
-
-        Ok(Menu::with_items(app, &items)?)
+        Ok(Menu::with_items(
+            app,
+            &[
+                &open,
+                &history,
+                &settings,
+                &separator1,
+                &updates,
+                &separator2,
+                &quit,
+            ],
+        )?)
     }
 }
 
@@ -666,95 +627,6 @@ pub(crate) fn rebuild_tray_menu(app: &tauri::AppHandle) -> Result<(), Box<dyn st
     }
 
     Ok(())
-}
-
-#[allow(clippy::type_complexity)]
-fn build_mic_menu_items(
-    app: &impl tauri::Manager<tauri::Wry>,
-) -> Result<Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>>, Box<dyn std::error::Error>> {
-    let devices = AudioCapture::list_devices();
-    let current_settings = settings::load_settings_sync();
-    let selected_id = current_settings.selected_microphone_id;
-
-    let has_selected_device = selected_id
-        .as_ref()
-        .map(|id| devices.iter().any(|device| &device.id == id))
-        .unwrap_or(false);
-
-    let mut mic_entries: Vec<MicMenuEntry> = Vec::new();
-    let mut result: Vec<Box<dyn tauri::menu::IsMenuItem<tauri::Wry>>> = Vec::new();
-
-    let mic_label = MenuItem::with_id(app, "mic_label", "Microphone", false, None::<&str>)?;
-    result.push(Box::new(mic_label));
-
-    for device in &devices {
-        let item_id = format!("mic_{}", encode_menu_id(&device.id));
-        let is_selected = if has_selected_device {
-            selected_id.as_ref() == Some(&device.id)
-        } else {
-            device.is_default
-        };
-        let item =
-            CheckMenuItem::with_id(app, &item_id, &device.name, true, is_selected, None::<&str>)?;
-        mic_entries.push(MicMenuEntry {
-            device_id: Some(device.id.clone()),
-            item: item.clone(),
-        });
-        result.push(Box::new(item));
-    }
-
-    let mut stored = MIC_MENU_ITEMS.lock().unwrap();
-    *stored = mic_entries;
-
-    Ok(result)
-}
-
-fn encode_menu_id(value: &str) -> String {
-    value
-        .as_bytes()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
-
-fn decode_menu_id(value: &str) -> Option<String> {
-    if !value.len().is_multiple_of(2) {
-        return None;
-    }
-
-    let mut bytes = Vec::with_capacity(value.len() / 2);
-    for pair in value.as_bytes().chunks(2) {
-        let hex = std::str::from_utf8(pair).ok()?;
-        let byte = u8::from_str_radix(hex, 16).ok()?;
-        bytes.push(byte);
-    }
-
-    String::from_utf8(bytes).ok()
-}
-
-fn update_mic_menu_checks(selected_id: Option<String>) {
-    let stored = match MIC_MENU_ITEMS.lock() {
-        Ok(items) => items,
-        Err(_) => return,
-    };
-
-    let has_selected_device = selected_id
-        .as_ref()
-        .map(|id| {
-            stored
-                .iter()
-                .any(|entry| entry.device_id.as_ref() == Some(id))
-        })
-        .unwrap_or(false);
-
-    for entry in stored.iter() {
-        let selected = if has_selected_device {
-            matches!((&entry.device_id, &selected_id), (Some(d), Some(s)) if d == s)
-        } else {
-            false
-        };
-        let _ = entry.item.set_checked(selected);
-    }
 }
 
 fn show_window_for_tab(app: &tauri::AppHandle, tab: &str) {
@@ -793,34 +665,6 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
             // Open main window and trigger the settings update flow.
             show_window_for_tab(app, "settings");
             let _ = app.emit("check-for-updates", ());
-        }
-        id if id.starts_with("mic_") => {
-            tracing::debug!("Mic menu event: {}", id);
-            let encoded = id.strip_prefix("mic_").unwrap_or("");
-            let device_id = match decode_menu_id(encoded) {
-                Some(decoded) => Some(decoded),
-                None => {
-                    tracing::warn!("Invalid microphone menu id: {}", id);
-                    return;
-                }
-            };
-            let current_selected = settings::load_settings_sync().selected_microphone_id;
-            if device_id == current_selected {
-                update_mic_menu_checks(current_selected);
-                return;
-            }
-            tracing::info!("Microphone changed via tray: {:?}", device_id);
-
-            // Save to settings and update checkmarks
-            let device_id_clone = device_id.clone();
-            tauri::async_runtime::spawn(async move {
-                let mut current_settings = settings::load_settings().await;
-                current_settings.selected_microphone_id = device_id_clone;
-                if let Err(e) = settings::save_settings(&current_settings).await {
-                    tracing::error!("Failed to save mic setting: {}", e);
-                }
-                update_mic_menu_checks(current_settings.selected_microphone_id.clone());
-            });
         }
         _ => {
             tracing::debug!("Unknown menu event: {}", event_id);
@@ -990,7 +834,6 @@ pub fn run() {
             // Audio
             get_audio_devices,
             refresh_audio_devices,
-            set_audio_device,
             test_microphone,
             start_mic_test,
             get_mic_test_level,
