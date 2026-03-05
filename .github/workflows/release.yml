@@ -39,6 +39,16 @@ jobs:
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Resolve release type
+        id: release_type
+        shell: bash
+        run: |
+          if [[ "${{ steps.release_tag.outputs.tag }}" == *-rc* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
@@ -82,4 +92,4 @@ jobs:
           releaseName: Fing ${{ steps.release_tag.outputs.tag }}
           releaseBody: See the assets to download this version and update metadata.
           releaseDraft: false
-          prerelease: false
+          prerelease: ${{ steps.release_type.outputs.prerelease }}
