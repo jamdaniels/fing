@@ -1,7 +1,7 @@
 {
   "name": "fing",
   "private": true,
-  "version": "1.0.0-rc2",
+  "version": "1.0.0-rc3",
   "type": "module",
   "scripts": {
     "dev": "bunx tauri dev",
@@ -27,4 +27,3 @@
     "vite": "^7.3.1"
   }
 }
-
