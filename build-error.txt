@@ -1,0 +1,1025 @@
+error: failed to run custom build command for `whisper-rs-sys v0.14.1`
+
+Caused by:
+  process didn't exit successfully: `C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-1e1d8f861c6e29bc\build-script-build` (exit code: 101)
+  --- stdout
+  cargo:rerun-if-changed=wrapper.h
+  cargo:rerun-if-env-changed=TARGET
+  cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS_x86_64-pc-windows-msvc
+  cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS_x86_64_pc_windows_msvc
+  cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS
+  cargo:rerun-if-changed=wrapper.h
+  cargo:rerun-if-changed=whisper.cpp/ggml/include/ggml-vulkan.h
+  cargo:rerun-if-changed=./whisper.cpp\include/whisper.h
+  cargo:rerun-if-changed=./whisper.cpp/ggml/include\ggml.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\stdbool.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\stddef.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\corecrt.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\vcruntime.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\sal.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\concurrencysal.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\vadefs.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\stdint.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\vcruntime.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\stdio.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\corecrt.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\corecrt_wstdio.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\corecrt.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\corecrt_stdio_config.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\corecrt.h
+  cargo:rerun-if-changed=./whisper.cpp/ggml/include\ggml-cpu.h
+  cargo:rerun-if-changed=./whisper.cpp/ggml/include\ggml.h
+  cargo:rerun-if-changed=./whisper.cpp/ggml/include\ggml-backend.h
+  cargo:rerun-if-changed=./whisper.cpp/ggml/include\ggml.h
+  cargo:rerun-if-changed=./whisper.cpp/ggml/include\ggml-alloc.h
+  cargo:rerun-if-changed=./whisper.cpp/ggml/include\ggml.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\stddef.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\stdint.h
+  cargo:rerun-if-changed=C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\include\stdbool.h
+  cargo:rerun-if-changed=./whisper.cpp\ggml/include/ggml.h
+  cargo:rerun-if-changed=./whisper.cpp/ggml/include\ggml-vulkan.h
+  cargo:rerun-if-changed=whisper.cpp/ggml/include\ggml.h
+  cargo:rerun-if-changed=whisper.cpp/ggml/include\ggml-backend.h
+  cargo:rerun-if-changed=whisper.cpp/ggml/include\ggml.h
+  cargo:rerun-if-changed=whisper.cpp/ggml/include\ggml-backend.h
+  cargo:rustc-link-lib=advapi32
+  cargo:rerun-if-env-changed=VULKAN_SDK
+  cargo:rustc-link-lib=vulkan-1
+  cargo:rustc-link-search=C:\VulkanSDK\1.4.335.0\Lib
+  CMAKE_TOOLCHAIN_FILE_x86_64-pc-windows-msvc = None
+  CMAKE_TOOLCHAIN_FILE_x86_64_pc_windows_msvc = None
+  HOST_CMAKE_TOOLCHAIN_FILE = None
+  CMAKE_TOOLCHAIN_FILE = None
+  CMAKE_GENERATOR_x86_64-pc-windows-msvc = None
+  CMAKE_GENERATOR_x86_64_pc_windows_msvc = None
+  HOST_CMAKE_GENERATOR = None
+  CMAKE_GENERATOR = None
+  CMAKE_PREFIX_PATH_x86_64-pc-windows-msvc = None
+  CMAKE_PREFIX_PATH_x86_64_pc_windows_msvc = None
+  HOST_CMAKE_PREFIX_PATH = None
+  CMAKE_PREFIX_PATH = None
+  CMAKE_x86_64-pc-windows-msvc = None
+  CMAKE_x86_64_pc_windows_msvc = None
+  HOST_CMAKE = None
+  CMAKE = None
+  Running with debug output on.
+  -- Selecting Windows SDK version 10.0.26100.0 to target Windows 10.0.26200.
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+  -- The C compiler identification is MSVC 19.50.35723.0
+     Called from: [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCCompiler.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake
+  -- The CXX compiler identification is MSVC 19.50.35723.0
+     Called from: [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCXXCompiler.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerId.cmake
+  -- Detecting C compiler ABI info
+     Called from: [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCCompiler.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake
+  -- Detecting C compiler ABI info - done
+     Called from: [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCCompiler.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake
+  -- Check for working C compiler: C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe - skipped
+     Called from: [2]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCCompiler.cmake
+  -- Detecting C compile features
+     Called from: [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCCompiler.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerSupport.cmake
+  -- Detecting C compile features - done
+     Called from: [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCCompiler.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerSupport.cmake
+  -- Detecting CXX compiler ABI info
+     Called from: [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake
+  -- Detecting CXX compiler ABI info - done
+     Called from: [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake
+  -- Check for working CXX compiler: C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe - skipped
+     Called from: [2]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake
+  -- Detecting CXX compile features
+     Called from: [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerSupport.cmake
+  -- Detecting CXX compile features - done
+     Called from: [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerSupport.cmake
+  -- Found Git: C:/Program Files/Git/cmd/git.exe (found version "2.53.0.windows.1")
+     Called from: [5]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+                  [4]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/cmake/git-vars.cmake
+                  [3]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindGit.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageHandleStandardArgs.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageMessage.cmake
+  -- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+     Called from: [5]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/CMakeLists.txt
+                  [4]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                  [3]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceCompiles.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceCompiles.cmake
+  -- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed
+     Called from: [5]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/CMakeLists.txt
+                  [4]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                  [3]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceCompiles.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceCompiles.cmake
+  -- Looking for pthread_create in pthreads
+     Called from: [4]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/CMakeLists.txt
+                  [3]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CheckLibraryExists.cmake
+  -- Looking for pthread_create in pthreads - not found
+     Called from: [4]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/CMakeLists.txt
+                  [3]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CheckLibraryExists.cmake
+  -- Looking for pthread_create in pthread
+     Called from: [4]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/CMakeLists.txt
+                  [3]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CheckLibraryExists.cmake
+  -- Looking for pthread_create in pthread - not found
+     Called from: [4]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/CMakeLists.txt
+                  [3]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CheckLibraryExists.cmake
+  -- Found Threads: TRUE
+     Called from: [4]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/CMakeLists.txt
+                  [3]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindThreads.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageHandleStandardArgs.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageMessage.cmake
+  -- Warning: ccache not found - consider installing it for faster compilation or disable this warning with GGML_CCACHE=OFF
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  -- CMAKE_SYSTEM_PROCESSOR: AMD64
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  -- CMAKE_GENERATOR_PLATFORM: x64
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  -- GGML_SYSTEM_ARCH: x86
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  -- Including CPU backend
+     Called from: [2]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  -- x86 detected
+     Called from: [2]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/CMakeLists.txt
+  -- Performing Test HAS_AVX_1
+     Called from: [6]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [5]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/CMakeLists.txt
+                  [4]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+  -- Performing Test HAS_AVX_1 - Success
+     Called from: [6]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [5]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/CMakeLists.txt
+                  [4]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+  -- Performing Test HAS_AVX2_1
+     Called from: [6]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [5]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/CMakeLists.txt
+                  [4]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+  -- Performing Test HAS_AVX2_1 - Success
+     Called from: [6]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [5]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/CMakeLists.txt
+                  [4]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+  -- Performing Test HAS_FMA_1
+     Called from: [6]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [5]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/CMakeLists.txt
+                  [4]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+  -- Performing Test HAS_FMA_1 - Success
+     Called from: [6]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [5]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/CMakeLists.txt
+                  [4]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+  -- Performing Test HAS_AVX512_1
+     Called from: [6]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [5]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/CMakeLists.txt
+                  [4]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+  -- Performing Test HAS_AVX512_1 - Success
+     Called from: [6]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [5]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/CMakeLists.txt
+                  [4]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/cmake/FindSIMD.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
+  -- Adding CPU backend variant ggml-cpu: /arch:AVX512 GGML_AVX512
+     Called from: [2]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/CMakeLists.txt
+  -- Found Vulkan: C:/VulkanSDK/1.4.335.0/Lib/vulkan-1.lib (found version "1.4.335") found components: glslc glslangValidator
+     Called from: [4]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+                  [3]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindVulkan.cmake
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageHandleStandardArgs.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageMessage.cmake
+  -- Vulkan found
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+  -- GL_KHR_cooperative_matrix supported by glslc
+     Called from: [2]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+                  [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+  -- GL_NV_cooperative_matrix2 supported by glslc
+     Called from: [2]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+                  [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+  -- GL_EXT_integer_dot_product supported by glslc
+     Called from: [2]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+                  [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+  -- GL_EXT_bfloat16 supported by glslc
+     Called from: [2]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+                  [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+  -- Including Vulkan backend
+     Called from: [2]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  -- ggml version: 0.0.122
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/CMakeLists.txt
+  -- ggml commit:  fe122bc
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/CMakeLists.txt
+  -- Configuring done (13.6s)
+  -- Generating C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/build
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+  -- Generating C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/build/ggml
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/CMakeLists.txt
+  -- Generating C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/build/ggml/src
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  -- Generating C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/build/ggml/src/ggml-cpu
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu/CMakeLists.txt
+  -- Generating C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/build/ggml/src/ggml-vulkan
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+  -- Generating C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/build/src
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/src/CMakeLists.txt
+  -- Generating done (0.2s)
+  -- Build files have been written to: C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/build
+  Change Dir: 'C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/build'
+
+  Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" INSTALL.vcxproj /p:Configuration=Release /p:Platform=x64 /p:VisualStudioVersion=18.0 /m:12 /v:n
+  MSBuild version 18.0.5+e22287bf1 for .NET Framework
+  Build started 06.03.2026 19:36:11.
+
+       1>Project "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\INSTALL.vcxproj" on node 1 (default targets).
+       1>Project "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\INSTALL.vcxproj" (1) is building "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ZERO_CHECK.vcxproj" (2) on node 1 (default targets).
+       2>PrepareForBuild:
+           Creating directory "x64\Release\ZERO_CHECK\".
+           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+           Creating directory "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\".
+         InitializeBuildStatus:
+           Creating "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+           Touching "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\unsuccessfulbuild".
+         PreBuildEvent:
+           Checking File Globs
+           setlocal
+           "C:\Program Files\CMake\bin\cmake.exe" -P C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/build/CMakeFiles/VerifyGlobs.cmake
+           if %errorlevel% neq 0 goto :cmEnd
+           :cmEnd
+           endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+           :cmErrorLevel
+           exit /b %1
+           :cmDone
+           if %errorlevel% neq 0 goto :VCEnd
+           :VCEnd
+         CustomBuild:
+           1>Checking Build System
+         FinalizeBuildStatus:
+           Deleting file "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\unsuccessfulbuild".
+           Touching "x64\Release\ZERO_CHECK\ZERO_CHECK.tlog\ZERO_CHECK.lastbuildstate".
+       2>Done Building Project "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ZERO_CHECK.vcxproj" (default targets).
+       1>Project "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\INSTALL.vcxproj" (1) is building "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ALL_BUILD.vcxproj" (3) on node 2 (default targets).
+       3>Project "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ALL_BUILD.vcxproj" (3) is building "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen.vcxproj" (4) on node 2 (default targets).
+       4>PrepareForBuild:
+           Creating directory "x64\Release\vulkan-shaders-gen\".
+           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+           Creating directory "x64\Release\vulkan-shaders-gen\vulkan-s.F0A3F52A.tlog\".
+         InitializeBuildStatus:
+           Creating "x64\Release\vulkan-shaders-gen\vulkan-s.F0A3F52A.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+           Touching "x64\Release\vulkan-shaders-gen\vulkan-s.F0A3F52A.tlog\unsuccessfulbuild".
+         ComputeCustomBuildOutput:
+           Creating directory "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\CMakeFiles\Release\".
+         CustomBuild:
+           "The build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-download.rule' depends on 'C:\USERS\CEM\CODE\FING\T\RELEASE\BUILD\WHISPER-RS-SYS-454283F99A272624\OUT\BUILD\GGML\SRC\GGML-VULKAN\VULKAN-SHADERS-GEN-PREFIX\SRC\VULKAN-SHADERS-GEN-STAMP\RELEASE\VULKAN-SHADERS-GEN-MKDIR' which is produced by the build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-mkdir.rule'. The items cannot be built in parallel."
+           "The build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-update.rule' depends on 'C:\USERS\CEM\CODE\FING\T\RELEASE\BUILD\WHISPER-RS-SYS-454283F99A272624\OUT\BUILD\GGML\SRC\GGML-VULKAN\VULKAN-SHADERS-GEN-PREFIX\SRC\VULKAN-SHADERS-GEN-STAMP\RELEASE\VULKAN-SHADERS-GEN-DOWNLOAD' which is produced by the build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-download.rule'. The items cannot be built in parallel."
+           "The build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-patch.rule' depends on 'C:\USERS\CEM\CODE\FING\T\RELEASE\BUILD\WHISPER-RS-SYS-454283F99A272624\OUT\BUILD\GGML\SRC\GGML-VULKAN\VULKAN-SHADERS-GEN-PREFIX\SRC\VULKAN-SHADERS-GEN-STAMP\RELEASE\VULKAN-SHADERS-GEN-UPDATE' which is produced by the build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-update.rule'. The items cannot be built in parallel."
+           "The build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-configure.rule' depends on 'C:\USERS\CEM\CODE\FING\T\RELEASE\BUILD\WHISPER-RS-SYS-454283F99A272624\OUT\BUILD\GGML\SRC\GGML-VULKAN\VULKAN-SHADERS-GEN-PREFIX\SRC\VULKAN-SHADERS-GEN-STAMP\RELEASE\VULKAN-SHADERS-GEN-PATCH' which is produced by the build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-patch.rule'. The items cannot be built in parallel."
+           "The build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-build.rule' depends on 'C:\USERS\CEM\CODE\FING\T\RELEASE\BUILD\WHISPER-RS-SYS-454283F99A272624\OUT\BUILD\GGML\SRC\GGML-VULKAN\VULKAN-SHADERS-GEN-PREFIX\SRC\VULKAN-SHADERS-GEN-STAMP\RELEASE\VULKAN-SHADERS-GEN-CONFIGURE' which is produced by the build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-configure.rule'. The items cannot be built in parallel."
+           "The build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-install.rule' depends on 'C:\USERS\CEM\CODE\FING\T\RELEASE\BUILD\WHISPER-RS-SYS-454283F99A272624\OUT\BUILD\GGML\SRC\GGML-VULKAN\VULKAN-SHADERS-GEN-PREFIX\SRC\VULKAN-SHADERS-GEN-STAMP\RELEASE\VULKAN-SHADERS-GEN-BUILD' which is produced by the build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-build.rule'. The items cannot be built in parallel."
+           "The build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\dba41aa60789a5d549b80a5a2cbf7dce\vulkan-shaders-gen-complete.rule' depends on 'C:\USERS\CEM\CODE\FING\T\RELEASE\BUILD\WHISPER-RS-SYS-454283F99A272624\OUT\BUILD\GGML\SRC\GGML-VULKAN\VULKAN-SHADERS-GEN-PREFIX\SRC\VULKAN-SHADERS-GEN-STAMP\RELEASE\VULKAN-SHADERS-GEN-INSTALL' which is produced by the build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-install.rule'. The items cannot be built in parallel."
+           "The build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\32e2bb327ed2858624a5abe7ba50f8f6\vulkan-shaders-gen.rule' depends on 'C:\USERS\CEM\CODE\FING\T\RELEASE\BUILD\WHISPER-RS-SYS-454283F99A272624\OUT\BUILD\GGML\SRC\GGML-VULKAN\CMAKEFILES\RELEASE\VULKAN-SHADERS-GEN-COMPLETE' which is produced by the build of 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\dba41aa60789a5d549b80a5a2cbf7dce\vulkan-shaders-gen-complete.rule'. The items cannot be built in parallel."
+           Creating directories for 'vulkan-shaders-gen'
+           Building Custom Rule C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+           No download step for 'vulkan-shaders-gen'
+           No update step for 'vulkan-shaders-gen'
+           No patch step for 'vulkan-shaders-gen'
+           Performing configure step for 'vulkan-shaders-gen'
+           -- Selecting Windows SDK version 10.0.26100.0 to target Windows 10.0.26200.
+           -- The C compiler identification is MSVC 19.50.35723.0
+           -- The CXX compiler identification is MSVC 19.50.35723.0
+           -- Detecting C compiler ABI info
+           -- Detecting C compiler ABI info - failed
+           -- Check for working C compiler: C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe
+           -- Check for working C compiler: C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe - broken
+           CMake Error at C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCCompiler.cmake:67 (message):
+             The C compiler
+
+               "C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/cl.exe"
+
+             is not able to compile a simple test program.
+
+             It fails with the following output:
+
+               Change Dir: 'C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-build/CMakeFiles/CMakeScratch/TryCompile-10ta5q'
+
+               Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_649aa.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+               MSBuild version 18.0.5+e22287bf1 for .NET Framework
+               Build started 06.03.2026 19:36:16.
+
+               Project "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen-prefix\src\vulkan-shaders-gen-build\CMakeFiles\CMakeScratch\TryCompile-10ta5q\cmTC_649aa.vcxproj" on node 1 (default targets).
+               PrepareForBuild:
+                 Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+                 Creating directory "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen-prefix\src\vulkan-shaders-gen-build\CMakeFiles\CMakeScratch\TryCompile-10ta5q\Debug\".
+                 Creating directory "cmTC_649aa.dir\Debug\cmTC_649aa.tlog\".
+               InitializeBuildStatus:
+                 Creating "cmTC_649aa.dir\Debug\cmTC_649aa.tlog\unsuccessfulbuild" because "AlwaysCreate" was specified.
+                 Touching "cmTC_649aa.dir\Debug\cmTC_649aa.tlog\unsuccessfulbuild".
+               ClCompile:
+                 C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\bin\HostX64\x64\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\"Debug\"" /RTC1 /MDd /Fo"cmTC_649aa.dir\Debug\\" /Fd"cmTC_649aa.dir\Debug\vc145.pdb" /external:W1 /TC /errorReport:queue "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen-prefix\src\vulkan-shaders-gen-build\CMakeFiles\CMakeScratch\TryCompile-10ta5q\testCCompiler.c"
+                 Microsoft (R) C/C++ Optimizing Compiler Version 19.50.35723 for x64
+                 Copyright (C) Microsoft Corporation.  All rights reserved.
+                 cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\"Debug\"" /RTC1 /MDd /Fo"cmTC_649aa.dir\Debug\\" /Fd"cmTC_649aa.dir\Debug\vc145.pdb" /external:W1 /TC /errorReport:queue "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen-prefix\src\vulkan-shaders-gen-build\CMakeFiles\CMakeScratch\TryCompile-10ta5q\testCCompiler.c"
+                 testCCompiler.c
+               Link:
+           -- Configuring incomplete, errors occurred!
+                 C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Tools\MSVC\14.50.35717\bin\HostX64\x64\link.exe /OUT:"C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen-prefix\src\vulkan-shaders-gen-build\CMakeFiles\CMakeScratch\TryCompile-10ta5q\Debug\cmTC_649aa.exe" /INCREMENTAL /ILK:"cmTC_649aa.dir\Debug\cmTC_649aa.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-build/CMakeFiles/CMakeScratch/TryCompile-10ta5q/Debug/cmTC_649aa.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-build/CMakeFiles/CMakeScratch/TryCompile-10ta5q/Debug/cmTC_649aa.lib" /MACHINE:X64  /machine:x64 cmTC_649aa.dir\Debug\testCCompiler.obj
+       4>FileTracker : error FTK1011: could not create the new file tracking log file: C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen-prefix\src\vulkan-shaders-gen-build\CMakeFiles\CMakeScratch\TryCompile-10ta5q\cmTC_649aa.dir\Debug\cmTC_649aa.tlog\link-cvtres.write.1.tlog. The system cannot find the path specified. [C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen-prefix\src\vulkan-shaders-gen-build\CMakeFiles\CMakeScratch\TryCompile-10ta5q\cmTC_649aa.vcxproj] [C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen.vcxproj]
+
+
+
+               Done Building Project "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen-prefix\src\vulkan-shaders-gen-build\CMakeFiles\CMakeScratch\TryCompile-10ta5q\cmTC_649aa.vcxproj" (default targets) -- FAILED.
+
+               Build FAILED.
+
+               "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen-prefix\src\vulkan-shaders-gen-build\CMakeFiles\CMakeScratch\TryCompile-10ta5q\cmTC_649aa.vcxproj" (default target) (1) ->
+               (Link target) ->
+       4>FileTracker : error FTK1011: could not create the new file tracking log file: C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen-prefix\src\vulkan-shaders-gen-build\CMakeFiles\CMakeScratch\TryCompile-10ta5q\cmTC_649aa.dir\Debug\cmTC_649aa.tlog\link-cvtres.write.1.tlog. The system cannot find the path specified. [C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen-prefix\src\vulkan-shaders-gen-build\CMakeFiles\CMakeScratch\TryCompile-10ta5q\cmTC_649aa.vcxproj] [C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen.vcxproj]
+
+                   0 Warning(s)
+                   1 Error(s)
+
+               Time Elapsed 00:00:00.28
+
+
+
+
+
+             CMake will not be able to correctly generate this project.
+           Call Stack (most recent call first):
+             CMakeLists.txt:2 (project)
+
+
+       4>C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\MSBuild\Microsoft\VC\v180\Microsoft.CppCommon.targets(254,5): error MSB8066: Custom build for 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-mkdir.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-download.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-update.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-patch.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-configure.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-build.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-install.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\dba41aa60789a5d549b80a5a2cbf7dce\vulkan-shaders-gen-complete.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\32e2bb327ed2858624a5abe7ba50f8f6\vulkan-shaders-gen.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\whisper.cpp\ggml\src\ggml-vulkan\CMakeLists.txt' exited with code 1. [C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen.vcxproj]
+       4>Done Building Project "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen.vcxproj" (default targets) -- FAILED.
+       3>Done Building Project "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ALL_BUILD.vcxproj" (default targets) -- FAILED.
+       1>Done Building Project "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\INSTALL.vcxproj" (default targets) -- FAILED.
+
+  Build FAILED.
+
+         "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\INSTALL.vcxproj" (default target) (1) ->
+         "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ALL_BUILD.vcxproj" (default target) (3) ->
+         "C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen.vcxproj" (default target) (4) ->
+         (CustomBuild target) ->
+           FileTracker : error FTK1011: could not create the new file tracking log file: C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen-prefix\src\vulkan-shaders-gen-build\CMakeFiles\CMakeScratch\TryCompile-10ta5q\cmTC_649aa.dir\Debug\cmTC_649aa.tlog\link-cvtres.write.1.tlog. The system cannot find the path specified. [C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen-prefix\src\vulkan-shaders-gen-build\CMakeFiles\CMakeScratch\TryCompile-10ta5q\cmTC_649aa.vcxproj] [C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen.vcxproj]
+           FileTracker : error FTK1011: could not create the new file tracking log file: C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen-prefix\src\vulkan-shaders-gen-build\CMakeFiles\CMakeScratch\TryCompile-10ta5q\cmTC_649aa.dir\Debug\cmTC_649aa.tlog\link-cvtres.write.1.tlog. The system cannot find the path specified. [C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen-prefix\src\vulkan-shaders-gen-build\CMakeFiles\CMakeScratch\TryCompile-10ta5q\cmTC_649aa.vcxproj] [C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen.vcxproj]
+           C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\MSBuild\Microsoft\VC\v180\Microsoft.CppCommon.targets(254,5): error MSB8066: Custom build for 'C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-mkdir.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-download.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-update.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-patch.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-configure.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-build.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\d5982270a98b6945549aa89b36bfee55\vulkan-shaders-gen-install.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\dba41aa60789a5d549b80a5a2cbf7dce\vulkan-shaders-gen-complete.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\CMakeFiles\32e2bb327ed2858624a5abe7ba50f8f6\vulkan-shaders-gen.rule;C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\whisper.cpp\ggml\src\ggml-vulkan\CMakeLists.txt' exited with code 1. [C:\Users\cem\code\fing\t\release\build\whisper-rs-sys-454283f99a272624\out\build\ggml\src\ggml-vulkan\vulkan-shaders-gen.vcxproj]
+
+      0 Warning(s)
+      3 Error(s)
+
+  Time Elapsed 00:00:04.53
+
+
+  --- stderr
+  running: "cmake" "-Wdev" "--debug-output" "C:\\Users\\cem\\code\\fing\\t\\release\\build\\whisper-rs-sys-454283f99a272624\\out\\whisper.cpp/" "-B" "C:\\Users\\cem\\code\\fing\\t\\release\\build\\whisper-rs-sys-454283f99a272624\\out\\build" "-G" "Visual Studio 18 2026" "-Thost=x64" "-Ax64" "-DBUILD_SHARED_LIBS=OFF" "-DWHISPER_ALL_WARNINGS=OFF" "-DWHISPER_ALL_WARNINGS_3RD_PARTY=OFF" "-DWHISPER_BUILD_TESTS=OFF" "-DWHISPER_BUILD_EXAMPLES=OFF" "-DGGML_VULKAN=ON" "-DGGML_METAL=OFF" "-DCMAKE_BUILD_TYPE=Release" "-DGGML_OPENMP=OFF" "-DCMAKE_INSTALL_PREFIX=C:\\Users\\cem\\code\\fing\\t\\release\\build\\whisper-rs-sys-454283f99a272624\\out" "-DCMAKE_C_FLAGS= -nologo -MD -Brepro -W0" "-DCMAKE_C_FLAGS_RELEASE= -nologo -MD -Brepro -W0" "-DCMAKE_CXX_FLAGS= /utf-8 -nologo -MD -Brepro -W0" "-DCMAKE_CXX_FLAGS_RELEASE= /utf-8 -nologo -MD -Brepro -W0" "-DCMAKE_ASM_FLAGS= -nologo -MD -Brepro -W0" "-DCMAKE_ASM_FLAGS_RELEASE= -nologo -MD -Brepro -W0" "-DCMAKE_VERBOSE_MAKEFILE:BOOL=ON"
+  CMake Deprecation Warning at CMakeLists.txt:1 (cmake_minimum_required):
+    Compatibility with CMake < 3.10 will be removed from a future version of
+    CMake.
+
+    Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
+    to tell CMake that the project requires at least <min> but has been updated
+    to work with policies introduced by <max> or earlier.
+
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+  CMake Warning (dev) at C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake:83 (try_compile):
+    Policy CMP0066 is not set: Honor per-config flags in try_compile()
+    source-file signature.  Run "cmake --help-policy CMP0066" for policy
+    details.  Use the cmake_policy command to set the policy and suppress this
+    warning.
+
+    For compatibility with older versions of CMake, try_compile is not honoring
+    caller config-specific compiler flags (e.g.  CMAKE_C_FLAGS_DEBUG) in the
+    test project.
+  Call Stack (most recent call first):
+    C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)
+    CMakeLists.txt:2 (project)
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCCompiler.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake
+  CMake Warning (dev) at C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake:83 (try_compile):
+    Policy CMP0066 is not set: Honor per-config flags in try_compile()
+    source-file signature.  Run "cmake --help-policy CMP0066" for policy
+    details.  Use the cmake_policy command to set the policy and suppress this
+    warning.
+
+    For compatibility with older versions of CMake, try_compile is not honoring
+    caller config-specific compiler flags (e.g.  CMAKE_C_FLAGS_DEBUG) in the
+    test project.
+  Call Stack (most recent call first):
+    C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)
+    CMakeLists.txt:2 (project)
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [3]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+                  [2]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeTestCXXCompiler.cmake
+                  [1]   C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDetermineCompilerABI.cmake
+     Entering             C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+     Entering             C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/CMakeLists.txt
+     Entering             C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-cpu
+     Called from: [2]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+     Returning to         C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src
+     Called from: [2]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+     Entering             C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan
+     Called from: [2]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+     Returning to         C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src
+     Called from: [2]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+                  [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+     Returning to         C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/CMakeLists.txt
+     Returning to         C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+     Entering             C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/src
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+     Returning to         C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+  CMake Warning (dev) in ggml/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Threads::Threads" selected
+    configuration "(none)", but would select configuration "DEBUG" under the
+    NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "DEBUG" under the
+    NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+  CMake Warning (dev) in ggml/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Threads::Threads" selected
+    configuration "(none)", but would select configuration "RELEASE" under the
+    NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+  CMake Warning (dev) in ggml/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Threads::Threads" selected
+    configuration "(none)", but would select configuration "MINSIZEREL" under
+    the NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+  CMake Warning (dev) in ggml/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Threads::Threads" selected
+    configuration "(none)", but would select configuration "RELWITHDEBINFO"
+    under the NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "RELEASE" under the
+    NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "MINSIZEREL" under
+    the NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "RELWITHDEBINFO"
+    under the NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+  CMake Warning (dev) in CMakeLists.txt:
+    Policy CMP0082 is not set: Install rules from add_subdirectory() are
+    interleaved with those in caller.  Run "cmake --help-policy CMP0082" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:190 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:190 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:190 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:190 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:243 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  Call Stack (most recent call first):
+    ggml/src/ggml-cpu/CMakeLists.txt:22 (ggml_add_backend_library)
+    ggml/src/CMakeLists.txt:372 (ggml_add_cpu_backend_variant_impl)
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:243 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  Call Stack (most recent call first):
+    ggml/src/ggml-cpu/CMakeLists.txt:22 (ggml_add_backend_library)
+    ggml/src/CMakeLists.txt:372 (ggml_add_cpu_backend_variant_impl)
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:243 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  Call Stack (most recent call first):
+    ggml/src/ggml-cpu/CMakeLists.txt:22 (ggml_add_backend_library)
+    ggml/src/CMakeLists.txt:372 (ggml_add_cpu_backend_variant_impl)
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:243 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  Call Stack (most recent call first):
+    ggml/src/ggml-cpu/CMakeLists.txt:22 (ggml_add_backend_library)
+    ggml/src/CMakeLists.txt:372 (ggml_add_cpu_backend_variant_impl)
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:213 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "DEBUG" under the
+    NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:213 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "RELEASE" under the
+    NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:213 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "MINSIZEREL" under
+    the NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:213 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "RELWITHDEBINFO"
+    under the NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:243 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  Call Stack (most recent call first):
+    ggml/src/ggml-vulkan/CMakeLists.txt:47 (ggml_add_backend_library)
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "DEBUG" under the
+    NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:243 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  Call Stack (most recent call first):
+    ggml/src/ggml-vulkan/CMakeLists.txt:47 (ggml_add_backend_library)
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "RELEASE" under the
+    NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:243 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  Call Stack (most recent call first):
+    ggml/src/ggml-vulkan/CMakeLists.txt:47 (ggml_add_backend_library)
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "MINSIZEREL" under
+    the NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+  CMake Warning (dev) at ggml/src/CMakeLists.txt:243 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  Call Stack (most recent call first):
+    ggml/src/ggml-vulkan/CMakeLists.txt:47 (ggml_add_backend_library)
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "RELWITHDEBINFO"
+    under the NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/ggml/src/ggml-vulkan/CMakeLists.txt
+  CMake Warning (dev) in src/CMakeLists.txt:
+    Policy CMP0128 is not set: Selection of language standard and extension
+    flags improved.  Run "cmake --help-policy CMP0128" for policy details.  Use
+    the cmake_policy command to set the policy and suppress this warning.
+
+    For compatibility with older versions of CMake, compiler extensions won't
+    be enabled.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/src/CMakeLists.txt
+  CMake Warning (dev) in src/CMakeLists.txt:
+    Policy CMP0128 is not set: Selection of language standard and extension
+    flags improved.  Run "cmake --help-policy CMP0128" for policy details.  Use
+    the cmake_policy command to set the policy and suppress this warning.
+
+    For compatibility with older versions of CMake, compiler extensions won't
+    be enabled.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/src/CMakeLists.txt
+  CMake Warning (dev) in src/CMakeLists.txt:
+    Policy CMP0128 is not set: Selection of language standard and extension
+    flags improved.  Run "cmake --help-policy CMP0128" for policy details.  Use
+    the cmake_policy command to set the policy and suppress this warning.
+
+    For compatibility with older versions of CMake, compiler extensions won't
+    be enabled.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/src/CMakeLists.txt
+  CMake Warning (dev) in src/CMakeLists.txt:
+    Policy CMP0128 is not set: Selection of language standard and extension
+    flags improved.  Run "cmake --help-policy CMP0128" for policy details.  Use
+    the cmake_policy command to set the policy and suppress this warning.
+
+    For compatibility with older versions of CMake, compiler extensions won't
+    be enabled.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/src/CMakeLists.txt
+  CMake Warning (dev) at src/CMakeLists.txt:105 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/src/CMakeLists.txt
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "DEBUG" under the
+    NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/src/CMakeLists.txt
+  CMake Warning (dev) at src/CMakeLists.txt:105 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/src/CMakeLists.txt
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "RELEASE" under the
+    NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/src/CMakeLists.txt
+  CMake Warning (dev) at src/CMakeLists.txt:105 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/src/CMakeLists.txt
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "MINSIZEREL" under
+    the NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/src/CMakeLists.txt
+  CMake Warning (dev) at src/CMakeLists.txt:105 (add_library):
+    Policy CMP0156 is not set: De-duplicate libraries on link lines based on
+    linker capabilities.  Run "cmake --help-policy CMP0156" for policy details.
+    Use the cmake_policy command to set the policy and suppress this warning.
+
+    Since the policy is not set, legacy libraries de-duplication strategy will
+    be applied.
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/src/CMakeLists.txt
+  CMake Warning (dev) in ggml/src/ggml-vulkan/CMakeLists.txt:
+    Policy CMP0200 is not set: Location and configuration selection for
+    imported targets is more consistent.  Run "cmake --help-policy CMP0200" for
+    policy details.  Use the cmake_policy command to set the policy and
+    suppress this warning.
+
+    Configuration selection for imported target "Vulkan::Vulkan" selected
+    configuration "(none)", but would select configuration "RELWITHDEBINFO"
+    under the NEW policy.
+
+  This warning is for project developers.  Use -Wno-dev to suppress it.
+
+     Called from: [1]   C:/Users/cem/code/fing/t/release/build/whisper-rs-sys-454283f99a272624/out/whisper.cpp/src/CMakeLists.txt
+  CMake Warning:
+    Manually-specified variables were not used by the project:
+
+      CMAKE_ASM_FLAGS
+      CMAKE_ASM_FLAGS_RELEASE
+
+
+  running: "cmake" "--build" "C:\\Users\\cem\\code\\fing\\t\\release\\build\\whisper-rs-sys-454283f99a272624\\out\\build" "--target" "install" "--config" "Release" "--parallel" "12"
+
+  thread 'main' (36096) panicked at C:\Users\cem\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\cmake-0.1.57\src\lib.rs:1132:5:
+
+  command did not execute successfully, got: exit code: 1
+
+  build script failed, must exit now
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+warning: build failed, waiting for other jobs to finish...
+failed to build app: failed to build app
+       Error failed to build app: failed to build app
+error: script "build" exited with code 1

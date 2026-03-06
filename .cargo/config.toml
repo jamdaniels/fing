@@ -1,0 +1,3 @@
+[build]
+# Keep the target dir short enough for ggml-vulkan's generated Windows paths.
+target-dir = "t"

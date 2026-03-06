@@ -49,6 +49,20 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Resolve bundle args
+        id: bundle_args
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            if [ "${{ steps.release_type.outputs.prerelease }}" = "true" ]; then
+              echo "args=--bundles nsis" >> "$GITHUB_OUTPUT"
+            else
+              echo "args=--bundles nsis,msi" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "args=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
@@ -79,6 +93,7 @@ jobs:
           Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/$ver/windows/VulkanSDK-$ver-Installer.exe" -OutFile $installer
           Start-Process -FilePath $installer -Args "--accept-licenses --default-answer --confirm-command install" -Wait
           echo "VULKAN_SDK=C:\VulkanSDK\$ver" >> $env:GITHUB_ENV
+          echo "CARGO_TARGET_DIR=C:\t" >> $env:GITHUB_ENV
           echo "C:\VulkanSDK\$ver\Bin" >> $env:GITHUB_PATH
 
       - name: Build and publish release
@@ -93,3 +108,6 @@ jobs:
           releaseBody: See the assets to download this version and update metadata.
           releaseDraft: false
           prerelease: ${{ steps.release_type.outputs.prerelease }}
+          args: ${{ steps.bundle_args.outputs.args }}
+
+
