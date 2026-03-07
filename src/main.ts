@@ -343,7 +343,7 @@ function renderHome(el: HTMLElement): void {
             (w, i) => `
       <div class="word-item">
         <span class="word-rank">${i + 1}</span>
-        <span class="word-text">${w.word}</span>
+        <span class="word-text">${escapeHtml(w.word)}</span>
         <div class="word-bar-container"><div class="word-bar" style="width: ${(w.count / maxCount) * 100}%"></div></div>
         <span class="word-count">${w.count}</span>
       </div>`

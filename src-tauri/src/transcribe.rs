@@ -20,7 +20,10 @@ impl Transcriber {
             return Err(TranscribeError::ModelNotFound);
         }
 
+        #[cfg(target_os = "windows")]
         let mut ctx_params = WhisperContextParameters::default();
+        #[cfg(not(target_os = "windows"))]
+        let ctx_params = WhisperContextParameters::default();
         #[cfg(target_os = "windows")]
         let prefer_gpu = configure_windows_backend(&mut ctx_params);
         #[cfg(not(target_os = "windows"))]
