@@ -1,7 +1,8 @@
 use crate::model::ModelVariant;
 use serde::{Deserialize, Serialize};
-use std::sync::RwLock;
+use std::sync::{LazyLock, RwLock};
 use tokio::fs;
+use tokio::sync::Mutex;
 
 /// User-selected theme preference.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
@@ -25,6 +26,7 @@ pub enum HistoryMode {
 
 /// Cached settings to reduce disk I/O
 static SETTINGS_CACHE: RwLock<Option<Settings>> = RwLock::new(None);
+static SETTINGS_UPDATE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 /// User-configurable application settings (persisted to JSON).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,6 +140,11 @@ pub fn load_settings_sync() -> Settings {
 }
 
 pub async fn save_settings(settings: &Settings) -> Result<(), String> {
+    let _guard = SETTINGS_UPDATE_LOCK.lock().await;
+    save_settings_unlocked(settings).await
+}
+
+async fn save_settings_unlocked(settings: &Settings) -> Result<(), String> {
     let sanitized = sanitize_settings(settings.clone());
     let path =
         crate::paths::settings_path().ok_or_else(|| "App paths not initialized".to_string())?;
@@ -162,6 +169,18 @@ pub async fn save_settings(settings: &Settings) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+pub async fn update_settings_atomic<F>(mutator: F) -> Result<Settings, String>
+where
+    F: FnOnce(&mut Settings),
+{
+    let _guard = SETTINGS_UPDATE_LOCK.lock().await;
+    let mut settings = load_settings_from_disk().await;
+    mutator(&mut settings);
+    let sanitized = sanitize_settings(settings);
+    save_settings_unlocked(&sanitized).await?;
+    Ok(sanitized)
 }
 
 /// Invalidate the settings cache (call after external changes)

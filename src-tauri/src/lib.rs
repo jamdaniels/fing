@@ -521,7 +521,7 @@ fn get_current_hotkey() -> String {
 #[tauri::command]
 async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
     // Load settings to get active model variant
-    let mut current_settings = settings::load_settings().await;
+    let current_settings = settings::load_settings().await;
     let variant = current_settings.active_model_variant;
 
     let model_path = model::ensure_variant_verified(variant)?;
@@ -537,9 +537,11 @@ async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
         init_result.map_err(|e| format!("Failed to initialize transcriber: {e}"))?;
     }
 
-    // Save onboarding_completed to settings
-    current_settings.onboarding_completed = true;
-    settings::save_settings(&current_settings).await?;
+    settings::update_settings_atomic(|latest_settings| {
+        latest_settings.onboarding_completed = true;
+        latest_settings.onboarding_step = None;
+    })
+    .await?;
 
     // Set hotkey from settings and register listener.
     // Don't fail setup if this fails - user can fix permissions and restart

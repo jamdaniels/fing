@@ -8,7 +8,7 @@ use crate::audio::AudioCapture;
 use crate::db::{save_transcript, NewTranscript};
 use crate::model::{ensure_variant_verified, model_path_for_variant, ModelVariant};
 use crate::paste::paste_text;
-use crate::settings::{load_settings, load_settings_sync, save_settings};
+use crate::settings::{load_settings, load_settings_sync};
 use crate::sounds;
 use crate::transcribe::{
     init_transcriber, is_transcriber_loaded, transcribe_audio, unload_transcriber,
@@ -207,34 +207,42 @@ fn send_stop_recording_command(cmd_tx: &Sender<AudioCommand>) -> Result<Vec<f32>
 
 fn persist_fallback_microphone_selection(requested_device: Option<String>, actual_device: String) {
     tauri::async_runtime::spawn(async move {
-        let mut current_settings = load_settings().await;
+        let mut previous_selected = None;
+        let update_result = crate::settings::update_settings_atomic(|current_settings| {
+            if current_settings.selected_microphone_id.as_ref() != requested_device.as_ref() {
+                tracing::debug!(
+                    "Skipping microphone auto-update; selection changed from {:?} to {:?}",
+                    requested_device,
+                    current_settings.selected_microphone_id
+                );
+                return;
+            }
 
-        if current_settings.selected_microphone_id.as_ref() != requested_device.as_ref() {
-            tracing::debug!(
-                "Skipping microphone auto-update; selection changed from {:?} to {:?}",
-                requested_device,
-                current_settings.selected_microphone_id
-            );
-            return;
+            if current_settings.selected_microphone_id.as_ref() == Some(&actual_device) {
+                return;
+            }
+
+            previous_selected = current_settings.selected_microphone_id.clone();
+            current_settings.selected_microphone_id = Some(actual_device.clone());
+        })
+        .await;
+
+        match update_result {
+            Ok(updated_settings) => {
+                if updated_settings.selected_microphone_id.as_ref() != Some(&actual_device) {
+                    return;
+                }
+
+                tracing::info!(
+                    "Auto-updated microphone selection from {:?} to '{}'",
+                    previous_selected,
+                    actual_device
+                );
+            }
+            Err(e) => {
+                tracing::error!("Failed to persist fallback microphone selection: {}", e);
+            }
         }
-
-        if current_settings.selected_microphone_id.as_ref() == Some(&actual_device) {
-            return;
-        }
-
-        let previous_selected = current_settings.selected_microphone_id.clone();
-        current_settings.selected_microphone_id = Some(actual_device.clone());
-
-        if let Err(e) = save_settings(&current_settings).await {
-            tracing::error!("Failed to persist fallback microphone selection: {}", e);
-            return;
-        }
-
-        tracing::info!(
-            "Auto-updated microphone selection from {:?} to '{}'",
-            previous_selected,
-            actual_device
-        );
     });
 }
 

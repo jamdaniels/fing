@@ -52,8 +52,7 @@ struct RuntimeUpdateState {
 
 static UPDATE_STATE: Lazy<RwLock<RuntimeUpdateState>> =
     Lazy::new(|| RwLock::new(RuntimeUpdateState::default()));
-static UPDATE_CHECK_LOCK: Lazy<tokio::sync::Mutex<()>> =
-    Lazy::new(|| tokio::sync::Mutex::new(()));
+static UPDATE_CHECK_LOCK: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::new(()));
 static STOP_PERIODIC_CHECKS: Lazy<tokio::sync::Notify> = Lazy::new(tokio::sync::Notify::new);
 static PERIODIC_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -201,7 +200,9 @@ fn mark_enabled(enabled: bool) {
     let mut state = match UPDATE_STATE.write() {
         Ok(state) => state,
         Err(poisoned) => {
-            tracing::warn!("Update state write lock poisoned while toggling enablement, recovering");
+            tracing::warn!(
+                "Update state write lock poisoned while toggling enablement, recovering"
+            );
             poisoned.into_inner()
         }
     };
@@ -212,7 +213,9 @@ fn should_check_for_current_app_version() -> bool {
     let state = match UPDATE_STATE.read() {
         Ok(state) => state,
         Err(poisoned) => {
-            tracing::warn!("Update state read lock poisoned while deciding check eligibility, recovering");
+            tracing::warn!(
+                "Update state read lock poisoned while deciding check eligibility, recovering"
+            );
             poisoned.into_inner()
         }
     };
@@ -302,7 +305,9 @@ fn sync_runtime_from_check_result(update_available: bool) -> Result<(), String> 
     let mut runtime = match UPDATE_STATE.write() {
         Ok(runtime) => runtime,
         Err(poisoned) => {
-            tracing::warn!("Update state write lock poisoned while syncing check result, recovering");
+            tracing::warn!(
+                "Update state write lock poisoned while syncing check result, recovering"
+            );
             poisoned.into_inner()
         }
     };
@@ -413,7 +418,9 @@ pub async fn check_for_updates_now(app: AppHandle) -> Result<UpdateCheckResult, 
         let state = match UPDATE_STATE.read() {
             Ok(state) => state,
             Err(poisoned) => {
-                tracing::warn!("Update state read lock poisoned before manual update check, recovering");
+                tracing::warn!(
+                    "Update state read lock poisoned before manual update check, recovering"
+                );
                 poisoned.into_inner()
             }
         };
