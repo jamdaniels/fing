@@ -7,10 +7,10 @@ import {
   ClipboardList,
   Download,
   Globe,
-  GlobeLock,
   Keyboard,
   LoaderCircle,
   Mic,
+  Monitor,
   PersonStanding,
   Search,
   Shield,
@@ -582,7 +582,7 @@ function renderWelcome(): void {
       </div>
       <div class="onboarding-body">
         <ul class="onboarding-features">
-          <li>${createIcon(GlobeLock)} All processing happens locally on your device</li>
+          <li>${createIcon(Monitor)} All processing happens locally on your device</li>
           <li>${createIcon(Mic)} Microphone is only active while you hold the hotkey</li>
           <li>${createIcon(Shield)} Your audio never leaves your computer</li>
         </ul>

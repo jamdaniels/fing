@@ -1930,7 +1930,10 @@ function renderModelList(): string {
   const lazyModelRow = `
     <div class="model-lazy-row">
       <div>
-        <div class="settings-row-label">Lazy model loading</div>
+        <div class="settings-row-label model-lazy-label">
+          <span>Lazy model loading</span>
+          <span class="settings-inline-badge experimental">Experimental</span>
+        </div>
         <div class="settings-row-desc">Save memory and load model on hotkey press; unloads after 10s idle</div>
       </div>
       <div class="toggle ${settings?.lazyModelLoading ? "active" : ""} ${lazyModelToggleBusy ? "disabled" : ""}" data-setting="lazyModelLoading"></div>

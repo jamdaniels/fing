@@ -532,6 +532,31 @@ body[data-platform="windows"] .titlebar {
   font-weight: 500;
 }
 
+.model-lazy-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settings-inline-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.settings-inline-badge.experimental {
+  color: var(--text-tertiary);
+  background-color: var(--bg-secondary);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
 .settings-row-desc {
   font-size: 11px;
   color: var(--text-secondary);
