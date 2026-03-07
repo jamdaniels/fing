@@ -28,6 +28,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Resolve release tag
         id: release_tag
@@ -38,6 +40,12 @@ jobs:
           else
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Check out release tag
+        shell: bash
+        run: |
+          git fetch --tags --force
+          git checkout "${{ steps.release_tag.outputs.tag }}"
 
       - name: Resolve release type
         id: release_type
@@ -68,6 +76,19 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
+
+      - name: Verify tag matches version files
+        run: bun run release:verify-tag "${{ steps.release_tag.outputs.tag }}"
+
+      - name: Resolve release notes
+        id: release_notes
+        shell: bash
+        run: |
+          {
+            echo "body<<EOF"
+            bun run release:notes "${{ steps.release_tag.outputs.tag }}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -105,9 +126,8 @@ jobs:
         with:
           tagName: ${{ steps.release_tag.outputs.tag }}
           releaseName: Fing ${{ steps.release_tag.outputs.tag }}
-          releaseBody: See the assets to download this version and update metadata.
+          releaseBody: ${{ steps.release_notes.outputs.body }}
           releaseDraft: false
           prerelease: ${{ steps.release_type.outputs.prerelease }}
           args: ${{ steps.bundle_args.outputs.args }}
-
 

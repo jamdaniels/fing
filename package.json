@@ -10,7 +10,10 @@
     "frontend:build": "bunx --bun vite build",
     "typecheck": "tsc --noEmit",
     "lint": "bunx ultracite check",
-    "lint:fix": "bunx ultracite fix"
+    "lint:fix": "bunx ultracite fix",
+    "release:version": "bun run scripts/release.ts bump",
+    "release:verify-tag": "bun run scripts/release.ts verify-tag",
+    "release:notes": "bun run scripts/release.ts notes"
   },
   "dependencies": {
     "@tauri-apps/plugin-dialog": "^2.6.0",

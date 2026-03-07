@@ -3,8 +3,9 @@ name = "fing"
 version = "1.0.0-rc4"
 edition = "2021"
 description = "Fast, private, local speech-to-text"
-authors = ["You"]
+authors = ["jamdaniels"]
 license = "MIT"
+repository = "https://github.com/jamdaniels/fing"
 
 [lib]
 name = "fing_lib"
