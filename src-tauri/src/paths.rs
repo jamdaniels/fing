@@ -3,6 +3,8 @@ use std::sync::OnceLock;
 use tauri::Manager;
 
 static APP_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+#[cfg(test)]
+static TEST_UPDATE_STATE_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 /// Initialize the app data directory from Tauri's path resolver.
 /// Must be called once during app setup.
@@ -32,7 +34,22 @@ pub fn settings_path() -> Option<PathBuf> {
     app_data_dir().map(|p| p.join("settings.json"))
 }
 
+/// Path to the persisted update-check state file. Returns None if paths not initialized.
+pub fn update_state_path() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(path) = TEST_UPDATE_STATE_PATH.get() {
+        return Some(path.clone());
+    }
+
+    app_data_dir().map(|p| p.join("update_state.json"))
+}
+
 /// Directory containing downloaded model files. Returns None if paths not initialized.
 pub fn models_dir() -> Option<PathBuf> {
     app_data_dir().map(|p| p.join("models"))
+}
+
+#[cfg(test)]
+pub fn init_test_update_state_path(path: PathBuf) {
+    let _ = TEST_UPDATE_STATE_PATH.set(path);
 }

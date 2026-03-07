@@ -19,6 +19,7 @@ mod sounds;
 mod state;
 mod stats;
 mod transcribe;
+mod update;
 
 use audio::{AudioCapture, AudioDevice, MicrophoneTest};
 use state::AppState;
@@ -556,6 +557,10 @@ async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
         tracing::error!("Failed to rebuild tray menu: {}", e);
     }
 
+    if let Err(error) = update::enable_after_onboarding(&app).await {
+        tracing::warn!("Post-setup update initialization failed: {}", error);
+    }
+
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
@@ -590,7 +595,7 @@ fn build_tray_menu_for_state(
         let updates = MenuItem::with_id(
             app,
             "check_updates",
-            "Check for Updates",
+            update::tray_menu_label(),
             true,
             None::<&str>,
         )?;
@@ -716,6 +721,7 @@ pub fn run() {
             let app_handle = app.handle().clone();
             let saved_settings = tauri::async_runtime::block_on(settings::load_settings());
             let mut show_setup_window = false;
+            let mut updates_enabled = false;
 
             if saved_settings.onboarding_completed {
                 // User already completed onboarding - check model and init if needed
@@ -761,6 +767,12 @@ pub fn run() {
                         );
                         // Transition to Ready before building tray menu
                         state::set_state(&app_handle, AppState::Ready).ok();
+                        updates_enabled = true;
+                        if let Err(error) =
+                            tauri::async_runtime::block_on(update::initialize_for_ready_app())
+                        {
+                            tracing::warn!("Failed to restore persisted update state: {}", error);
+                        }
                         tracing::info!("Restored to Ready state from saved settings");
                     }
                 } else {
@@ -814,15 +826,22 @@ pub fn run() {
                 }
             }
 
+            if updates_enabled {
+                update::schedule_startup_check(&app_handle);
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             get_app_state,
             // App info
             app_info::get_app_info,
+            update::get_update_status,
             // Settings
             settings::get_settings,
             update_settings,
+            update::check_for_updates_now,
+            update::clear_update_status,
             // Stats
             stats::get_stats,
             // Database operations

@@ -63,6 +63,13 @@ export interface AppInfo {
   inferenceBackend: "Metal" | "Vulkan" | "CPU";
 }
 
+export interface UpdateStatus {
+  updateAvailable: boolean;
+  availableVersion: string | null;
+  availableBody: string | null;
+  checking: boolean;
+}
+
 export interface WordCount {
   word: string;
   count: number;

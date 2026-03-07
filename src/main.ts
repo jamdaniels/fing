@@ -26,6 +26,8 @@ import {
 import { cleanupOnboarding, renderOnboarding } from "./components/onboarding";
 import { createIcon, escapeHtml } from "./lib/icons";
 import {
+  checkForUpdatesNow,
+  clearUpdateStatus,
   deleteAllTranscripts,
   deleteModel,
   deleteTranscript,
@@ -39,6 +41,7 @@ import {
   getRecentTranscripts,
   getSettings,
   getStats,
+  getUpdateStatus,
   refreshAudioDevices,
   relaunchApp,
   requestAccessibilityPermission,
@@ -64,6 +67,7 @@ import type {
   Stats,
   Theme,
   Transcript,
+  UpdateStatus,
 } from "./lib/types";
 
 declare global {
@@ -106,6 +110,12 @@ const MAX_DICTIONARY_WORDS_PER_TERM = 3;
 let dictionaryError: string | null = null;
 let lazyModelToggleBusy = false;
 let updateCheckInProgress = false;
+let updateStatus: UpdateStatus = {
+  updateAvailable: false,
+  availableVersion: null,
+  availableBody: null,
+  checking: false,
+};
 
 interface ModelDownloadProgressState {
   variant: ModelVariant;
@@ -1488,6 +1498,12 @@ function getUpdateNotesPreview(
   return `${trimmed.slice(0, 320)}...`;
 }
 
+function getUpdateButtonLabel(): string {
+  return updateStatus.updateAvailable
+    ? "Update Available"
+    : "Check for Updates";
+}
+
 function setUpdateButtonBusy(isBusy: boolean): void {
   const button = document.querySelector(
     ".check-updates-btn"
@@ -1497,7 +1513,50 @@ function setUpdateButtonBusy(isBusy: boolean): void {
   }
 
   button.disabled = isBusy;
-  button.textContent = isBusy ? "Checking..." : "Check for Updates";
+  button.textContent = isBusy ? "Checking..." : getUpdateButtonLabel();
+}
+
+async function promptForAvailableUpdate(status: UpdateStatus): Promise<boolean> {
+  const { ask } = await import("@tauri-apps/plugin-dialog");
+  const notesPreview = getUpdateNotesPreview(status.availableBody);
+  const prompt = notesPreview
+    ? `Version ${status.availableVersion ?? "a newer version"} is available.\n\nRelease notes:\n${notesPreview}\n\nInstall now?`
+    : `Version ${status.availableVersion ?? "a newer version"} is available.\n\nInstall now?`;
+
+  return await ask(prompt, {
+    title: "Update Available",
+    kind: "info",
+    okLabel: "Install Update",
+    cancelLabel: "Later",
+  });
+}
+
+async function installAvailableUpdate(): Promise<void> {
+  const [{ message }, { check }] = await Promise.all([
+    import("@tauri-apps/plugin-dialog"),
+    import("@tauri-apps/plugin-updater"),
+  ]);
+  const update = await check();
+
+  if (!update) {
+    updateStatus = await clearUpdateStatus();
+    if (currentView === "settings") {
+      renderContent();
+    }
+    await message("Fing is up to date.", {
+      title: "No Updates Available",
+      kind: "info",
+    });
+    return;
+  }
+
+  await update.downloadAndInstall();
+  updateStatus = await clearUpdateStatus();
+  await message("The update was installed. Fing will now restart.", {
+    title: "Update Installed",
+    kind: "info",
+  });
+  await relaunchApp();
 }
 
 async function runManualUpdateCheck(): Promise<void> {
@@ -1509,13 +1568,13 @@ async function runManualUpdateCheck(): Promise<void> {
   setUpdateButtonBusy(true);
 
   try {
-    const [{ ask, message }, { check }] = await Promise.all([
-      import("@tauri-apps/plugin-dialog"),
-      import("@tauri-apps/plugin-updater"),
-    ]);
-    const update = await check();
+    const { message } = await import("@tauri-apps/plugin-dialog");
 
-    if (!update) {
+    if (!updateStatus.updateAvailable) {
+      updateStatus = await checkForUpdatesNow();
+    }
+
+    if (!updateStatus.updateAvailable) {
       await message("Fing is up to date.", {
         title: "No Updates Available",
         kind: "info",
@@ -1523,26 +1582,12 @@ async function runManualUpdateCheck(): Promise<void> {
       return;
     }
 
-    const notesPreview = getUpdateNotesPreview(update.body);
-    const prompt = notesPreview
-      ? `Version ${update.version} is available.\n\nRelease notes:\n${notesPreview}\n\nInstall now?`
-      : `Version ${update.version} is available.\n\nInstall now?`;
-    const shouldInstall = await ask(prompt, {
-      title: "Update Available",
-      kind: "info",
-      okLabel: "Install Update",
-      cancelLabel: "Later",
-    });
+    const shouldInstall = await promptForAvailableUpdate(updateStatus);
     if (!shouldInstall) {
       return;
     }
 
-    await update.downloadAndInstall();
-    await message("The update was installed. Fing will now restart.", {
-      title: "Update Installed",
-      kind: "info",
-    });
-    await relaunchApp();
+    await installAvailableUpdate();
   } catch (error) {
     console.error("Failed to check for updates:", error);
     const { message } = await import("@tauri-apps/plugin-dialog");
@@ -2148,7 +2193,7 @@ function renderSettingsUI(el: HTMLElement): void {
             <div class="settings-row-desc">Check for and install the latest version</div>
           </div>
           <button class="btn btn-secondary check-updates-btn" ${updateCheckInProgress ? "disabled" : ""}>
-            ${updateCheckInProgress ? "Checking..." : "Check for Updates"}
+            ${updateCheckInProgress ? "Checking..." : getUpdateButtonLabel()}
           </button>
         </div>
         <div class="settings-row">
@@ -2626,6 +2671,7 @@ async function init(): Promise<void> {
     currentAppState = await getAppState();
     appInfo = await getAppInfo();
     stats = await getStats().catch(() => null);
+    updateStatus = await getUpdateStatus();
   } catch {
     // Commands may not be registered yet
   }
@@ -2655,6 +2701,7 @@ async function init(): Promise<void> {
     currentAppState = "ready";
     await loadSettings({ force: true, refreshDevices: true });
     stats = await getStats().catch(() => null);
+    updateStatus = await getUpdateStatus().catch(() => updateStatus);
     showMainUI(); // Rebuild DOM to main UI structure before hiding
     // Now set up the frontend hotkey listener with the user's chosen hotkey
     setupHotkeyListener().catch(console.error);
@@ -2689,6 +2736,13 @@ async function init(): Promise<void> {
   // Listen for navigation events from tray menu
   listen<string>("navigate-to-tab", (event) => {
     navigateToTab(event.payload as SidebarItem);
+  });
+
+  listen<UpdateStatus>("update-status-changed", (event) => {
+    updateStatus = event.payload;
+    if (currentView === "settings") {
+      renderContent();
+    }
   });
 
   listen("check-for-updates", () => {

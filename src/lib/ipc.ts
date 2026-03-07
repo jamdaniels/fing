@@ -13,6 +13,7 @@ import type {
   Settings,
   Stats,
   Transcript,
+  UpdateStatus,
 } from "./types";
 
 export async function getAppState(): Promise<AppState> {
@@ -21,6 +22,18 @@ export async function getAppState(): Promise<AppState> {
 
 export async function getAppInfo(): Promise<AppInfo> {
   return await invoke<AppInfo>("get_app_info");
+}
+
+export async function getUpdateStatus(): Promise<UpdateStatus> {
+  return await invoke<UpdateStatus>("get_update_status");
+}
+
+export async function checkForUpdatesNow(): Promise<UpdateStatus> {
+  return await invoke<UpdateStatus>("check_for_updates_now");
+}
+
+export async function clearUpdateStatus(): Promise<UpdateStatus> {
+  return await invoke<UpdateStatus>("clear_update_status");
 }
 
 export async function getSettings(): Promise<Settings> {
