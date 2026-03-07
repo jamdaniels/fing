@@ -13,6 +13,7 @@ import type {
   Settings,
   Stats,
   Transcript,
+  UpdateCheckResult,
   UpdateStatus,
 } from "./types";
 
@@ -28,8 +29,8 @@ export async function getUpdateStatus(): Promise<UpdateStatus> {
   return await invoke<UpdateStatus>("get_update_status");
 }
 
-export async function checkForUpdatesNow(): Promise<UpdateStatus> {
-  return await invoke<UpdateStatus>("check_for_updates_now");
+export async function checkForUpdatesNow(): Promise<UpdateCheckResult> {
+  return await invoke<UpdateCheckResult>("check_for_updates_now");
 }
 
 export async function clearUpdateStatus(): Promise<UpdateStatus> {

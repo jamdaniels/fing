@@ -65,9 +65,13 @@ export interface AppInfo {
 
 export interface UpdateStatus {
   updateAvailable: boolean;
+  checking: boolean;
+}
+
+export interface UpdateCheckResult {
+  updateAvailable: boolean;
   availableVersion: string | null;
   availableBody: string | null;
-  checking: boolean;
 }
 
 export interface WordCount {

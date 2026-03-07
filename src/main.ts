@@ -67,6 +67,7 @@ import type {
   Stats,
   Theme,
   Transcript,
+  UpdateCheckResult,
   UpdateStatus,
 } from "./lib/types";
 
@@ -112,8 +113,6 @@ let lazyModelToggleBusy = false;
 let updateCheckInProgress = false;
 let updateStatus: UpdateStatus = {
   updateAvailable: false,
-  availableVersion: null,
-  availableBody: null,
   checking: false,
 };
 
@@ -1516,7 +1515,9 @@ function setUpdateButtonBusy(isBusy: boolean): void {
   button.textContent = isBusy ? "Checking..." : getUpdateButtonLabel();
 }
 
-async function promptForAvailableUpdate(status: UpdateStatus): Promise<boolean> {
+async function promptForAvailableUpdate(
+  status: UpdateCheckResult
+): Promise<boolean> {
   const { ask } = await import("@tauri-apps/plugin-dialog");
   const notesPreview = getUpdateNotesPreview(status.availableBody);
   const prompt = notesPreview
@@ -1569,12 +1570,15 @@ async function runManualUpdateCheck(): Promise<void> {
 
   try {
     const { message } = await import("@tauri-apps/plugin-dialog");
+    const latestUpdate = await checkForUpdatesNow();
 
-    if (!updateStatus.updateAvailable) {
-      updateStatus = await checkForUpdatesNow();
-    }
+    updateStatus = {
+      ...updateStatus,
+      updateAvailable: latestUpdate.updateAvailable,
+      checking: false,
+    };
 
-    if (!updateStatus.updateAvailable) {
+    if (!latestUpdate.updateAvailable) {
       await message("Fing is up to date.", {
         title: "No Updates Available",
         kind: "info",
@@ -1582,7 +1586,7 @@ async function runManualUpdateCheck(): Promise<void> {
       return;
     }
 
-    const shouldInstall = await promptForAvailableUpdate(updateStatus);
+    const shouldInstall = await promptForAvailableUpdate(latestUpdate);
     if (!shouldInstall) {
       return;
     }

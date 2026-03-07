@@ -19,9 +19,15 @@ const CURRENT_APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[serde(rename_all = "camelCase")]
 pub struct UpdateStatus {
     pub update_available: bool,
+    pub checking: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCheckResult {
+    pub update_available: bool,
     pub available_version: Option<String>,
     pub available_body: Option<String>,
-    pub checking: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -29,10 +35,6 @@ pub struct UpdateStatus {
 struct PersistedUpdateState {
     #[serde(default)]
     update_available: bool,
-    #[serde(default)]
-    available_version: Option<String>,
-    #[serde(default)]
-    available_body: Option<String>,
     #[serde(default)]
     detected_for_app_version: Option<String>,
     #[serde(default)]
@@ -43,8 +45,6 @@ struct PersistedUpdateState {
 struct RuntimeUpdateState {
     enabled: bool,
     update_available: bool,
-    available_version: Option<String>,
-    available_body: Option<String>,
     detected_for_app_version: Option<String>,
     last_checked_at: Option<u64>,
     checking: bool,
@@ -56,12 +56,6 @@ static UPDATE_CHECK_LOCK: Lazy<tokio::sync::Mutex<()>> =
     Lazy::new(|| tokio::sync::Mutex::new(()));
 static STOP_PERIODIC_CHECKS: Lazy<tokio::sync::Notify> = Lazy::new(tokio::sync::Notify::new);
 static PERIODIC_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
-
-#[derive(Clone, Copy)]
-enum CheckErrorMode {
-    Silent,
-    Propagate,
-}
 
 fn current_timestamp() -> u64 {
     SystemTime::now()
@@ -134,8 +128,6 @@ fn runtime_status() -> UpdateStatus {
 
     UpdateStatus {
         update_available: state.update_available,
-        available_version: state.available_version.clone(),
-        available_body: state.available_body.clone(),
         checking: state.checking,
     }
 }
@@ -151,8 +143,6 @@ fn persisted_state_snapshot() -> PersistedUpdateState {
 
     PersistedUpdateState {
         update_available: state.update_available,
-        available_version: state.available_version.clone(),
-        available_body: state.available_body.clone(),
         detected_for_app_version: state.detected_for_app_version.clone(),
         last_checked_at: state.last_checked_at,
     }
@@ -183,8 +173,6 @@ fn apply_persisted_state(state: PersistedUpdateState) -> Result<(), String> {
             }
         };
         runtime.update_available = sanitized.update_available;
-        runtime.available_version = sanitized.available_version.clone();
-        runtime.available_body = sanitized.available_body.clone();
         runtime.detected_for_app_version = sanitized.detected_for_app_version.clone();
         runtime.last_checked_at = sanitized.last_checked_at;
         runtime.checking = false;
@@ -293,7 +281,7 @@ pub fn start_periodic_checks(app: &AppHandle) {
                 break;
             }
 
-            let _ = run_check(&app_handle, CheckErrorMode::Silent).await;
+            let _ = run_check(&app_handle).await;
 
             if !should_check_for_current_app_version() {
                 break;
@@ -310,7 +298,7 @@ fn stop_periodic_checks() {
     }
 }
 
-fn sync_runtime_from_check_result(update: Option<(String, Option<String>)>) -> Result<(), String> {
+fn sync_runtime_from_check_result(update_available: bool) -> Result<(), String> {
     let mut runtime = match UPDATE_STATE.write() {
         Ok(runtime) => runtime,
         Err(poisoned) => {
@@ -321,21 +309,10 @@ fn sync_runtime_from_check_result(update: Option<(String, Option<String>)>) -> R
 
     runtime.last_checked_at = Some(current_timestamp());
     runtime.detected_for_app_version = Some(CURRENT_APP_VERSION.to_string());
-
-    if let Some((version, body)) = update {
-        runtime.update_available = true;
-        runtime.available_version = Some(version);
-        runtime.available_body = body;
-    } else {
-        runtime.update_available = false;
-        runtime.available_version = None;
-        runtime.available_body = None;
-    }
+    runtime.update_available = update_available;
 
     let persisted = PersistedUpdateState {
         update_available: runtime.update_available,
-        available_version: runtime.available_version.clone(),
-        available_body: runtime.available_body.clone(),
         detected_for_app_version: runtime.detected_for_app_version.clone(),
         last_checked_at: runtime.last_checked_at,
     };
@@ -344,7 +321,7 @@ fn sync_runtime_from_check_result(update: Option<(String, Option<String>)>) -> R
     write_persisted_state_to_disk(&persisted)
 }
 
-async fn run_check(app: &AppHandle, error_mode: CheckErrorMode) -> Result<UpdateStatus, String> {
+async fn run_check(app: &AppHandle) -> Result<UpdateStatus, String> {
     {
         let state = match UPDATE_STATE.read() {
             Ok(state) => state,
@@ -380,27 +357,22 @@ async fn run_check(app: &AppHandle, error_mode: CheckErrorMode) -> Result<Update
     set_checking(false);
 
     match check_result {
-        Ok(Some(update)) => {
-            sync_runtime_from_check_result(Some((update.version, update.body)))?;
+        Ok(Some(_update)) => {
+            sync_runtime_from_check_result(true)?;
             stop_periodic_checks();
             emit_status_changed(app);
             Ok(runtime_status())
         }
         Ok(None) => {
-            sync_runtime_from_check_result(None)?;
+            sync_runtime_from_check_result(false)?;
             emit_status_changed(app);
             Ok(runtime_status())
         }
         Err(error) => {
             let message = error.to_string();
             emit_status_changed(app);
-
-            if matches!(error_mode, CheckErrorMode::Silent) {
-                tracing::warn!("Silent update check failed: {message}");
-                Ok(runtime_status())
-            } else {
-                Err(message)
-            }
+            tracing::warn!("Silent update check failed: {message}");
+            Ok(runtime_status())
         }
     }
 }
@@ -414,7 +386,7 @@ pub fn schedule_startup_check(app: &AppHandle) {
 
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = run_check(&app_handle, CheckErrorMode::Silent).await;
+        let _ = run_check(&app_handle).await;
     });
 }
 
@@ -427,7 +399,7 @@ pub async fn enable_after_onboarding(app: &AppHandle) -> Result<UpdateStatus, St
     }
 
     start_periodic_checks(app);
-    run_check(app, CheckErrorMode::Silent).await
+    run_check(app).await
 }
 
 #[tauri::command]
@@ -436,8 +408,52 @@ pub fn get_update_status() -> UpdateStatus {
 }
 
 #[tauri::command]
-pub async fn check_for_updates_now(app: AppHandle) -> Result<UpdateStatus, String> {
-    run_check(&app, CheckErrorMode::Propagate).await
+pub async fn check_for_updates_now(app: AppHandle) -> Result<UpdateCheckResult, String> {
+    {
+        let state = match UPDATE_STATE.read() {
+            Ok(state) => state,
+            Err(poisoned) => {
+                tracing::warn!("Update state read lock poisoned before manual update check, recovering");
+                poisoned.into_inner()
+            }
+        };
+
+        if !state.enabled {
+            return Err("Update checks are unavailable during setup".to_string());
+        }
+    }
+
+    let _guard = UPDATE_CHECK_LOCK.lock().await;
+
+    set_checking(true);
+    emit_status_changed(&app);
+
+    let updater = app.updater().map_err(|error| error.to_string())?;
+    let check_result = updater.check().await;
+
+    set_checking(false);
+
+    match check_result {
+        Ok(Some(update)) => {
+            sync_runtime_from_check_result(true)?;
+            stop_periodic_checks();
+            emit_status_changed(&app);
+            Ok(UpdateCheckResult {
+                update_available: true,
+                available_version: Some(update.version),
+                available_body: update.body,
+            })
+        }
+        Ok(None) => {
+            sync_runtime_from_check_result(false)?;
+            emit_status_changed(&app);
+            Ok(UpdateCheckResult::default())
+        }
+        Err(error) => {
+            emit_status_changed(&app);
+            Err(error.to_string())
+        }
+    }
 }
 
 #[tauri::command]
@@ -456,8 +472,6 @@ pub async fn clear_update_status(app: AppHandle) -> Result<UpdateStatus, String>
         }
 
         state.update_available = false;
-        state.available_version = None;
-        state.available_body = None;
         state.detected_for_app_version = Some(CURRENT_APP_VERSION.to_string());
         state.last_checked_at = Some(current_timestamp());
         state.checking = false;
@@ -506,8 +520,6 @@ mod tests {
 
         let expected = PersistedUpdateState {
             update_available: true,
-            available_version: Some("1.2.3".to_string()),
-            available_body: Some("Notes".to_string()),
             detected_for_app_version: Some(CURRENT_APP_VERSION.to_string()),
             last_checked_at: Some(123),
         };
@@ -516,8 +528,6 @@ mod tests {
         let actual = read_persisted_state_from_disk().expect("persisted state should read");
 
         assert_eq!(actual.update_available, expected.update_available);
-        assert_eq!(actual.available_version, expected.available_version);
-        assert_eq!(actual.available_body, expected.available_body);
         assert_eq!(
             actual.detected_for_app_version,
             expected.detected_for_app_version
@@ -531,16 +541,12 @@ mod tests {
     fn stale_cached_update_is_cleared_for_new_app_version() {
         let stale = PersistedUpdateState {
             update_available: true,
-            available_version: Some("9.9.9".to_string()),
-            available_body: Some("Stale".to_string()),
             detected_for_app_version: Some("0.0.1".to_string()),
             last_checked_at: Some(123),
         };
 
         let sanitized = sanitized_persisted_state(stale);
         assert!(!sanitized.update_available);
-        assert!(sanitized.available_version.is_none());
-        assert!(sanitized.available_body.is_none());
         assert!(sanitized.detected_for_app_version.is_none());
         assert!(sanitized.last_checked_at.is_none());
     }
