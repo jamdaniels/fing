@@ -10,83 +10,83 @@ export type Theme = "system" | "light" | "dark";
 export type ModelVariant = "small_q5" | "small" | "large_turbo_q5";
 
 export interface ModelInfo {
-  variant: ModelVariant;
-  filename: string;
-  displayName: string;
   description: string;
-  sizeBytes: number;
-  memoryEstimateMb: number;
-  isDownloaded: boolean;
+  displayName: string;
+  filename: string;
   isActive: boolean;
+  isDownloaded: boolean;
+  memoryEstimateMb: number;
+  sizeBytes: number;
+  variant: ModelVariant;
 }
 
 export interface Transcript {
-  id: number;
-  text: string;
+  appContext: string | null;
   createdAt: string;
   durationMs: number;
-  appContext: string | null;
+  id: number;
+  text: string;
   wordCount: number;
 }
 
 export interface AudioDevice {
   id: string;
-  name: string;
   isDefault: boolean;
+  name: string;
 }
 
 export type HistoryMode = "off" | "30d";
 
 export interface Settings {
-  hotkey: string;
-  modelPath: string;
-  selectedMicrophoneId: string | null;
-  autoStart: boolean;
-  soundEnabled: boolean;
-  pasteEnabled: boolean;
-  historyMode: HistoryMode;
-  onboardingCompleted: boolean;
-  languages: string[];
-  onboardingStep: number | null;
   activeModelVariant: ModelVariant;
-  theme: Theme;
-  lazyModelLoading: boolean;
+  autoStart: boolean;
   dictionaryTerms: string[];
+  historyMode: HistoryMode;
+  hotkey: string;
+  languages: string[];
+  lazyModelLoading: boolean;
+  modelPath: string;
+  onboardingCompleted: boolean;
+  onboardingStep: number | null;
+  pasteEnabled: boolean;
+  selectedMicrophoneId: string | null;
+  soundEnabled: boolean;
+  theme: Theme;
 }
 
 export interface AppInfo {
-  name: string;
-  version: string;
-  commit: string;
   buildDate: string;
-  repository: string;
+  commit: string;
   inferenceBackend: "Metal" | "Vulkan" | "CPU";
+  name: string;
+  repository: string;
+  version: string;
 }
 
 export interface UpdateStatus {
-  updateAvailable: boolean;
   checking: boolean;
+  updateAvailable: boolean;
 }
 
 export interface UpdateCheckResult {
-  updateAvailable: boolean;
-  availableVersion: string | null;
   availableBody: string | null;
+  availableVersion: string | null;
+  updateAvailable: boolean;
 }
 
 export interface WordCount {
-  word: string;
   count: number;
+  word: string;
 }
 
 export interface Stats {
+  averageWordsPerTranscription: number;
+  averageWpm: number;
+  topWords: WordCount[];
   totalTranscriptions: number;
   totalWords: number;
   transcriptionsToday: number;
   wordsToday: number;
-  averageWordsPerTranscription: number;
-  averageWpm: number;
-  topWords: WordCount[];
 }
 
 export type SidebarItem =
@@ -97,42 +97,42 @@ export type SidebarItem =
   | "about";
 
 export interface DownloadProgress {
-  variant: ModelVariant | null;
   bytesDownloaded: number;
-  totalBytes: number;
+  errorMessage?: string;
   percentage: number;
   status: "not-started" | "downloading" | "verifying" | "complete" | "failed";
-  errorMessage?: string;
+  totalBytes: number;
+  variant: ModelVariant | null;
 }
 
 export interface ModelVerification {
-  path: string;
   exists: boolean;
-  sizeValid: boolean;
   formatValid: boolean;
   hashValid: boolean;
   isValid: boolean;
+  path: string;
+  sizeValid: boolean;
 }
 
 export interface MicrophoneTest {
   deviceName: string;
-  peakLevel: number;
   isReceivingAudio: boolean;
+  peakLevel: number;
 }
 
 export interface MicTestStartResult {
-  requestedDevice: string | null;
   actualDevice: string;
   deviceMatched: boolean;
+  requestedDevice: string | null;
 }
 
 export interface PermissionStatus {
-  microphone: "unknown" | "prompt" | "granted" | "denied";
   accessibility: "unknown" | "granted" | "denied" | "not-applicable";
+  microphone: "unknown" | "prompt" | "granted" | "denied";
 }
 
 export interface HotkeyRegistrationResult {
-  success: boolean;
   error?: "conflict-system" | "conflict-app" | "permission-denied" | "unknown";
   message?: string;
+  success: boolean;
 }

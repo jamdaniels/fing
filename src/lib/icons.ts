@@ -12,7 +12,9 @@ const DEFAULT_ICON_ATTRIBUTES: Record<string, string> = {
   "stroke-linejoin": "round",
 };
 
-function renderAttributes(attrs: Record<string, string | number | undefined>): string {
+function renderAttributes(
+  attrs: Record<string, string | number | undefined>
+): string {
   return Object.entries(attrs)
     .filter(([, value]) => value !== undefined)
     .map(([key, value]) => `${key}="${String(value)}"`)

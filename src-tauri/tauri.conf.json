@@ -64,7 +64,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["sounds/*"],
+    "resources": [
+      "sounds/*"
+    ],
     "macOS": {
       "entitlements": "entitlements.plist",
       "minimumSystemVersion": "10.15",

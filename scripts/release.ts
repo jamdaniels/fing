@@ -1,10 +1,10 @@
-import { readFile, writeFile } from "node:fs/promises";
-
 const PACKAGE_JSON_PATH = "package.json";
 const CARGO_TOML_PATH = "src-tauri/Cargo.toml";
 const TAURI_CONFIG_PATH = "src-tauri/tauri.conf.json";
 const CHANGELOG_PATH = "CHANGELOG.md";
 
+const CARGO_VERSION_LINE_PATTERN = /^version = ".*"$/m;
+const CARGO_VERSION_PATTERN = /^version = "(.*)"$/m;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 type Command = "bump" | "notes" | "verify-tag";
@@ -25,31 +25,33 @@ function normalizeVersion(input: string): string {
 }
 
 async function readJsonFile<T>(path: string): Promise<T> {
-  const file = await readFile(path, "utf8");
+  const file = await Bun.file(path).text();
 
   return JSON.parse(file) as T;
 }
 
 async function writeJsonFile(path: string, value: unknown): Promise<void> {
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
+  await Bun.write(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 async function updatePackageVersion(version: string): Promise<void> {
-  const packageJson = await readJsonFile<Record<string, unknown>>(PACKAGE_JSON_PATH);
+  const packageJson =
+    await readJsonFile<Record<string, unknown>>(PACKAGE_JSON_PATH);
   packageJson.version = version;
   await writeJsonFile(PACKAGE_JSON_PATH, packageJson);
 }
 
 async function updateTauriConfigVersion(version: string): Promise<void> {
-  const tauriConfig = await readJsonFile<Record<string, unknown>>(TAURI_CONFIG_PATH);
+  const tauriConfig =
+    await readJsonFile<Record<string, unknown>>(TAURI_CONFIG_PATH);
   tauriConfig.version = version;
   await writeJsonFile(TAURI_CONFIG_PATH, tauriConfig);
 }
 
 function replaceCargoVersion(file: string, version: string): string {
   const updated = file.replace(
-    /^version = ".*"$/m,
-    `version = "${version}"`,
+    CARGO_VERSION_LINE_PATTERN,
+    `version = "${version}"`
   );
 
   if (updated === file) {
@@ -60,8 +62,8 @@ function replaceCargoVersion(file: string, version: string): string {
 }
 
 async function updateCargoVersion(version: string): Promise<void> {
-  const cargoToml = await readFile(CARGO_TOML_PATH, "utf8");
-  await writeFile(CARGO_TOML_PATH, replaceCargoVersion(cargoToml, version));
+  const cargoToml = await Bun.file(CARGO_TOML_PATH).text();
+  await Bun.write(CARGO_TOML_PATH, replaceCargoVersion(cargoToml, version));
 }
 
 async function readVersions(): Promise<{
@@ -72,15 +74,15 @@ async function readVersions(): Promise<{
   const [packageJson, tauriConfig, cargoToml] = await Promise.all([
     readJsonFile<{ version?: string }>(PACKAGE_JSON_PATH),
     readJsonFile<{ version?: string }>(TAURI_CONFIG_PATH),
-    readFile(CARGO_TOML_PATH, "utf8"),
+    Bun.file(CARGO_TOML_PATH).text(),
   ]);
 
-  const cargoVersionMatch = cargoToml.match(/^version = "(.*)"$/m);
+  const cargoVersionMatch = cargoToml.match(CARGO_VERSION_PATTERN);
   const cargoVersion = cargoVersionMatch?.[1];
   const packageVersion = packageJson.version;
   const tauriVersion = tauriConfig.version;
 
-  if (!cargoVersion || !packageVersion || !tauriVersion) {
+  if (!(cargoVersion && packageVersion && tauriVersion)) {
     fail("Could not read all version values.");
   }
 
@@ -129,12 +131,14 @@ async function bumpVersion(rawVersion: string): Promise<void> {
   ]);
 
   console.log(`Updated version files to ${version}`);
-  console.log("Run `cargo check --manifest-path src-tauri/Cargo.toml` before tagging.");
+  console.log(
+    "Run `cargo check --manifest-path src-tauri/Cargo.toml` before tagging."
+  );
 }
 
 async function printReleaseNotes(rawTag: string): Promise<void> {
   const version = normalizeVersion(rawTag);
-  const changelog = await readFile(CHANGELOG_PATH, "utf8");
+  const changelog = await Bun.file(CHANGELOG_PATH).text();
   process.stdout.write(`${extractReleaseNotes(changelog, version)}\n`);
 }
 
@@ -155,17 +159,22 @@ async function verifyTag(rawTag: string): Promise<void> {
     fail(`Tag v${expectedVersion} does not match version files: ${details}`);
   }
 
-  const changelog = await readFile(CHANGELOG_PATH, "utf8");
+  const changelog = await Bun.file(CHANGELOG_PATH).text();
   extractReleaseNotes(changelog, expectedVersion);
 
   console.log(`Verified tag v${expectedVersion}`);
 }
 
 async function main(): Promise<void> {
-  const [command, value] = process.argv.slice(2) as [Command | undefined, string | undefined];
+  const [command, value] = process.argv.slice(2) as [
+    Command | undefined,
+    string | undefined,
+  ];
 
-  if (!command || !value) {
-    fail("Usage: bun run scripts/release.ts <bump|verify-tag|notes> <version-or-tag>");
+  if (!(command && value)) {
+    fail(
+      "Usage: bun run scripts/release.ts <bump|verify-tag|notes> <version-or-tag>"
+    );
   }
 
   switch (command) {

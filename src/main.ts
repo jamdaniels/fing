@@ -24,6 +24,15 @@ import {
   X,
 } from "lucide";
 import { cleanupOnboarding, renderOnboarding } from "./components/onboarding";
+import type { ParsedHotkeyConfig } from "./lib/hotkey";
+import {
+  keyEventToHotkey,
+  matchesHotkey,
+  matchesHotkeyRelease,
+  normalizeStoredHotkey,
+  parseHotkeyString,
+  shouldReleaseOnKeydown,
+} from "./lib/hotkey";
 import { createIcon, escapeHtml } from "./lib/icons";
 import {
   checkForUpdatesNow,
@@ -117,9 +126,9 @@ let updateStatus: UpdateStatus = {
 };
 
 interface ModelDownloadProgressState {
-  variant: ModelVariant;
   percentage: number;
   status: "downloading" | "verifying";
+  variant: ModelVariant;
 }
 
 let modelDownloadProgress: ModelDownloadProgressState | null = null;
@@ -931,65 +940,6 @@ function formatKeyForDisplay(key: string): string {
   return formatted.join(" + ");
 }
 
-const FUNCTION_KEY_REGEX = /^F\d+$/i;
-const SINGLE_KEY_REGEX = /^[A-Z0-9]$/;
-const MODIFIER_EVENT_KEYS = ["Control", "Alt", "Shift", "Meta"];
-const SPACE_EVENT_KEYS = [" ", "Space", "Spacebar"];
-
-function getHotkeyModifiers(e: KeyboardEvent): string[] {
-  const modifiers: string[] = [];
-  if (e.ctrlKey) {
-    modifiers.push("Ctrl");
-  }
-  if (e.altKey) {
-    modifiers.push("Option");
-  }
-  if (e.shiftKey) {
-    modifiers.push("Shift");
-  }
-  if (e.metaKey) {
-    modifiers.push("Cmd");
-  }
-  return modifiers;
-}
-
-function normalizeHotkeyBase(key: string): string | null {
-  if (FUNCTION_KEY_REGEX.test(key)) {
-    return key.toUpperCase();
-  }
-  if (key.length === 1 && SINGLE_KEY_REGEX.test(key.toUpperCase())) {
-    return key.toUpperCase();
-  }
-  return null;
-}
-
-function isSpaceKeyEvent(e: KeyboardEvent): boolean {
-  return e.code === "Space" || SPACE_EVENT_KEYS.includes(e.key);
-}
-
-function keyEventToHotkey(e: KeyboardEvent): string | null {
-  if (e.key === "Escape") {
-    return null;
-  }
-
-  const modifiers = getHotkeyModifiers(e);
-
-  if (MODIFIER_EVENT_KEYS.includes(e.key)) {
-    return modifiers.length === 2 ? modifiers.join("+") : null;
-  }
-
-  if (isSpaceKeyEvent(e)) {
-    return modifiers.length === 1 ? [...modifiers, "Space"].join("+") : null;
-  }
-
-  const key = normalizeHotkeyBase(e.key);
-  if (!key || modifiers.length !== 0) {
-    return null;
-  }
-
-  return key;
-}
-
 async function setHotkey(hotkey: string): Promise<boolean> {
   if (!settings) {
     return false;
@@ -1421,11 +1371,11 @@ function showRestartDialog(previousVariant?: ModelVariant): void {
 }
 
 interface ConfirmDialogOptions {
-  title: string;
   body: string;
-  confirmText?: string;
   cancelText?: string;
+  confirmText?: string;
   danger?: boolean;
+  title: string;
 }
 
 function showConfirmDialog(options: ConfirmDialogOptions): Promise<boolean> {
@@ -2413,14 +2363,6 @@ function showMainUI(): void {
   renderContent();
 }
 
-type ParsedHotkeyConfig = {
-  key: string | null;
-  ctrl: boolean;
-  alt: boolean;
-  shift: boolean;
-  meta: boolean;
-};
-
 // Windows WebView2 hotkey workaround
 // WebView2 doesn't propagate keyboard events to low-level hooks when focused
 // so we handle hotkeys via JavaScript when the window is focused
@@ -2486,189 +2428,6 @@ async function setupHotkeyListener(): Promise<void> {
   }
 }
 
-function normalizeStoredHotkey(hotkey?: string | null): string {
-  if (hotkey) {
-    const parsed = parseHotkeyString(hotkey);
-    if (parsed) {
-      return parsed.key === "Fn" ? "Fn" : hotkey;
-    }
-  }
-
-  return "F9";
-}
-
-function parseHotkeyString(hotkey: string): ParsedHotkeyConfig | null {
-  const parts = hotkey.split("+");
-  if (parts.length === 0 || parts.length > 2) {
-    return null;
-  }
-
-  let key: string | null = null;
-  let ctrl = false;
-  let alt = false;
-  let shift = false;
-  let meta = false;
-
-  for (const part of parts) {
-    const trimmed = part.trim();
-    if (!trimmed) {
-      return null;
-    }
-
-    const lower = trimmed.toLowerCase();
-    if (lower === "ctrl" || lower === "control") {
-      ctrl = true;
-    } else if (lower === "alt" || lower === "option") {
-      alt = true;
-    } else if (lower === "shift") {
-      shift = true;
-    } else if (lower === "meta" || lower === "cmd" || lower === "command") {
-      meta = true;
-    } else if (lower === "space") {
-      if (key !== null) {
-        return null;
-      }
-      key = "Space";
-    } else if (lower === "fn") {
-      if (key !== null) {
-        return null;
-      }
-      key = "Fn";
-    } else {
-      const normalized = normalizeHotkeyBase(trimmed);
-      if (!normalized || key !== null) {
-        return null;
-      }
-      key = normalized;
-    }
-  }
-
-  const config = { key, ctrl, alt, shift, meta };
-  const modifierCount = getParsedModifierCount(config);
-
-  if (parts.length === 1) {
-    if (key === "Fn") {
-      return modifierCount === 0 ? config : null;
-    }
-    if (key === "Space" || key === null) {
-      return null;
-    }
-    return modifierCount === 0 ? config : null;
-  }
-
-  if (key === null) {
-    return modifierCount === 2 ? config : null;
-  }
-
-  if (key === "Space") {
-    return modifierCount === 1 ? config : null;
-  }
-
-  return null;
-}
-
-function getParsedModifierCount(config: ParsedHotkeyConfig): number {
-  return Number(config.ctrl) + Number(config.alt) + Number(config.shift) + Number(config.meta);
-}
-
-function matchesModifierFlags(
-  e: KeyboardEvent,
-  config: ParsedHotkeyConfig
-): boolean {
-  return (
-    e.ctrlKey === config.ctrl &&
-    e.altKey === config.alt &&
-    e.shiftKey === config.shift &&
-    e.metaKey === config.meta
-  );
-}
-
-function isConfiguredModifierKey(
-  key: string,
-  config: ParsedHotkeyConfig
-): boolean {
-  if (key === "Control") {
-    return config.ctrl;
-  }
-  if (key === "Alt") {
-    return config.alt;
-  }
-  if (key === "Shift") {
-    return config.shift;
-  }
-  if (key === "Meta") {
-    return config.meta;
-  }
-  return false;
-}
-
-function shouldReleaseOnKeydown(
-  e: KeyboardEvent,
-  config: ParsedHotkeyConfig
-): boolean {
-  if (!matchesModifierFlags(e, config)) {
-    return true;
-  }
-
-  if (config.key === null) {
-    return !isConfiguredModifierKey(e.key, config);
-  }
-
-  return false;
-}
-
-function matchesHotkey(
-  e: KeyboardEvent,
-  config: ParsedHotkeyConfig
-): boolean {
-  if (!matchesModifierFlags(e, config)) {
-    return false;
-  }
-
-  if (config.key === null) {
-    return isConfiguredModifierKey(e.key, config);
-  }
-
-  const key = config.key.toLowerCase();
-  const eventKey = e.key.toLowerCase();
-
-  if (key.startsWith("f") && key.length <= 3) {
-    return eventKey === key;
-  }
-
-  if (key === "space") {
-    return isSpaceKeyEvent(e);
-  }
-
-  return eventKey === key;
-}
-
-function matchesHotkeyRelease(
-  e: KeyboardEvent,
-  config: ParsedHotkeyConfig
-): boolean {
-  if (!matchesModifierFlags(e, config)) {
-    return true;
-  }
-
-  if (config.key === null) {
-    return false;
-  }
-
-  const key = config.key.toLowerCase();
-  const eventKey = e.key.toLowerCase();
-
-  if (key.startsWith("f") && key.length <= 3) {
-    return eventKey === key;
-  }
-
-  if (key === "space") {
-    return isSpaceKeyEvent(e);
-  }
-
-  return eventKey === key;
-}
-
 async function init(): Promise<void> {
   // Platform detection for platform-specific UI (e.g., hide custom titlebar on Windows)
   const isMac = navigator.userAgent.includes("Mac");
@@ -2725,8 +2484,7 @@ async function init(): Promise<void> {
   });
 
   listen("transcript-added", () => {
-    const shouldRerender =
-      currentView === "home" || currentView === "history";
+    const shouldRerender = currentView === "home" || currentView === "history";
 
     getStats()
       .then((s) => {
