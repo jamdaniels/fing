@@ -776,6 +776,11 @@ pub fn run() {
                             tracing::warn!("Failed to restore persisted update state: {}", error);
                         }
                         tracing::info!("Restored to Ready state from saved settings");
+                    } else {
+                        tracing::warn!(
+                            "Onboarding completed but transcriber failed to initialize, showing setup"
+                        );
+                        show_setup_window = true;
                     }
                 } else {
                     tracing::warn!("Onboarding completed but model invalid, showing setup");
@@ -901,3 +906,4 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+

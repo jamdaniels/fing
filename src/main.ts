@@ -51,6 +51,8 @@ import {
   getSettings,
   getStats,
   getUpdateStatus,
+  hotkeyPress,
+  hotkeyRelease,
   refreshAudioDevices,
   relaunchApp,
   requestAccessibilityPermission,
@@ -105,6 +107,7 @@ let searchQuery = "";
 let transcriptOffset = 0;
 let hasMoreTranscripts = true;
 const PAGE_SIZE = 25;
+const ONBOARDING_STATE_RETRY_DELAY_MS = 150;
 let settings: SettingsType | null = null;
 let settingsLoadedAt = 0;
 let audioDevices: AudioDevice[] = [];
@@ -2376,9 +2379,6 @@ async function setupHotkeyListener(): Promise<void> {
 
   // Only needed on Windows
   try {
-    const { getSettings, hotkeyPress, hotkeyRelease } = await import(
-      "./lib/ipc"
-    );
     // Get hotkey from settings (more reliable than backend config which may not be initialized)
     const currentSettings = await getSettings();
     const hotkeyStr = normalizeStoredHotkey(currentSettings.hotkey);
@@ -2433,6 +2433,8 @@ async function init(): Promise<void> {
   const isMac = navigator.userAgent.includes("Mac");
   document.body.dataset.platform = isMac ? "darwin" : "windows";
 
+  await loadSettings({ refreshDevices: true });
+
   try {
     currentAppState = await getAppState();
     appInfo = await getAppInfo();
@@ -2442,21 +2444,46 @@ async function init(): Promise<void> {
     // Commands may not be registered yet
   }
 
-  if (currentAppState === "needs-setup") {
+  await listen("app-state-changed", (event) => {
+    const newState = event.payload as AppState;
+    if (newState !== "needs-setup" && currentAppState === "needs-setup") {
+      cleanupOnboarding();
+      showMainUI(); // Rebuild DOM so tray menu can navigate properly
+    }
+    currentAppState = newState;
+  });
+
+  const hasCompletedOnboarding = settings?.onboardingCompleted ?? false;
+  const hasSavedOnboardingStep = settings?.onboardingStep !== null;
+  let shouldShowOnboarding = currentAppState === "needs-setup";
+
+  if (
+    shouldShowOnboarding &&
+    hasCompletedOnboarding &&
+    !hasSavedOnboardingStep
+  ) {
+    await new Promise((resolve) =>
+      window.setTimeout(resolve, ONBOARDING_STATE_RETRY_DELAY_MS)
+    );
+
+    try {
+      currentAppState = await getAppState();
+    } catch {
+      // Keep the previously observed state
+    }
+
+    shouldShowOnboarding = currentAppState === "needs-setup";
+  }
+
+  if (shouldShowOnboarding) {
     await showOnboarding();
     // Don't set up frontend hotkey listener during onboarding
     // The onboarding flow has its own temporary listener for the test step
   } else {
     showMainUI();
-    loadSettings({ refreshDevices: true })
-      .then(() => {
-        if (settings?.theme) {
-          applyTheme(settings.theme);
-        }
-      })
-      .catch(() => {
-        // Ignore settings warmup failures
-      });
+    if (settings?.theme) {
+      applyTheme(settings.theme);
+    }
     // Setup frontend hotkey handling (Windows WebView2 workaround)
     // Only after main UI is ready and settings are loaded
     setupHotkeyListener().catch(console.error);
@@ -2472,15 +2499,6 @@ async function init(): Promise<void> {
     // Now set up the frontend hotkey listener with the user's chosen hotkey
     setupHotkeyListener().catch(console.error);
     getCurrentWindow().hide();
-  });
-
-  listen("app-state-changed", (event) => {
-    const newState = event.payload as AppState;
-    if (newState !== "needs-setup" && currentAppState === "needs-setup") {
-      cleanupOnboarding();
-      showMainUI(); // Rebuild DOM so tray menu can navigate properly
-    }
-    currentAppState = newState;
   });
 
   listen("transcript-added", () => {
