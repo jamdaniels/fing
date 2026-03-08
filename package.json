@@ -9,8 +9,8 @@
     "frontend:dev": "bunx --bun vite",
     "frontend:build": "bunx --bun vite build",
     "typecheck": "tsc --noEmit",
-    "lint": "bunx biome check .",
-    "lint:fix": "bunx biome check --write .",
+    "lint": "bunx --bun ultracite check",
+    "lint:fix": "bunx --bun ultracite fix",
     "release:version": "bun run scripts/release.ts bump",
     "release:verify-tag": "bun run scripts/release.ts verify-tag",
     "release:notes": "bun run scripts/release.ts notes"
@@ -22,7 +22,7 @@
     "lucide": "0.575.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.4",
+    "@biomejs/biome": "2.4.0",
     "@tauri-apps/api": "2.10.1",
     "@tauri-apps/cli": "2.10.0",
     "typescript": "^5.7.3",
