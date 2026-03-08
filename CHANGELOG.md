@@ -2,15 +2,11 @@
 
 All notable changes to Fing will be documented in this file.
 
-## Unreleased
-
-- Add additional hotkey
-- Add multilingual support
-
-## 1.0.0 - 2026-03-07
+## 1.0.0 - 2026-03-08
 
 - Official release.
 - Fix Windows onboarding persistence.
+- Various bugfixes.
 
 ## 1.0.0-rc4 - 2026-03-07
 
