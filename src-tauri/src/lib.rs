@@ -98,19 +98,6 @@ fn refresh_audio_devices() -> Vec<AudioDevice> {
 }
 
 #[tauri::command]
-fn test_microphone(device_id: Option<String>) -> Result<MicrophoneTest, String> {
-    tracing::debug!("test_microphone called with device_id: {:?}", device_id);
-    let mut capture = AudioCapture::new();
-    if let Some(ref id) = device_id {
-        tracing::debug!("Setting device to: {}", id);
-        capture.set_device(Some(id.clone()));
-    }
-    let result = capture.test_microphone();
-    tracing::debug!("test_microphone result: {:?}", result);
-    result.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult, String> {
     tracing::info!("Starting mic test with device: {:?}", device_id);
 
@@ -255,13 +242,6 @@ fn stop_mic_test() {
 }
 
 #[tauri::command]
-async fn start_model_download() -> Result<String, String> {
-    model::download()
-        .await
-        .map(|p| p.to_string_lossy().to_string())
-}
-
-#[tauri::command]
 async fn download_model(variant: model::ModelVariant) -> Result<String, String> {
     model::download_variant(variant)
         .await
@@ -271,17 +251,6 @@ async fn download_model(variant: model::ModelVariant) -> Result<String, String> 
 #[tauri::command]
 fn get_download_progress() -> model::DownloadProgress {
     model::get_progress()
-}
-
-#[tauri::command]
-fn verify_model(path: String) -> model::ModelVerification {
-    model::verify(std::path::Path::new(&path))
-}
-
-#[tauri::command]
-fn check_model_exists_for_variant(variant: model::ModelVariant) -> model::ModelVerification {
-    let path = model::model_path_for_variant(variant);
-    model::verify_for_variant(&path, variant)
 }
 
 #[tauri::command]
@@ -327,20 +296,6 @@ async fn set_active_model(
     Ok(false)
 }
 
-#[tauri::command]
-fn open_main_window(app: tauri::AppHandle, tab: Option<String>) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("main") {
-        window.show().map_err(|e| e.to_string())?;
-        window.set_focus().map_err(|e| e.to_string())?;
-
-        // Emit navigation event if tab specified
-        if let Some(tab_name) = tab {
-            app.emit("navigate-to-tab", tab_name)
-                .map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
-}
 
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
@@ -361,11 +316,6 @@ fn set_auto_start(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
 #[tauri::command]
 fn get_auto_start(app: tauri::AppHandle) -> bool {
     app.autolaunch().is_enabled().unwrap_or(false)
-}
-
-#[tauri::command]
-fn check_accessibility_permission() -> bool {
-    platform::check_accessibility_permission()
 }
 
 #[tauri::command]
@@ -466,10 +416,6 @@ fn request_microphone_permission() {
     platform::request_microphone_permission();
 }
 
-#[tauri::command]
-fn try_register_hotkey(app: tauri::AppHandle) -> Result<(), String> {
-    hotkey::register_hotkey(&app)
-}
 
 #[tauri::command]
 fn update_hotkey(hotkey: String) -> Result<(), String> {
@@ -511,11 +457,6 @@ fn hotkey_release(app: tauri::AppHandle) {
         tracing::warn!("Frontend hotkey release worker unavailable: {}", e);
         hotkey::on_key_up(&app);
     }
-}
-
-#[tauri::command]
-fn get_current_hotkey() -> String {
-    hotkey_config::get_hotkey_string()
 }
 
 #[tauri::command]
@@ -860,7 +801,6 @@ pub fn run() {
             // Audio
             get_audio_devices,
             refresh_audio_devices,
-            test_microphone,
             start_mic_test,
             get_mic_test_level,
             stop_mic_test,
@@ -873,16 +813,11 @@ pub fn run() {
             indicator::indicator_show_processing,
             indicator::indicator_hide,
             // Notifications
-            notifications::notify_error,
             // Window management
-            open_main_window,
             quit_app,
             // Model management
-            start_model_download,
             download_model,
             get_download_progress,
-            verify_model,
-            check_model_exists_for_variant,
             get_models,
             delete_model,
             set_active_model,
@@ -892,16 +827,13 @@ pub fn run() {
             set_auto_start,
             get_auto_start,
             // Permissions
-            check_accessibility_permission,
             request_accessibility_permission,
             request_microphone_permission,
             request_permissions,
-            try_register_hotkey,
             update_hotkey,
             // Frontend hotkey handling (WebView2 workaround)
             hotkey_press,
             hotkey_release,
-            get_current_hotkey,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -234,43 +234,6 @@ pub fn get_hotkey_config() -> Option<HotkeyConfig> {
         .and_then(|cfg| cfg.as_ref().cloned())
 }
 
-/// Get the current hotkey as a string for frontend use
-pub fn get_hotkey_string() -> String {
-    let config = match get_hotkey_config() {
-        Some(c) => c,
-        None => return DEFAULT_HOTKEY.to_string(),
-    };
-
-    let mut parts: Vec<String> = Vec::new();
-
-    if config.require_ctrl {
-        parts.push("Ctrl".to_string());
-    }
-    if config.require_alt {
-        parts.push("Alt".to_string());
-    }
-    if config.require_shift {
-        parts.push("Shift".to_string());
-    }
-    if config.require_meta {
-        parts.push("Meta".to_string());
-    }
-    if config.require_fn && config.key != Some(HotkeyKey::Function) {
-        parts.push("Fn".to_string());
-    }
-
-    if let Some(key) = &config.key {
-        let key_str = match key {
-            HotkeyKey::Function => "Fn".to_string(),
-            HotkeyKey::F(n) => format!("F{n}"),
-            HotkeyKey::Space => "Space".to_string(),
-            HotkeyKey::Char(c) => c.to_string(),
-        };
-        parts.push(key_str);
-    }
-
-    parts.join("+")
-}
 
 #[cfg(test)]
 mod tests {
@@ -313,8 +276,14 @@ mod tests {
     }
 
     #[test]
-    fn serializes_modifier_pair_without_phantom_key() {
+    fn stores_modifier_pair_without_phantom_key() {
         set_hotkey_from_string("Ctrl+Option").unwrap();
-        assert_eq!(get_hotkey_string(), "Ctrl+Alt");
+        let config = get_hotkey_config().unwrap();
+        assert_eq!(config.key, None);
+        assert!(config.require_ctrl);
+        assert!(config.require_alt);
+        assert!(!config.require_shift);
+        assert!(!config.require_meta);
+        assert!(!config.require_fn);
     }
 }

@@ -105,15 +105,6 @@ export interface DownloadProgress {
   variant: ModelVariant | null;
 }
 
-export interface ModelVerification {
-  exists: boolean;
-  formatValid: boolean;
-  hashValid: boolean;
-  isValid: boolean;
-  path: string;
-  sizeValid: boolean;
-}
-
 export interface MicrophoneTest {
   deviceName: string;
   isReceivingAudio: boolean;
@@ -129,10 +120,4 @@ export interface MicTestStartResult {
 export interface PermissionStatus {
   accessibility: "unknown" | "granted" | "denied" | "not-applicable";
   microphone: "unknown" | "prompt" | "granted" | "denied";
-}
-
-export interface HotkeyRegistrationResult {
-  error?: "conflict-system" | "conflict-app" | "permission-denied" | "unknown";
-  message?: string;
-  success: boolean;
 }

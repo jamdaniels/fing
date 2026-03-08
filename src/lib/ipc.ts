@@ -8,7 +8,6 @@ import type {
   MicTestStartResult,
   ModelInfo,
   ModelVariant,
-  ModelVerification,
   PermissionStatus,
   Settings,
   Stats,
@@ -88,18 +87,6 @@ export async function getDownloadProgress(): Promise<DownloadProgress> {
   return await invoke<DownloadProgress>("get_download_progress");
 }
 
-export async function verifyModel(path: string): Promise<ModelVerification> {
-  return await invoke<ModelVerification>("verify_model", { path });
-}
-
-export async function checkModelExistsForVariant(
-  variant: ModelVariant
-): Promise<ModelVerification> {
-  return await invoke<ModelVerification>("check_model_exists_for_variant", {
-    variant,
-  });
-}
-
 export async function getModels(): Promise<ModelInfo[]> {
   return await invoke<ModelInfo[]>("get_models");
 }
@@ -114,14 +101,6 @@ export async function setActiveModel(variant: ModelVariant): Promise<boolean> {
 
 export async function completeSetup(): Promise<void> {
   return await invoke("complete_setup");
-}
-
-export async function testMicrophone(
-  deviceId?: string | null
-): Promise<MicrophoneTest> {
-  return await invoke<MicrophoneTest>("test_microphone", {
-    deviceId: deviceId ?? null,
-  });
 }
 
 export async function startMicTest(
@@ -145,24 +124,12 @@ export async function requestPermissions(): Promise<PermissionStatus> {
   return await invoke<PermissionStatus>("request_permissions");
 }
 
-export async function checkAccessibilityPermission(): Promise<boolean> {
-  return await invoke<boolean>("check_accessibility_permission");
-}
-
 export async function requestAccessibilityPermission(): Promise<boolean> {
   return await invoke<boolean>("request_accessibility_permission");
 }
 
 export async function requestMicrophonePermission(): Promise<void> {
   return await invoke("request_microphone_permission");
-}
-
-export async function openMainWindow(tab?: string): Promise<void> {
-  return await invoke("open_main_window", { tab });
-}
-
-export async function quitApp(): Promise<void> {
-  return await invoke("quit_app");
 }
 
 export async function setAutoStart(enabled: boolean): Promise<void> {
@@ -193,10 +160,6 @@ export async function hotkeyPress(): Promise<void> {
 
 export async function hotkeyRelease(): Promise<void> {
   return await invoke("hotkey_release");
-}
-
-export async function getCurrentHotkey(): Promise<string> {
-  return await invoke<string>("get_current_hotkey");
 }
 
 export async function updateHotkey(hotkey: string): Promise<void> {

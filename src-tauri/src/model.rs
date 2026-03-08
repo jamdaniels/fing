@@ -239,11 +239,6 @@ struct HashCacheEntry {
     sha256: String,
 }
 
-/// Verify a model file exists and has valid magic bytes.
-/// Uses a general size check (minimum 50MB for any whisper model).
-pub fn verify(path: &std::path::Path) -> ModelVerification {
-    verify_with_expected_size(path, None, None)
-}
 
 /// Inspect a model file for a specific variant without hashing it.
 pub fn inspect_for_variant(path: &std::path::Path, variant: ModelVariant) -> ModelVerification {
@@ -470,10 +465,6 @@ fn validate_ggml_magic(path: &std::path::Path) -> bool {
     magic == GGML_MAGIC_GGML || magic == GGML_MAGIC_GGJT
 }
 
-/// Download the default model variant (for backwards compatibility)
-pub async fn download() -> Result<PathBuf, String> {
-    download_variant(ModelVariant::default()).await
-}
 
 /// Download a specific model variant
 pub async fn download_variant(variant: ModelVariant) -> Result<PathBuf, String> {

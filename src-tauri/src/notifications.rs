@@ -24,8 +24,3 @@ pub fn show_info(app: &AppHandle, title: &str, message: &str) {
     show_notification(app, title, message);
     tracing::info!("Info notification: {} - {}", title, message);
 }
-
-#[tauri::command]
-pub fn notify_error(app: AppHandle, title: String, message: String) {
-    show_error(&app, &title, &message);
-}
