@@ -19,29 +19,26 @@ Hold your hotkey, speak, release — transcribed text is pasted instantly. Your 
 - **Multi-language** — English, German, Spanish, French with auto-detection
 - **Custom hotkey** — Bind any key or modifier combination
 - **Dictionary** — Add custom words and short phrases to improve recognition
-- **Optional local history** — Transcripts are searchable and auto-cleared after 30 days
+- **Local history** — Optional transcripts that are searchable and auto-cleared after 30 days
 - **Copy & reuse** — One-click copy of any previous transcription
 - **Sound feedback** — Optional audio cues for start
-- **Auto-start** — Launch on login
-- **Usage stats** — Dashboard with word counts, speaking speed, most used words
+- **Auto-start** — Optional auto-launch on login
 
 ## Requirements
 
-Windows 10+ / macOS 10.15+
+Windows 10+ / macOS 11.0+ (Big Sur)
 
 ## Install
 
-Download the latest release from [Releases](https://github.com/jamdaniels/fing/releases).
+Download the latest [release](https://github.com/jamdaniels/fing/releases).
 
 ### macOS
 
 The app is not notarized with Apple, so macOS will block it on first launch. After installing, either:
 
-**Option A** — Right-click the app > Open, then click "Open" in the dialog.
-
-**Option B** — Go to System Settings > Privacy & Security, scroll down and click "Open Anyway".
-
-**Option C** — Run in Terminal:
+- **Option A** — Right-click the app > Open, then click "Open" in the dialog.
+- **Option B** — Go to System Settings > Privacy & Security, scroll down and click "Open Anyway".
+- **Option C** — Run in Terminal:
 ```bash
 xattr -cr /Applications/Fing.app
 ```

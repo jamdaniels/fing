@@ -20,8 +20,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-14
+          - platform: macos-15
+            updater_json_keep_universal: true
           - platform: windows-2022
+            updater_json_keep_universal: false
 
     runs-on: ${{ matrix.platform }}
 
@@ -57,18 +59,16 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Resolve bundle args
-        id: bundle_args
+      - name: Resolve Tauri args
+        id: tauri_args
         shell: bash
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            if [ "${{ steps.release_type.outputs.prerelease }}" = "true" ]; then
-              echo "args=--bundles nsis" >> "$GITHUB_OUTPUT"
-            else
-              echo "args=--bundles nsis,msi" >> "$GITHUB_OUTPUT"
-            fi
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            echo "args=--target universal-apple-darwin" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.release_type.outputs.prerelease }}" = "true" ]; then
+            echo "args=--bundles nsis" >> "$GITHUB_OUTPUT"
           else
-            echo "args=" >> "$GITHUB_OUTPUT"
+            echo "args=--bundles nsis,msi" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup Bun
@@ -93,6 +93,11 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install macOS universal Rust targets
+        if: runner.os == 'macOS'
+        shell: bash
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
       - name: Configure macOS build
         if: runner.os == 'macOS'
         shell: bash
@@ -114,13 +119,22 @@ jobs:
           Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/$ver/windows/VulkanSDK-$ver-Installer.exe" -OutFile $installer
           Start-Process -FilePath $installer -Args "--accept-licenses --default-answer --confirm-command install" -Wait
           echo "VULKAN_SDK=C:\VulkanSDK\$ver" >> $env:GITHUB_ENV
-          echo "CARGO_TARGET_DIR=C:\t" >> $env:GITHUB_ENV
           echo "C:\VulkanSDK\$ver\Bin" >> $env:GITHUB_PATH
 
+      - name: Verify Ninja is available
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ninja = Get-Command ninja -ErrorAction SilentlyContinue
+          if (-not $ninja) {
+            throw "Ninja is required for Windows Vulkan builds."
+          }
+
       - name: Build and publish release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CMAKE_GENERATOR: Ninja Multi-Config
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
@@ -129,5 +143,5 @@ jobs:
           releaseBody: ${{ steps.release_notes.outputs.body }}
           releaseDraft: false
           prerelease: ${{ steps.release_type.outputs.prerelease }}
-          args: ${{ steps.bundle_args.outputs.args }}
-
+          updaterJsonKeepUniversal: ${{ matrix.updater_json_keep_universal }}
+          args: ${{ steps.tauri_args.outputs.args }}

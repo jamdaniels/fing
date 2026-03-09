@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bunx tauri dev",
     "build": "bun run scripts/tauri-build.ts",
+    "build:mac:universal": "bun run build -- --target universal-apple-darwin",
     "frontend:dev": "bunx --bun vite",
     "frontend:build": "bunx --bun vite build",
     "typecheck": "tsc --noEmit",
