@@ -103,7 +103,7 @@ jobs:
         shell: bash
         run: |
           echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
-          echo "WHISPER_NATIVE=OFF" >> "$GITHUB_ENV"
+          echo "SOURCE_DATE_EPOCH=1" >> "$GITHUB_ENV"
           echo "CMAKE_CROSSCOMPILING=ON" >> "$GITHUB_ENV"
           echo "WHISPER_CCACHE=OFF" >> "$GITHUB_ENV"
           echo "CARGO_BUILD_JOBS=1" >> "$GITHUB_ENV"
@@ -134,7 +134,6 @@ jobs:
         uses: tauri-apps/tauri-action@v0.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CMAKE_GENERATOR: Ninja Multi-Config
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
