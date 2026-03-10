@@ -121,14 +121,14 @@ jobs:
           echo "VULKAN_SDK=C:\VulkanSDK\$ver" >> $env:GITHUB_ENV
           echo "C:\VulkanSDK\$ver\Bin" >> $env:GITHUB_PATH
 
-      - name: Verify Ninja is available
+      - name: Configure Windows build
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $ninja = Get-Command ninja -ErrorAction SilentlyContinue
-          if (-not $ninja) {
-            throw "Ninja is required for Windows Vulkan builds."
-          }
+          # Keep Cargo's output path short enough for MSBuild's FileTracker in
+          # whisper-rs-sys's nested Vulkan helper build.
+          New-Item -ItemType Directory -Force -Path 'D:\t' | Out-Null
+          echo "CARGO_TARGET_DIR=D:\t" >> $env:GITHUB_ENV
 
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0.6.1
