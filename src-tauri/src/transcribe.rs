@@ -183,3 +183,79 @@ pub fn transcribe_audio(
         None => Err(TranscribeError::ModelNotFound),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TRANSCRIBE_TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+    struct TranscriberReset;
+
+    impl Drop for TranscriberReset {
+        fn drop(&mut self) {
+            unload_transcriber();
+        }
+    }
+
+    fn missing_model_path() -> String {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+
+        std::env::temp_dir()
+            .join(format!("fing-missing-model-{nanos}.bin"))
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    #[test]
+    fn transcribe_audio_requires_loaded_transcriber() {
+        let _guard = TRANSCRIBE_TEST_MUTEX
+            .lock()
+            .expect("transcribe test mutex should lock");
+        let _reset = TranscriberReset;
+
+        unload_transcriber();
+
+        assert!(matches!(
+            transcribe_audio(&[0.25], None, None),
+            Err(TranscribeError::ModelNotFound)
+        ));
+        assert!(!is_transcriber_loaded());
+    }
+
+    #[test]
+    fn init_transcriber_returns_model_not_found_for_missing_file() {
+        let _guard = TRANSCRIBE_TEST_MUTEX
+            .lock()
+            .expect("transcribe test mutex should lock");
+        let _reset = TranscriberReset;
+
+        unload_transcriber();
+        let missing_path = missing_model_path();
+
+        assert!(matches!(
+            init_transcriber(&missing_path),
+            Err(TranscribeError::ModelNotFound)
+        ));
+        assert!(!is_transcriber_loaded());
+    }
+
+    #[test]
+    fn unload_transcriber_keeps_global_state_unloaded() {
+        let _guard = TRANSCRIBE_TEST_MUTEX
+            .lock()
+            .expect("transcribe test mutex should lock");
+        let _reset = TranscriberReset;
+
+        unload_transcriber();
+        unload_transcriber();
+
+        assert!(get_transcriber().is_none());
+        assert!(!is_transcriber_loaded());
+    }
+}

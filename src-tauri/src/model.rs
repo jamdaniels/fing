@@ -643,3 +643,102 @@ pub fn get_progress() -> DownloadProgress {
     let state = lock_download_state();
     DownloadProgress::from(&*state)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fs::{self, File};
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_test_path(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+
+        env::temp_dir().join(format!("fing-{name}-{nanos}.bin"))
+    }
+
+    fn write_test_model_file(path: &Path, size: u64, magic: u32) {
+        let mut file = File::create(path).expect("test model file should be created");
+        file.write_all(&magic.to_le_bytes())
+            .expect("magic bytes should be written");
+
+        if size > 4 {
+            let padding = vec![0_u8; (size - 4) as usize];
+            file.write_all(&padding)
+                .expect("padding bytes should be written");
+        }
+
+        file.sync_all().expect("test model file should sync");
+    }
+
+    #[test]
+    fn inspect_with_expected_size_accepts_valid_ggml_file() {
+        let path = unique_test_path("model-valid");
+        write_test_model_file(&path, 100, GGML_MAGIC_GGML);
+
+        let verification = inspect_with_expected_size(&path, Some(100));
+
+        assert!(verification.exists);
+        assert!(verification.size_valid);
+        assert!(verification.format_valid);
+        assert!(verification.hash_valid);
+        assert!(verification.is_valid);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn inspect_with_expected_size_rejects_invalid_magic() {
+        let path = unique_test_path("model-invalid-magic");
+        write_test_model_file(&path, 100, 0x1234_5678);
+
+        let verification = inspect_with_expected_size(&path, Some(100));
+
+        assert!(verification.exists);
+        assert!(!verification.size_valid);
+        assert!(!verification.format_valid);
+        assert!(verification.hash_valid);
+        assert!(!verification.is_valid);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn inspect_with_expected_size_rejects_wrong_file_size() {
+        let path = unique_test_path("model-invalid-size");
+        write_test_model_file(&path, 40, GGML_MAGIC_GGJT);
+
+        let verification = inspect_with_expected_size(&path, Some(100));
+
+        assert!(verification.exists);
+        assert!(!verification.size_valid);
+        assert!(!verification.format_valid);
+        assert!(verification.hash_valid);
+        assert!(!verification.is_valid);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn download_status_reports_public_strings_and_errors() {
+        assert_eq!(DownloadStatus::NotStarted.as_str(), "not-started");
+        assert_eq!(DownloadStatus::Downloading.as_str(), "downloading");
+        assert_eq!(DownloadStatus::Verifying.as_str(), "verifying");
+        assert_eq!(DownloadStatus::Complete.as_str(), "complete");
+        assert_eq!(
+            DownloadStatus::Failed("network".to_string()).as_str(),
+            "failed"
+        );
+
+        assert_eq!(DownloadStatus::NotStarted.error_message(), None);
+        assert_eq!(
+            DownloadStatus::Failed("network".to_string()).error_message(),
+            Some("network".to_string())
+        );
+    }
+}

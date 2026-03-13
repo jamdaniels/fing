@@ -80,3 +80,49 @@ pub fn get_state() -> AppState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static STATE_TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+    struct StateReset(AppState);
+
+    impl Drop for StateReset {
+        fn drop(&mut self) {
+            let _ = transition_to(self.0);
+        }
+    }
+
+    #[test]
+    fn state_labels_and_recording_capability_match_contract() {
+        let _guard = STATE_TEST_MUTEX.lock().expect("state test mutex should lock");
+
+        assert_eq!(AppState::NeedsSetup.as_str(), "needs-setup");
+        assert_eq!(AppState::Ready.as_str(), "ready");
+        assert_eq!(AppState::Recording.as_str(), "recording");
+        assert_eq!(AppState::Processing.as_str(), "processing");
+
+        assert!(!AppState::NeedsSetup.can_record());
+        assert!(AppState::Ready.can_record());
+        assert!(!AppState::Recording.can_record());
+        assert!(!AppState::Processing.can_record());
+    }
+
+    #[test]
+    fn transition_to_updates_global_state() {
+        let _guard = STATE_TEST_MUTEX.lock().expect("state test mutex should lock");
+        let _reset = StateReset(get_state());
+
+        transition_to(AppState::Ready).expect("transition to ready should succeed");
+        assert_eq!(get_state(), AppState::Ready);
+
+        transition_to(AppState::Recording).expect("transition to recording should succeed");
+        assert_eq!(get_state(), AppState::Recording);
+
+        transition_to(AppState::Processing).expect("transition to processing should succeed");
+        assert_eq!(get_state(), AppState::Processing);
+    }
+}
