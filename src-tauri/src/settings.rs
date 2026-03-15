@@ -59,6 +59,15 @@ fn default_languages() -> Vec<String> {
     vec!["en".to_string()]
 }
 
+fn merge_settings_update(latest: Settings, incoming: Settings) -> Settings {
+    let mut merged = sanitize_settings(incoming);
+    merged.onboarding_completed = latest.onboarding_completed;
+    if merged.onboarding_completed {
+        merged.onboarding_step = None;
+    }
+    merged
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -197,12 +206,170 @@ pub async fn get_settings() -> Result<Settings, String> {
 }
 
 pub async fn update_settings(settings: Settings) -> Result<Settings, String> {
-    let sanitized = sanitize_settings(settings);
-    save_settings(&sanitized).await?;
-    Ok(sanitized)
+    let _guard = SETTINGS_UPDATE_LOCK.lock().await;
+    let latest = load_settings_from_disk().await;
+    let merged = merge_settings_update(latest, settings);
+    save_settings_unlocked(&merged).await?;
+    Ok(merged)
 }
 
 fn sanitize_settings(mut settings: Settings) -> Settings {
     settings.dictionary_terms = crate::dictionary::sanitize_terms(&settings.dictionary_terms);
     settings
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex as StdMutex;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use tokio::runtime::Builder;
+
+    static SETTINGS_TEST_MUTEX: StdMutex<()> = StdMutex::new(());
+
+    fn init_test_paths() -> std::path::PathBuf {
+        let path = std::env::temp_dir().join("fing-settings-tests");
+        crate::paths::init_test_app_data_dir(path.clone());
+        path
+    }
+
+    async fn reset_test_settings() {
+        let app_data_dir = init_test_paths();
+        let settings_path = crate::paths::settings_path().expect("settings path should exist");
+
+        invalidate_settings_cache();
+        let _ = fs::remove_file(&settings_path).await;
+        fs::create_dir_all(&app_data_dir)
+            .await
+            .expect("test app data dir should be created");
+    }
+
+    fn run_async_test<F>(test: F)
+    where
+        F: std::future::Future<Output = ()>,
+    {
+        Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime should build")
+            .block_on(test);
+    }
+
+    fn unique_suffix() -> String {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos().to_string())
+            .unwrap_or_else(|_| "0".to_string())
+    }
+
+    #[test]
+    fn update_settings_preserves_onboarding_completed_when_incoming_snapshot_is_stale() {
+        run_async_test(async {
+            let _guard = SETTINGS_TEST_MUTEX
+                .lock()
+                .expect("settings test mutex should lock");
+            reset_test_settings().await;
+
+            let completed = Settings {
+                onboarding_completed: true,
+                ..Settings::default()
+            };
+            save_settings(&completed)
+                .await
+                .expect("completed settings should save");
+
+            let stale = Settings {
+                onboarding_completed: false,
+                onboarding_step: Some(3),
+                selected_microphone_id: Some(format!("mic-{}", unique_suffix())),
+                ..Settings::default()
+            };
+
+            let updated = update_settings(stale)
+                .await
+                .expect("stale settings update should succeed");
+
+            assert!(updated.onboarding_completed);
+            assert_eq!(updated.onboarding_step, None);
+            assert!(updated.selected_microphone_id.is_some());
+
+            let reloaded = load_settings_from_disk().await;
+            assert!(reloaded.onboarding_completed);
+            assert_eq!(reloaded.onboarding_step, None);
+            assert_eq!(
+                reloaded.selected_microphone_id,
+                updated.selected_microphone_id
+            );
+        });
+    }
+
+    #[test]
+    fn update_settings_clears_onboarding_step_once_setup_is_completed() {
+        run_async_test(async {
+            let _guard = SETTINGS_TEST_MUTEX
+                .lock()
+                .expect("settings test mutex should lock");
+            reset_test_settings().await;
+
+            let persisted = Settings {
+                onboarding_completed: true,
+                onboarding_step: Some(5),
+                ..Settings::default()
+            };
+            save_settings(&persisted)
+                .await
+                .expect("completed settings should save");
+
+            let incoming = Settings {
+                onboarding_completed: false,
+                onboarding_step: Some(7),
+                theme: Theme::Dark,
+                ..Settings::default()
+            };
+
+            let updated = update_settings(incoming)
+                .await
+                .expect("settings update should succeed");
+
+            assert!(updated.onboarding_completed);
+            assert_eq!(updated.onboarding_step, None);
+            assert_eq!(updated.theme, Theme::Dark);
+        });
+    }
+
+    #[test]
+    fn update_settings_still_allows_incomplete_onboarding_progress_updates() {
+        run_async_test(async {
+            let _guard = SETTINGS_TEST_MUTEX
+                .lock()
+                .expect("settings test mutex should lock");
+            reset_test_settings().await;
+
+            save_settings(&Settings::default())
+                .await
+                .expect("default settings should save");
+
+            let incoming = Settings {
+                onboarding_step: Some(5),
+                selected_microphone_id: Some(format!("mic-{}", unique_suffix())),
+                ..Settings::default()
+            };
+
+            let updated = update_settings(incoming)
+                .await
+                .expect("settings update should succeed");
+
+            assert!(!updated.onboarding_completed);
+            assert_eq!(updated.onboarding_step, Some(5));
+            assert!(updated.selected_microphone_id.is_some());
+
+            let reloaded = load_settings_from_disk().await;
+            assert!(!reloaded.onboarding_completed);
+            assert_eq!(reloaded.onboarding_step, Some(5));
+            assert_eq!(
+                reloaded.selected_microphone_id,
+                updated.selected_microphone_id
+            );
+        });
+    }
 }

@@ -61,6 +61,7 @@ interface OnboardingState {
   downloadError: string | null;
   downloadProgress: DownloadProgress | null;
   isCompleting: boolean;
+  micError: string | null;
   models: ModelInfo[];
   permissions: PermissionStatus | null;
   selectedDeviceId: string | null;
@@ -85,6 +86,7 @@ let state: OnboardingState = {
   downloadError: null,
   completeError: null,
   isCompleting: false,
+  micError: null,
   permissions: null,
   audioDevices: [],
   selectedDeviceId: null,
@@ -155,18 +157,14 @@ function formatBytes(bytes: number): string {
 }
 
 async function persistSelectedDevice(deviceId: string | null): Promise<void> {
-  try {
-    const currentSettings = await getSettings();
-    if (currentSettings.selectedMicrophoneId === deviceId) {
-      return;
-    }
-    await updateSettings({
-      ...currentSettings,
-      selectedMicrophoneId: deviceId,
-    });
-  } catch (err) {
-    console.error("Failed to save microphone selection:", err);
+  const currentSettings = await getSettings();
+  if (currentSettings.selectedMicrophoneId === deviceId) {
+    return;
   }
+  await updateSettings({
+    ...currentSettings,
+    selectedMicrophoneId: deviceId,
+  });
 }
 
 function formatKeyForDisplay(hotkey: string): string {
@@ -855,6 +853,11 @@ function renderMicSelection(): void {
         <p class="onboarding-desc">Choose which microphone to use for recording</p>
       </div>
       <div class="onboarding-body">
+        ${
+          state.micError
+            ? `<div class="download-status error" style="margin-bottom: 16px;">${escapeHtml(state.micError)}</div>`
+            : ""
+        }
         <select id="mic-select" class="settings-select mic-select-full">
           ${state.audioDevices
             .map(
@@ -881,7 +884,7 @@ function renderMicSelection(): void {
     ?.addEventListener("change", handleMicChange);
   document
     .getElementById("continue-btn")
-    ?.addEventListener("click", () => goToStep(8));
+    ?.addEventListener("click", handleMicContinue);
   attachStepIndicatorListeners();
 }
 
@@ -989,6 +992,7 @@ async function goToStep(step: OnboardingStep): Promise<void> {
   }
 
   if (step === 7) {
+    state.micError = null;
     await loadAudioDevices();
   }
 
@@ -1114,10 +1118,25 @@ async function loadAudioDevices(): Promise<void> {
   render();
 }
 
-async function handleMicChange(e: Event): Promise<void> {
+function handleMicChange(e: Event): void {
   const select = e.target as HTMLSelectElement;
+  state.micError = null;
   state.selectedDeviceId = select.value || null;
-  await persistSelectedDevice(state.selectedDeviceId);
+}
+
+async function handleMicContinue(): Promise<void> {
+  state.micError = null;
+
+  try {
+    await persistSelectedDevice(state.selectedDeviceId);
+  } catch (err) {
+    console.error("Failed to save microphone selection:", err);
+    state.micError = "Could not save your microphone selection. Try again.";
+    render();
+    return;
+  }
+
+  goToStep(8);
 }
 
 function hasDownloadProgressChanged(
@@ -1264,6 +1283,7 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     downloadError: null,
     completeError: null,
     isCompleting: false,
+    micError: null,
     permissions: null,
     audioDevices: [],
     selectedDeviceId: null,
