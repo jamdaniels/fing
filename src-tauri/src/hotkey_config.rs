@@ -234,7 +234,6 @@ pub fn get_hotkey_config() -> Option<HotkeyConfig> {
         .and_then(|cfg| cfg.as_ref().cloned())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

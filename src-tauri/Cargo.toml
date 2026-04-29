@@ -21,7 +21,7 @@ tauri-plugin-autostart = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
-whisper-rs = "0.15"
+whisper-rs = "0.16"
 cpal = "0.17"
 rubato = "1.0"
 audioadapter-buffers = "2"
@@ -43,12 +43,12 @@ sha2 = "0.10"
 
 # macOS: Metal for Apple GPUs
 [target.'cfg(target_os = "macos")'.dependencies]
-whisper-rs = { version = "0.15", features = ["metal"] }
+whisper-rs = { version = "0.16", features = ["metal"] }
 enigo = "0.6"
 
 # Windows: Vulkan for cross-vendor GPU support
 [target.'cfg(target_os = "windows")'.dependencies]
-whisper-rs = { version = "0.15", features = ["vulkan"] }
+whisper-rs = { version = "0.16", features = ["vulkan"] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",

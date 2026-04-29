@@ -42,8 +42,8 @@ import {
   deleteTranscript,
   downloadModel,
   getAppInfo,
-  getAppState,
   getAutoStart,
+  getBootstrapStatus,
   getDownloadProgress,
   getMicTestLevel,
   getModels,
@@ -107,7 +107,6 @@ let searchQuery = "";
 let transcriptOffset = 0;
 let hasMoreTranscripts = true;
 const PAGE_SIZE = 25;
-const ONBOARDING_STATE_RETRY_DELAY_MS = 150;
 let settings: SettingsType | null = null;
 let settingsLoadedAt = 0;
 let audioDevices: AudioDevice[] = [];
@@ -2137,7 +2136,7 @@ function renderSettingsUI(el: HTMLElement): void {
             <button class="appearance-option ${settings?.historyMode === "off" ? "selected" : ""}" data-history-mode="off">
               <span>Off</span>
             </button>
-            <button class="appearance-option ${settings?.historyMode !== "off" ? "selected" : ""}" data-history-mode="30d">
+            <button class="appearance-option ${settings?.historyMode === "off" ? "" : "selected"}" data-history-mode="30d">
               <span>Last 30 days</span>
             </button>
           </div>
@@ -2434,14 +2433,23 @@ async function init(): Promise<void> {
   document.body.dataset.platform = isMac ? "darwin" : "windows";
 
   await loadSettings({ refreshDevices: true });
+  const settingsHasCompletedOnboarding = settings?.onboardingCompleted === true;
+  let shouldShowOnboarding =
+    settings !== null && !settingsHasCompletedOnboarding;
 
   try {
-    currentAppState = await getAppState();
+    const bootstrapStatus = await getBootstrapStatus();
+    const completedByEitherSource =
+      settingsHasCompletedOnboarding ||
+      bootstrapStatus.onboardingCompleted === true;
+    currentAppState = bootstrapStatus.appState;
+    shouldShowOnboarding =
+      bootstrapStatus.shouldShowOnboarding && !completedByEitherSource;
     appInfo = await getAppInfo();
     stats = await getStats().catch(() => null);
     updateStatus = await getUpdateStatus();
-  } catch {
-    // Commands may not be registered yet
+  } catch (error) {
+    console.error("Failed to load bootstrap status:", error);
   }
 
   await listen("app-state-changed", (event) => {
@@ -2452,28 +2460,6 @@ async function init(): Promise<void> {
     }
     currentAppState = newState;
   });
-
-  const hasCompletedOnboarding = settings?.onboardingCompleted ?? false;
-  const hasSavedOnboardingStep = settings?.onboardingStep !== null;
-  let shouldShowOnboarding = currentAppState === "needs-setup";
-
-  if (
-    shouldShowOnboarding &&
-    hasCompletedOnboarding &&
-    !hasSavedOnboardingStep
-  ) {
-    await new Promise((resolve) =>
-      window.setTimeout(resolve, ONBOARDING_STATE_RETRY_DELAY_MS)
-    );
-
-    try {
-      currentAppState = await getAppState();
-    } catch {
-      // Keep the previously observed state
-    }
-
-    shouldShowOnboarding = currentAppState === "needs-setup";
-  }
 
   if (shouldShowOnboarding) {
     await showOnboarding();

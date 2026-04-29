@@ -171,9 +171,10 @@ pub fn init_db() -> Result<(), String> {
         tracing::warn!("Could not enable foreign key enforcement: {}", e);
     }
 
-    // Enable WAL mode for better reliability (non-fatal if fails)
-    if let Err(e) = conn.execute("PRAGMA journal_mode=WAL", []) {
-        tracing::warn!("Could not enable WAL mode: {}", e);
+    // journal_mode returns the selected mode, so use a query API rather than execute.
+    match conn.query_row("PRAGMA journal_mode=WAL", [], |row| row.get::<_, String>(0)) {
+        Ok(mode) => tracing::info!("SQLite journal mode: {}", mode),
+        Err(e) => tracing::warn!("Could not enable WAL mode: {}", e),
     }
 
     // Create main transcripts table
@@ -264,7 +265,7 @@ pub fn init_db() -> Result<(), String> {
         .map_err(|e| format!("Database lock poisoned: {e}"))?;
     *db = Some(conn);
 
-    tracing::info!("Database initialized at {:?}", path);
+    tracing::info!("Database initialized");
     Ok(())
 }
 

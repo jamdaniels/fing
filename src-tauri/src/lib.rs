@@ -86,6 +86,90 @@ fn get_app_state() -> String {
     state.as_str().to_string()
 }
 
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct BootstrapStatus {
+    app_state: String,
+    should_show_onboarding: bool,
+    onboarding_completed: bool,
+}
+
+#[derive(Clone)]
+struct BootstrapContext {
+    decision: BootstrapDecision,
+    settings: settings::Settings,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BootstrapDecision {
+    app_state: AppState,
+    should_show_onboarding: bool,
+    reason: &'static str,
+}
+
+impl BootstrapDecision {
+    fn ready() -> Self {
+        Self::completed("ready")
+    }
+
+    fn completed(reason: &'static str) -> Self {
+        Self {
+            app_state: AppState::Ready,
+            should_show_onboarding: false,
+            reason,
+        }
+    }
+
+    fn needs_setup(reason: &'static str) -> Self {
+        Self {
+            app_state: AppState::NeedsSetup,
+            should_show_onboarding: true,
+            reason,
+        }
+    }
+
+    fn status(self, settings: &settings::Settings) -> BootstrapStatus {
+        BootstrapStatus {
+            app_state: self.app_state.as_str().to_string(),
+            should_show_onboarding: self.should_show_onboarding,
+            onboarding_completed: settings.onboarding_completed,
+        }
+    }
+}
+
+fn resolve_bootstrap_decision(saved_settings: &settings::Settings) -> BootstrapDecision {
+    if !saved_settings.onboarding_completed {
+        return BootstrapDecision::needs_setup("incomplete_onboarding");
+    }
+
+    BootstrapDecision::ready()
+}
+
+async fn load_bootstrap_context(phase: &'static str) -> BootstrapContext {
+    let saved_settings = settings::load_settings_uncached().await;
+    let decision = resolve_bootstrap_decision(&saved_settings);
+
+    tracing::info!(
+        "Bootstrap decision: phase={}, reason={}, onboarding_completed={}, should_show_onboarding={}, app_state={}",
+        phase,
+        decision.reason,
+        saved_settings.onboarding_completed,
+        decision.should_show_onboarding,
+        decision.app_state.as_str(),
+    );
+
+    BootstrapContext {
+        decision,
+        settings: saved_settings,
+    }
+}
+
+#[tauri::command]
+async fn get_bootstrap_status() -> Result<BootstrapStatus, String> {
+    let context = load_bootstrap_context("ipc").await;
+    Ok(context.decision.status(&context.settings))
+}
+
 #[tauri::command]
 fn get_audio_devices() -> Vec<AudioDevice> {
     AudioCapture::list_devices()
@@ -296,7 +380,6 @@ async fn set_active_model(
     Ok(false)
 }
 
-
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     tracing::info!("Application shutdown requested");
@@ -416,7 +499,6 @@ fn request_microphone_permission() {
     platform::request_microphone_permission();
 }
 
-
 #[tauri::command]
 fn update_hotkey(hotkey: String) -> Result<(), String> {
     hotkey_config::set_hotkey_from_string(&hotkey)
@@ -480,7 +562,6 @@ async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
 
     settings::update_settings_atomic(|latest_settings| {
         latest_settings.onboarding_completed = true;
-        latest_settings.onboarding_step = None;
     })
     .await?;
 
@@ -622,7 +703,7 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Use try_init to avoid panic if stderr isn't available (Windows without console)
+    // Use try_init to avoid panic if stderr isn't available (Windows without console).
     let _ = tracing_subscriber::fmt::try_init();
 
     tauri::Builder::default()
@@ -662,73 +743,44 @@ pub fn run() {
 
             // Check if onboarding was previously completed
             let app_handle = app.handle().clone();
-            let saved_settings = tauri::async_runtime::block_on(settings::load_settings());
-            let mut show_setup_window = false;
+            let bootstrap_context = tauri::async_runtime::block_on(load_bootstrap_context("setup"));
+            let saved_settings = bootstrap_context.settings;
+            let show_setup_window = bootstrap_context.decision.should_show_onboarding;
             let mut updates_enabled = false;
 
-            if saved_settings.onboarding_completed {
-                // User already completed onboarding - check model and init if needed
+            if bootstrap_context.decision.app_state == AppState::Ready {
                 let variant = saved_settings.active_model_variant;
                 let model_path = model::model_path_for_variant(variant);
-                let verification = if saved_settings.lazy_model_loading {
-                    model::inspect_for_variant(&model_path, variant)
-                } else {
-                    model::verify_for_variant(&model_path, variant)
-                };
 
-                if verification.is_valid {
-                    let transcriber_ready = if saved_settings.lazy_model_loading {
-                        true
-                    } else {
-                        let model_path_str = model_path.to_string_lossy().to_string();
-                        match tauri::async_runtime::block_on(async move {
-                            tauri::async_runtime::spawn_blocking(move || {
-                                transcribe::init_transcriber(&model_path_str)
-                            })
-                            .await
-                            .map_err(|e| format!("Transcriber initialization task failed: {e}"))
-                        }) {
-                            Ok(Ok(())) => true,
-                            Ok(Err(e)) => {
-                                tracing::error!("Failed to init transcriber: {}", e);
-                                false
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to init transcriber: {}", e);
-                                false
-                            }
-                        }
-                    };
-
-                    if transcriber_ready {
-                        // Set hotkey from settings before registering
-                        // Don't block Ready state if this fails
-                        apply_saved_hotkey_with_fallback(
-                            &app_handle,
-                            &saved_settings.hotkey,
-                            "Failed to parse hotkey from settings",
-                        );
-                        // Transition to Ready before building tray menu
-                        state::set_state(&app_handle, AppState::Ready).ok();
-                        updates_enabled = true;
-                        if let Err(error) =
-                            tauri::async_runtime::block_on(update::initialize_for_ready_app())
-                        {
-                            tracing::warn!("Failed to restore persisted update state: {}", error);
-                        }
-                        tracing::info!("Restored to Ready state from saved settings");
-                    } else {
-                        tracing::warn!(
-                            "Onboarding completed but transcriber failed to initialize, showing setup"
-                        );
-                        show_setup_window = true;
+                // Try to pre-load the transcriber, but don't block Ready state
+                // on failure. The hotkey handler will retry on first use.
+                if !saved_settings.lazy_model_loading {
+                    let model_path_str = model_path.to_string_lossy().to_string();
+                    if let Err(e) = tauri::async_runtime::block_on(async move {
+                        tauri::async_runtime::spawn_blocking(move || {
+                            transcribe::init_transcriber(&model_path_str)
+                        })
+                        .await
+                        .map_err(|e| format!("{e}"))?
+                        .map_err(|e| format!("{e}"))
+                    }) {
+                        tracing::warn!("Transcriber init deferred to first use: {}", e);
                     }
-                } else {
-                    tracing::warn!("Onboarding completed but model invalid, showing setup");
-                    show_setup_window = true;
                 }
-            } else {
-                show_setup_window = true;
+
+                apply_saved_hotkey_with_fallback(
+                    &app_handle,
+                    &saved_settings.hotkey,
+                    "Failed to parse hotkey from settings",
+                );
+                state::transition_to(AppState::Ready).ok();
+                updates_enabled = true;
+                if let Err(error) =
+                    tauri::async_runtime::block_on(update::initialize_for_ready_app())
+                {
+                    tracing::warn!("Failed to restore persisted update state: {}", error);
+                }
+                tracing::info!("Restored to Ready state from saved settings");
             }
 
             // Build tray menu based on app state
@@ -782,6 +834,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_app_state,
+            get_bootstrap_status,
             // App info
             app_info::get_app_info,
             update::get_update_status,
@@ -839,3 +892,30 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
+#[cfg(test)]
+mod bootstrap_tests {
+    use super::*;
+
+    fn completed_settings() -> settings::Settings {
+        settings::Settings {
+            onboarding_completed: true,
+            ..settings::Settings::default()
+        }
+    }
+
+    #[test]
+    fn bootstrap_ready_when_onboarding_completed_and_model_valid() {
+        let decision = resolve_bootstrap_decision(&completed_settings());
+
+        assert_eq!(decision.app_state, AppState::Ready);
+        assert!(!decision.should_show_onboarding);
+    }
+
+    #[test]
+    fn bootstrap_needs_setup_when_onboarding_is_incomplete() {
+        let decision = resolve_bootstrap_decision(&settings::Settings::default());
+
+        assert_eq!(decision.app_state, AppState::NeedsSetup);
+        assert!(decision.should_show_onboarding);
+    }
+}

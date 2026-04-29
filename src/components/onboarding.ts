@@ -396,12 +396,15 @@ function renderDownloadModel(): void {
     return;
   }
 
+  const selectedModel = state.models.find(
+    (model) => model.variant === state.selectedModelVariant
+  );
   const progress = state.downloadProgress;
   const isDownloading = progress?.status === "downloading";
   const isVerifying = progress?.status === "verifying";
-  const isComplete = progress?.status === "complete";
+  const isDownloaded = selectedModel?.isDownloaded === true;
+  const isComplete = progress?.status === "complete" || isDownloaded;
   const isFailed = progress?.status === "failed";
-  const downloadBtnText = "Download Model";
 
   // Determine footer button state
   let footerButton: string;
@@ -414,12 +417,17 @@ function renderDownloadModel(): void {
   } else if (isFailed) {
     footerButton = `<button class="btn btn-accent btn-lg" id="retry-btn">Retry Download</button>`;
   } else {
-    footerButton = `<button class="btn btn-accent btn-lg" id="download-btn">${downloadBtnText}</button>`;
+    footerButton = `<button class="btn btn-accent btn-lg" id="download-btn">Download Model</button>`;
   }
 
   // Body content - either selection or progress
   let bodyContent: string;
-  if (isDownloading || isVerifying || isComplete || isFailed) {
+  if (
+    isDownloading ||
+    isVerifying ||
+    progress?.status === "complete" ||
+    isFailed
+  ) {
     bodyContent = renderDownloadBody(progress);
   } else {
     bodyContent = `
@@ -713,32 +721,11 @@ function renderPermissions(): void {
   attachStepIndicatorListeners();
 }
 
-async function handlePermissionsContinue(): Promise<void> {
-  try {
-    const currentSettings = await getSettings();
-    if (currentSettings.onboardingStep !== null) {
-      await updateSettings({
-        ...currentSettings,
-        onboardingStep: null,
-      });
-    }
-  } catch (err) {
-    console.error("Failed to clear onboarding step:", err);
-  }
+function handlePermissionsContinue(): void {
   goToStep(6);
 }
 
 async function handleRestartForPermissions(): Promise<void> {
-  try {
-    const currentSettings = await getSettings();
-    await updateSettings({
-      ...currentSettings,
-      onboardingStep: 5,
-    });
-  } catch (err) {
-    console.error("Failed to save onboarding step:", err);
-  }
-
   await relaunchApp();
 }
 
@@ -1295,42 +1282,6 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     selectedHistoryMode: savedSettings?.historyMode ?? "30d",
     models,
   };
-
-  // Check if resuming from a saved step (after restart)
-  if (savedSettings?.onboardingStep) {
-    const savedStep = savedSettings.onboardingStep as OnboardingStep;
-    console.log("[onboarding] Resuming at step:", savedStep);
-
-    // If resuming at permissions step, refresh permissions
-    if (savedStep === 5) {
-      state.step = savedStep;
-      try {
-        state.permissions = await requestPermissions();
-      } catch (e) {
-        console.error("Failed to get permissions:", e);
-      }
-      render();
-      return;
-    }
-
-    state.step = savedStep;
-    render();
-    return;
-  }
-
-  const selectedModel = models.find(
-    (model) => model.variant === state.selectedModelVariant
-  );
-  if (selectedModel?.isDownloaded) {
-    state.downloadProgress = {
-      variant: state.selectedModelVariant,
-      bytesDownloaded: 0,
-      totalBytes: 0,
-      percentage: 100,
-      status: "complete",
-    };
-    state.step = 3;
-  }
 
   render();
 }

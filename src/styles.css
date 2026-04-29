@@ -1472,15 +1472,15 @@ body[data-platform="windows"] .titlebar {
   overflow-y: auto;
 }
 
+.transcript-list {
+  display: flex;
+  flex-direction: column;
+}
+
 .history-scrollable .transcript-list,
 .history-scrollable .empty-state,
 .history-scrollable .dashboard-disabled-wrapper {
   margin-right: 24px;
-}
-
-.transcript-list {
-  display: flex;
-  flex-direction: column;
 }
 
 .load-more-btn {

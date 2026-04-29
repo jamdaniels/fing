@@ -26,6 +26,9 @@ logs/
 # Tauri
 src-tauri/target/
 
+# Local Cargo config
+src-tauri/.cargo/
+
 # Models (user-downloaded)
 .models/
 *.bin

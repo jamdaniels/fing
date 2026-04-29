@@ -6,6 +6,20 @@ const target =
   targetFlagIndex === -1 ? undefined : extraArgs[targetFlagIndex + 1];
 
 if (process.platform === "darwin") {
+  const pathEntries = (env.PATH ?? "").split(":");
+  const rustPathEntries = [
+    `${env.HOME ?? ""}/.cargo/bin`,
+    "/opt/homebrew/opt/rustup/bin",
+    "/usr/local/opt/rustup/bin",
+  ].filter(
+    (pathEntry) =>
+      pathEntry !== "/.cargo/bin" && !pathEntries.includes(pathEntry)
+  );
+
+  if (rustPathEntries.length > 0) {
+    env.PATH = [...rustPathEntries, ...pathEntries].join(":");
+  }
+
   env.WHISPER_CCACHE ??= "OFF";
   env.CCACHE_DISABLE ??= "1";
 

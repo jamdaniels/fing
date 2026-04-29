@@ -239,7 +239,6 @@ struct HashCacheEntry {
     sha256: String,
 }
 
-
 /// Inspect a model file for a specific variant without hashing it.
 pub fn inspect_for_variant(path: &std::path::Path, variant: ModelVariant) -> ModelVerification {
     let def = get_definition(variant);
@@ -464,7 +463,6 @@ fn validate_ggml_magic(path: &std::path::Path) -> bool {
     let magic = u32::from_le_bytes(magic_bytes);
     magic == GGML_MAGIC_GGML || magic == GGML_MAGIC_GGJT
 }
-
 
 /// Download a specific model variant
 pub async fn download_variant(variant: ModelVariant) -> Result<PathBuf, String> {

@@ -3,6 +3,7 @@ import type {
   AppInfo,
   AppState,
   AudioDevice,
+  BootstrapStatus,
   DownloadProgress,
   MicrophoneTest,
   MicTestStartResult,
@@ -18,6 +19,10 @@ import type {
 
 export async function getAppState(): Promise<AppState> {
   return (await invoke<string>("get_app_state")) as AppState;
+}
+
+export async function getBootstrapStatus(): Promise<BootstrapStatus> {
+  return await invoke<BootstrapStatus>("get_bootstrap_status");
 }
 
 export async function getAppInfo(): Promise<AppInfo> {

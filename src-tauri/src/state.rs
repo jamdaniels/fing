@@ -98,7 +98,9 @@ mod tests {
 
     #[test]
     fn state_labels_and_recording_capability_match_contract() {
-        let _guard = STATE_TEST_MUTEX.lock().expect("state test mutex should lock");
+        let _guard = STATE_TEST_MUTEX
+            .lock()
+            .expect("state test mutex should lock");
 
         assert_eq!(AppState::NeedsSetup.as_str(), "needs-setup");
         assert_eq!(AppState::Ready.as_str(), "ready");
@@ -113,7 +115,9 @@ mod tests {
 
     #[test]
     fn transition_to_updates_global_state() {
-        let _guard = STATE_TEST_MUTEX.lock().expect("state test mutex should lock");
+        let _guard = STATE_TEST_MUTEX
+            .lock()
+            .expect("state test mutex should lock");
         let _reset = StateReset(get_state());
 
         transition_to(AppState::Ready).expect("transition to ready should succeed");

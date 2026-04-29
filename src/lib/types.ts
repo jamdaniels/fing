@@ -47,11 +47,16 @@ export interface Settings {
   lazyModelLoading: boolean;
   modelPath: string;
   onboardingCompleted: boolean;
-  onboardingStep: number | null;
   pasteEnabled: boolean;
   selectedMicrophoneId: string | null;
   soundEnabled: boolean;
   theme: Theme;
+}
+
+export interface BootstrapStatus {
+  appState: AppState;
+  onboardingCompleted: boolean;
+  shouldShowOnboarding: boolean;
 }
 
 export interface AppInfo {

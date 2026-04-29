@@ -45,8 +45,6 @@ pub struct Settings {
     #[serde(default = "default_languages")]
     pub languages: Vec<String>,
     #[serde(default)]
-    pub onboarding_step: Option<u8>,
-    #[serde(default)]
     pub active_model_variant: ModelVariant,
     pub theme: Theme,
     #[serde(default)]
@@ -60,11 +58,9 @@ fn default_languages() -> Vec<String> {
 }
 
 fn merge_settings_update(latest: Settings, incoming: Settings) -> Settings {
+    let incoming_completed = incoming.onboarding_completed;
     let mut merged = sanitize_settings(incoming);
-    merged.onboarding_completed = latest.onboarding_completed;
-    if merged.onboarding_completed {
-        merged.onboarding_step = None;
-    }
+    merged.onboarding_completed = latest.onboarding_completed || incoming_completed;
     merged
 }
 
@@ -80,7 +76,6 @@ impl Default for Settings {
             history_mode: HistoryMode::default(),
             onboarding_completed: false,
             languages: default_languages(),
-            onboarding_step: None,
             active_model_variant: ModelVariant::default(),
             theme: Theme::default(),
             lazy_model_loading: false,
@@ -98,9 +93,11 @@ pub async fn load_settings() -> Settings {
         }
     }
 
-    // Load from disk
-    let settings = load_settings_from_disk().await;
+    load_settings_uncached().await
+}
 
+pub async fn load_settings_uncached() -> Settings {
+    let settings = load_settings_from_disk().await;
     // Update cache
     if let Ok(mut cache) = SETTINGS_CACHE.write() {
         *cache = Some(settings.clone());
@@ -111,13 +108,16 @@ pub async fn load_settings() -> Settings {
 
 async fn load_settings_from_disk() -> Settings {
     let Some(path) = crate::paths::settings_path() else {
+        tracing::warn!("Settings path requested before app paths were initialized");
         return Settings::default();
     };
 
-    if let Ok(contents) = fs::read_to_string(&path).await {
-        sanitize_settings(serde_json::from_str(&contents).unwrap_or_default())
-    } else {
-        Settings::default()
+    match fs::read_to_string(&path).await {
+        Ok(contents) => parse_settings_json(&contents),
+        Err(error) => {
+            tracing::info!("Settings file not loaded, using defaults: {}", error);
+            Settings::default()
+        }
     }
 }
 
@@ -132,12 +132,15 @@ pub fn load_settings_sync() -> Settings {
 
     // Load from disk
     let Some(path) = crate::paths::settings_path() else {
+        tracing::warn!("Settings path requested before app paths were initialized");
         return Settings::default();
     };
-    let settings = if let Ok(contents) = std::fs::read_to_string(&path) {
-        sanitize_settings(serde_json::from_str(&contents).unwrap_or_default())
-    } else {
-        Settings::default()
+    let settings = match std::fs::read_to_string(&path) {
+        Ok(contents) => parse_settings_json(&contents),
+        Err(error) => {
+            tracing::info!("Settings file not loaded, using defaults: {}", error);
+            Settings::default()
+        }
     };
 
     // Update cache
@@ -218,6 +221,60 @@ fn sanitize_settings(mut settings: Settings) -> Settings {
     settings
 }
 
+fn parse_settings_json(contents: &str) -> Settings {
+    let value: serde_json::Value = match serde_json::from_str(contents) {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!("Failed to parse settings JSON, using defaults: {}", error);
+            return Settings::default();
+        }
+    };
+
+    let raw_onboarding_completed = value
+        .get("onboardingCompleted")
+        .and_then(serde_json::Value::as_bool);
+    let raw_dictionary_terms = value
+        .get("dictionaryTerms")
+        .and_then(serde_json::Value::as_array)
+        .map(|terms| {
+            terms
+                .iter()
+                .filter_map(|term| term.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        });
+
+    let mut settings = match serde_json::from_value::<Settings>(value) {
+        Ok(settings) => sanitize_settings(settings),
+        Err(error) => {
+            tracing::warn!(
+                "Failed to deserialize settings JSON, using defaults: {}",
+                error
+            );
+            Settings::default()
+        }
+    };
+
+    if raw_onboarding_completed == Some(true) && !settings.onboarding_completed {
+        tracing::warn!("Recovering onboardingCompleted=true from raw settings JSON");
+        settings.onboarding_completed = true;
+    }
+
+    if settings.dictionary_terms.is_empty() {
+        if let Some(raw_terms) = raw_dictionary_terms {
+            let sanitized_terms = crate::dictionary::sanitize_terms(&raw_terms);
+            if !sanitized_terms.is_empty() {
+                tracing::warn!(
+                    "Recovering {} dictionary terms from raw settings JSON",
+                    sanitized_terms.len()
+                );
+                settings.dictionary_terms = sanitized_terms;
+            }
+        }
+    }
+
+    settings
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,7 +337,6 @@ mod tests {
 
             let stale = Settings {
                 onboarding_completed: false,
-                onboarding_step: Some(3),
                 selected_microphone_id: Some(format!("mic-{}", unique_suffix())),
                 ..Settings::default()
             };
@@ -290,12 +346,10 @@ mod tests {
                 .expect("stale settings update should succeed");
 
             assert!(updated.onboarding_completed);
-            assert_eq!(updated.onboarding_step, None);
             assert!(updated.selected_microphone_id.is_some());
 
             let reloaded = load_settings_from_disk().await;
             assert!(reloaded.onboarding_completed);
-            assert_eq!(reloaded.onboarding_step, None);
             assert_eq!(
                 reloaded.selected_microphone_id,
                 updated.selected_microphone_id
@@ -304,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn update_settings_clears_onboarding_step_once_setup_is_completed() {
+    fn update_settings_keeps_onboarding_completed_sticky() {
         run_async_test(async {
             let _guard = SETTINGS_TEST_MUTEX
                 .lock()
@@ -313,7 +367,6 @@ mod tests {
 
             let persisted = Settings {
                 onboarding_completed: true,
-                onboarding_step: Some(5),
                 ..Settings::default()
             };
             save_settings(&persisted)
@@ -322,7 +375,6 @@ mod tests {
 
             let incoming = Settings {
                 onboarding_completed: false,
-                onboarding_step: Some(7),
                 theme: Theme::Dark,
                 ..Settings::default()
             };
@@ -332,13 +384,12 @@ mod tests {
                 .expect("settings update should succeed");
 
             assert!(updated.onboarding_completed);
-            assert_eq!(updated.onboarding_step, None);
             assert_eq!(updated.theme, Theme::Dark);
         });
     }
 
     #[test]
-    fn update_settings_still_allows_incomplete_onboarding_progress_updates() {
+    fn update_settings_keeps_incoming_completed_state_when_disk_read_is_incomplete() {
         run_async_test(async {
             let _guard = SETTINGS_TEST_MUTEX
                 .lock()
@@ -350,7 +401,35 @@ mod tests {
                 .expect("default settings should save");
 
             let incoming = Settings {
-                onboarding_step: Some(5),
+                onboarding_completed: true,
+                dictionary_terms: vec!["Tauri".to_string()],
+                theme: Theme::Light,
+                ..Settings::default()
+            };
+
+            let updated = update_settings(incoming)
+                .await
+                .expect("settings update should succeed");
+
+            assert!(updated.onboarding_completed);
+            assert_eq!(updated.theme, Theme::Light);
+            assert_eq!(updated.dictionary_terms, vec!["Tauri".to_string()]);
+        });
+    }
+
+    #[test]
+    fn update_settings_still_allows_incomplete_onboarding_settings_updates() {
+        run_async_test(async {
+            let _guard = SETTINGS_TEST_MUTEX
+                .lock()
+                .expect("settings test mutex should lock");
+            reset_test_settings().await;
+
+            save_settings(&Settings::default())
+                .await
+                .expect("default settings should save");
+
+            let incoming = Settings {
                 selected_microphone_id: Some(format!("mic-{}", unique_suffix())),
                 ..Settings::default()
             };
@@ -360,12 +439,10 @@ mod tests {
                 .expect("settings update should succeed");
 
             assert!(!updated.onboarding_completed);
-            assert_eq!(updated.onboarding_step, Some(5));
             assert!(updated.selected_microphone_id.is_some());
 
             let reloaded = load_settings_from_disk().await;
             assert!(!reloaded.onboarding_completed);
-            assert_eq!(reloaded.onboarding_step, Some(5));
             assert_eq!(
                 reloaded.selected_microphone_id,
                 updated.selected_microphone_id
