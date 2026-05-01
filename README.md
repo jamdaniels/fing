@@ -34,14 +34,7 @@ Download the latest [release](https://github.com/jamdaniels/fing/releases).
 
 ### macOS
 
-The app is not notarized with Apple, so macOS will block it on first launch. After installing, either:
-
-- **Option A** — Right-click the app > Open, then click "Open" in the dialog.
-- **Option B** — Go to System Settings > Privacy & Security, scroll down and click "Open Anyway".
-- **Option C** — Run in Terminal:
-```bash
-xattr -cr /Applications/Fing.app
-```
+Fing macOS releases are signed with a Developer ID certificate and notarized by Apple. Open the DMG, move Fing to Applications, and launch it normally.
 
 ### Windows
 
