@@ -2,7 +2,7 @@
 
 All notable changes to Fing will be documented in this file.
 
-## 1.0.2-rc3 - 2026-05-03
+## 1.0.2 - 2026-05-03
 
 - macOS: Releases are now signed and notarized.
 - macOS: Improved permissions handling
