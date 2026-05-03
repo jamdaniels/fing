@@ -7,12 +7,27 @@ const SHORT_SHA_LEN: usize = 7;
 
 fn main() {
     emit_rerun_hints();
+    compile_macos_permission_shim();
     link_macos_clang_runtime();
 
     let commit = resolve_commit_sha().unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=GIT_COMMIT={commit}");
 
     tauri_build::build();
+}
+
+fn compile_macos_permission_shim() {
+    #[cfg(target_os = "macos")]
+    {
+        println!("cargo:rerun-if-changed=src/platform/macos_permissions.m");
+        println!("cargo:rustc-link-lib=framework=AVFoundation");
+        println!("cargo:rustc-link-lib=framework=Foundation");
+
+        cc::Build::new()
+            .file("src/platform/macos_permissions.m")
+            .flag("-fobjc-arc")
+            .compile("fing_macos_permissions");
+    }
 }
 
 fn link_macos_clang_runtime() {

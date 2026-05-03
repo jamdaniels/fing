@@ -23,7 +23,10 @@ mod update;
 
 use audio::{AudioCapture, AudioDevice, MicrophoneTest};
 use state::AppState;
-use std::sync::{mpsc, Mutex, OnceLock};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc, Mutex, OnceLock,
+};
 #[cfg(target_os = "macos")]
 use tauri::ActivationPolicy;
 use tauri::{
@@ -47,6 +50,8 @@ struct MicTestState {
 lazy_static::lazy_static! {
     static ref MIC_TEST_STATE: Mutex<MicTestState> = Mutex::new(MicTestState::default());
 }
+
+static PERMISSION_RESTART_ARMED: AtomicBool = AtomicBool::new(false);
 
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -384,6 +389,27 @@ async fn set_active_model(
 fn quit_app(app: tauri::AppHandle) {
     tracing::info!("Application shutdown requested");
     app.exit(0);
+}
+
+#[tauri::command]
+fn present_main_window(app: tauri::AppHandle, frontmost: bool) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_always_on_top(frontmost);
+
+        if frontmost {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+
+            #[cfg(target_os = "macos")]
+            platform::activate_current_app();
+        }
+    }
+}
+
+#[tauri::command]
+fn arm_permission_restart() {
+    PERMISSION_RESTART_ARMED.store(true, Ordering::Relaxed);
 }
 
 #[tauri::command]
@@ -868,6 +894,8 @@ pub fn run() {
             // Notifications
             // Window management
             quit_app,
+            present_main_window,
+            arm_permission_restart,
             // Model management
             download_model,
             get_download_progress,
@@ -888,8 +916,18 @@ pub fn run() {
             hotkey_press,
             hotkey_release,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            let _ = (&app, &event);
+
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::ExitRequested { code: None, .. } = event {
+                if PERMISSION_RESTART_ARMED.load(Ordering::Relaxed) {
+                    app.request_restart();
+                }
+            }
+        });
 }
 
 #[cfg(test)]

@@ -21,7 +21,9 @@
   --success-15: rgba(34, 197, 94, 0.15);
   --warning: #f59e0b;
   --warning-10: rgba(245, 158, 11, 0.1);
+  --warning-15: rgba(245, 158, 11, 0.15);
   --warning-30: rgba(245, 158, 11, 0.3);
+  --warning-text: #92400e;
   --border: #e5e5e5;
   --sidebar-item-hover: rgba(0, 0, 0, 0.04);
   --sidebar-item-active: rgba(0, 0, 0, 0.08);
@@ -50,7 +52,9 @@
   --success-15: rgba(74, 222, 128, 0.15);
   --warning: #fbbf24;
   --warning-10: rgba(251, 191, 36, 0.1);
+  --warning-15: rgba(251, 191, 36, 0.15);
   --warning-30: rgba(251, 191, 36, 0.3);
+  --warning-text: #fbbf24;
   --border: #333333;
   --sidebar-item-hover: rgba(255, 255, 255, 0.05);
   --sidebar-item-active: rgba(255, 255, 255, 0.1);
@@ -80,7 +84,9 @@
     --success-15: rgba(74, 222, 128, 0.15);
     --warning: #fbbf24;
     --warning-10: rgba(251, 191, 36, 0.1);
+    --warning-15: rgba(251, 191, 36, 0.15);
     --warning-30: rgba(251, 191, 36, 0.3);
+    --warning-text: #fbbf24;
     --border: #333333;
     --sidebar-item-hover: rgba(255, 255, 255, 0.05);
     --sidebar-item-active: rgba(255, 255, 255, 0.1);
@@ -231,6 +237,7 @@ body[data-platform="windows"] .titlebar {
   font-size: 12px;
   font-weight: 500;
   text-decoration: none;
+  user-select: none;
   border: none;
   border-radius: 6px;
 }
@@ -725,6 +732,8 @@ body[data-platform="windows"] .titlebar {
   font-weight: 600;
   color: var(--text-secondary);
   white-space: nowrap;
+  cursor: default;
+  user-select: none;
   background-color: var(--bg-primary);
   border-radius: 5px;
 }
@@ -747,6 +756,16 @@ body[data-platform="windows"] .titlebar {
 
 .permission-badge.action:hover {
   background-color: var(--border);
+}
+
+.permission-badge.restart {
+  color: var(--warning-text);
+  background-color: var(--warning-15);
+  border: 1px solid var(--warning-30);
+}
+
+.permission-badge.restart:hover {
+  background-color: var(--warning-30);
 }
 
 .search-input {
@@ -1195,6 +1214,8 @@ body[data-platform="windows"] .titlebar {
   font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
+  cursor: default;
+  user-select: none;
   background-color: var(--bg-primary);
   border-radius: 5px;
 }

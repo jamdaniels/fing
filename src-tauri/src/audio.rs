@@ -531,6 +531,7 @@ impl AudioCapture {
         output
     }
 
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub fn test_microphone(&mut self) -> Result<MicrophoneTest, AudioError> {
         let (_, match_result) = self.get_device()?;
         let device_name = match_result.actual;

@@ -150,6 +150,14 @@ export async function relaunchApp(): Promise<void> {
   await relaunch();
 }
 
+export async function presentMainWindow(frontmost: boolean): Promise<void> {
+  return await invoke("present_main_window", { frontmost });
+}
+
+export async function armPermissionRestart(): Promise<void> {
+  return await invoke("arm_permission_restart");
+}
+
 export async function enableOnboardingTestMode(): Promise<void> {
   return await invoke("enable_onboarding_test_mode");
 }

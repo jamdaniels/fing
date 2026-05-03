@@ -1398,6 +1398,7 @@ name = "fing"
 version = "1.0.2-rc2"
 dependencies = [
  "audioadapter-buffers",
+ "cc",
  "cpal",
  "enigo",
  "futures-util",

@@ -265,7 +265,7 @@ function renderMicPermissionStatus(status: string | undefined): string {
   if (status === "prompt") {
     return `<button class="btn btn-secondary btn-sm" id="grant-microphone-btn">Allow</button>`;
   }
-  return `<button class="btn btn-secondary btn-sm" id="grant-microphone-btn">Grant</button>`;
+  return `<button class="btn btn-secondary btn-sm" id="grant-microphone-btn">Allow</button>`;
 }
 
 function renderAccessibilityPermissionStatus(
@@ -277,7 +277,7 @@ function renderAccessibilityPermissionStatus(
   if (status === "not-applicable") {
     return `<div class="permission-status">N/A</div>`;
   }
-  return `<button class="btn btn-secondary btn-sm" id="grant-accessibility-btn">Grant</button>`;
+  return `<button class="btn btn-secondary btn-sm" id="grant-accessibility-btn">Allow</button>`;
 }
 
 function render(): void {

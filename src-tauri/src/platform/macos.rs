@@ -2,11 +2,49 @@
 // Uses native APIs instead of AppleScript to avoid Automation permission
 
 use enigo::{Enigo, Keyboard, Settings};
+use std::ffi::c_int;
 use std::ffi::c_void;
+
+#[repr(C)]
+struct CFDictionaryKeyCallBacks {
+    version: isize,
+    retain: *const c_void,
+    release: *const c_void,
+    copy_description: *const c_void,
+    equal: *const c_void,
+    hash: *const c_void,
+}
+
+#[repr(C)]
+struct CFDictionaryValueCallBacks {
+    version: isize,
+    retain: *const c_void,
+    release: *const c_void,
+    copy_description: *const c_void,
+    equal: *const c_void,
+}
 
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
     fn AXIsProcessTrusted() -> bool;
+    fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
+    static kAXTrustedCheckOptionPrompt: *const c_void;
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    fn CFDictionaryCreate(
+        allocator: *const c_void,
+        keys: *const *const c_void,
+        values: *const *const c_void,
+        num_values: isize,
+        key_callbacks: *const CFDictionaryKeyCallBacks,
+        value_callbacks: *const CFDictionaryValueCallBacks,
+    ) -> *const c_void;
+    fn CFRelease(cf: *const c_void);
+    static kCFBooleanTrue: *const c_void;
+    static kCFTypeDictionaryKeyCallBacks: CFDictionaryKeyCallBacks;
+    static kCFTypeDictionaryValueCallBacks: CFDictionaryValueCallBacks;
 }
 
 #[link(name = "AppKit", kind = "framework")]
@@ -14,6 +52,11 @@ extern "C" {}
 
 #[link(name = "Foundation", kind = "framework")]
 extern "C" {}
+
+extern "C" {
+    fn fing_microphone_authorization_status() -> u32;
+    fn fing_request_microphone_access() -> bool;
+}
 
 // Objective-C runtime bindings
 #[link(name = "objc", kind = "dylib")]
@@ -28,32 +71,82 @@ pub fn check_accessibility_permission() -> bool {
 }
 
 pub fn request_accessibility_permission() -> bool {
-    let _ = std::process::Command::new("open")
-        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-        .spawn();
+    unsafe {
+        let keys = [kAXTrustedCheckOptionPrompt];
+        let values = [kCFBooleanTrue];
+        let options = CFDictionaryCreate(
+            std::ptr::null(),
+            keys.as_ptr(),
+            values.as_ptr(),
+            1,
+            &kCFTypeDictionaryKeyCallBacks,
+            &kCFTypeDictionaryValueCallBacks,
+        );
 
-    check_accessibility_permission()
+        if options.is_null() {
+            tracing::warn!("Failed to create Accessibility prompt options");
+            return check_accessibility_permission();
+        }
+
+        let trusted = AXIsProcessTrustedWithOptions(options);
+        CFRelease(options);
+
+        trusted
+    }
 }
 
 /// Open System Preferences to the Microphone privacy pane
 pub fn request_microphone_permission() {
+    let status = check_microphone_permission();
+    if status == "granted" {
+        return;
+    }
+
+    if status == "prompt" {
+        if unsafe { fing_request_microphone_access() } {
+            return;
+        }
+
+        return;
+    }
+
     let _ = std::process::Command::new("open")
         .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
         .spawn();
 }
 
-/// Check if microphone permission is granted by trying to open an input stream.
-/// Successful stream setup indicates the app is authorized, even if the room is silent.
+/// Check microphone permission without opening the audio device.
 pub fn check_microphone_permission() -> String {
-    use crate::audio::AudioCapture;
+    let status = unsafe { fing_microphone_authorization_status() };
 
-    let mut capture = AudioCapture::new();
-    match capture.test_microphone() {
-        Ok(_) => "granted".to_string(),
-        Err(e) => {
-            tracing::warn!("Microphone check failed: {}", e);
+    match status {
+        0 => "prompt".to_string(),
+        3 => "granted".to_string(),
+        1 | 2 => "denied".to_string(),
+        _ => {
+            tracing::warn!("Unknown microphone authorization status: {}", status);
             "denied".to_string()
         }
+    }
+}
+
+pub fn activate_current_app() {
+    unsafe {
+        let app_class = objc_getClass(c"NSApplication".as_ptr());
+        if app_class.is_null() {
+            tracing::warn!("Failed to get NSApplication class");
+            return;
+        }
+
+        let shared_sel = sel_registerName(c"sharedApplication".as_ptr());
+        let app = objc_msgSend(app_class, shared_sel);
+        if app.is_null() {
+            tracing::warn!("Failed to get shared NSApplication");
+            return;
+        }
+
+        let activate_sel = sel_registerName(c"activateIgnoringOtherApps:".as_ptr());
+        let _: *mut c_void = objc_msgSend(app, activate_sel, 1 as c_int);
     }
 }
 

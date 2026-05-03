@@ -35,6 +35,7 @@ import {
 } from "./lib/hotkey";
 import { createIcon, escapeHtml } from "./lib/icons";
 import {
+  armPermissionRestart,
   checkForUpdatesNow,
   clearUpdateStatus,
   deleteAllTranscripts,
@@ -53,10 +54,12 @@ import {
   getUpdateStatus,
   hotkeyPress,
   hotkeyRelease,
+  presentMainWindow,
   refreshAudioDevices,
   relaunchApp,
   requestAccessibilityPermission,
   requestMicrophonePermission,
+  requestPermissions,
   searchTranscripts,
   setActiveModel,
   setAutoStart,
@@ -73,6 +76,7 @@ import type {
   MicTestStartResult,
   ModelInfo,
   ModelVariant,
+  PermissionStatus,
   Settings as SettingsType,
   SidebarItem,
   Stats,
@@ -126,6 +130,9 @@ let updateStatus: UpdateStatus = {
   updateAvailable: false,
   checking: false,
 };
+type SettingsPermission = "microphone" | "accessibility";
+const permissionRestartRequired = new Set<SettingsPermission>();
+let lastPermissionStatus: PermissionStatus | null = null;
 
 interface ModelDownloadProgressState {
   percentage: number;
@@ -863,9 +870,13 @@ function handleDictionaryKeydown(e: KeyboardEvent): void {
 const SETTINGS_CACHE_TTL = 5000; // 5 seconds
 
 async function loadSettings(
-  options: { force?: boolean; refreshDevices?: boolean } = {}
+  options: {
+    force?: boolean;
+    loadDevices?: boolean;
+    refreshDevices?: boolean;
+  } = {}
 ): Promise<void> {
-  const { force = false, refreshDevices = false } = options;
+  const { force = false, loadDevices = true, refreshDevices = false } = options;
 
   // Skip if cache is fresh (within TTL)
   if (
@@ -877,7 +888,12 @@ async function loadSettings(
   }
 
   try {
-    const shouldRefreshDevices = refreshDevices || audioDevices.length === 0;
+    let shouldRefreshDevices =
+      loadDevices && (refreshDevices || audioDevices.length === 0);
+    if (shouldRefreshDevices) {
+      shouldRefreshDevices = await canRefreshAudioDevices();
+    }
+
     const loadedModelsPromise = getModels().catch((err) => {
       console.error("Failed to load models:", err);
       return models;
@@ -906,6 +922,16 @@ async function loadSettings(
     audioDevices = [];
     models = [];
   }
+}
+
+async function canRefreshAudioDevices(): Promise<boolean> {
+  if (document.body.dataset.platform !== "darwin") {
+    return true;
+  }
+
+  const permissions = await requestPermissions();
+  trackPermissionRestartRequirement(permissions);
+  return permissions.microphone === "granted";
 }
 
 function formatKeyForDisplay(key: string): string {
@@ -1166,6 +1192,10 @@ async function showMicTestModal(): Promise<void> {
       btn.classList.add("spinning");
       const minSpinTime = new Promise((r) => setTimeout(r, 1000));
       try {
+        if (!(await canRefreshAudioDevices())) {
+          return;
+        }
+
         const [devices] = await Promise.all([
           refreshAudioDevices(),
           minSpinTime,
@@ -1734,7 +1764,16 @@ function handleSettingsClick(e: MouseEvent): void {
 
   // Handle mic test button
   if (target.closest(".mic-test-btn")) {
-    showMicTestModal();
+    canRefreshAudioDevices()
+      .then((canUseMicrophone) => {
+        if (!canUseMicrophone) {
+          updatePermissionStatus();
+          return;
+        }
+
+        showMicTestModal();
+      })
+      .catch((err) => console.error("Failed to check microphone access:", err));
     return;
   }
 
@@ -1751,7 +1790,12 @@ function handleSettingsClick(e: MouseEvent): void {
     refreshBtn.disabled = true;
     refreshBtn.classList.add("spinning");
     const minSpinTime = new Promise((r) => setTimeout(r, 1000));
-    Promise.all([refreshAudioDevices(), minSpinTime])
+    Promise.all([
+      canRefreshAudioDevices().then((canRefresh) =>
+        canRefresh ? refreshAudioDevices() : audioDevices
+      ),
+      minSpinTime,
+    ])
       .then(([devices]) => {
         audioDevices = devices;
         renderContent();
@@ -2008,6 +2052,7 @@ function renderDictionary(el: HTMLElement): void {
 }
 
 function renderSettingsUI(el: HTMLElement): void {
+  const isMac = document.body.dataset.platform === "darwin";
   const micOptions = audioDevices
     .map(
       (d) =>
@@ -2115,13 +2160,17 @@ function renderSettingsUI(el: HTMLElement): void {
           </div>
           <span class="permission-badge" data-permission="microphone">Checking...</span>
         </div>
-        <div class="settings-row">
+        ${
+          isMac
+            ? `<div class="settings-row">
           <div>
             <div class="settings-row-label">Accessibility</div>
             <div class="settings-row-desc">Required for global hotkey and paste</div>
           </div>
           <span class="permission-badge" data-permission="accessibility">Checking...</span>
-        </div>
+        </div>`
+            : ""
+        }
       </div>
     </div>
     <div class="settings-section">
@@ -2177,7 +2226,14 @@ function renderSettings(el: HTMLElement): void {
   renderSettingsUI(el);
 
   if (cacheFresh) {
-    refreshAudioDevices()
+    canRefreshAudioDevices()
+      .then((canRefresh) => {
+        if (!canRefresh) {
+          return audioDevices;
+        }
+
+        return refreshAudioDevices();
+      })
       .then((devices) => {
         audioDevices = devices;
         if (currentView === "settings") {
@@ -2196,7 +2252,15 @@ function renderSettings(el: HTMLElement): void {
   });
 }
 
-function updatePermissionStatus(): void {
+function updatePermissionStatus(grantedPermission?: SettingsPermission): void {
+  refreshPermissionStatus(grantedPermission).catch((err) => {
+    console.error("Failed to update permission status:", err);
+  });
+}
+
+async function refreshPermissionStatus(
+  grantedPermission?: SettingsPermission
+): Promise<void> {
   const micBadge = document.querySelector(
     '[data-permission="microphone"]'
   ) as HTMLElement;
@@ -2204,45 +2268,60 @@ function updatePermissionStatus(): void {
     '[data-permission="accessibility"]'
   ) as HTMLElement;
 
-  if (!(micBadge && accBadge)) {
+  if (!micBadge) {
     return;
   }
 
   const isMac = document.body.dataset.platform === "darwin";
-  const hasOnboarded = settings?.onboardingCompleted ?? false;
 
-  if (isMac) {
-    const status = hasOnboarded ? "granted" : "denied";
-    updateBadge(micBadge, status, "microphone");
-    updateBadge(accBadge, status, "accessibility");
+  if (!isMac) {
+    updateBadge(micBadge, "granted", "microphone");
     return;
   }
 
-  updateBadge(micBadge, "granted", "microphone");
-  updateBadge(accBadge, "not-applicable", "accessibility");
+  if (!accBadge) {
+    return;
+  }
+
+  const status = await requestPermissions();
+  trackPermissionRestartRequirement(status);
+
+  if (grantedPermission && status[grantedPermission] === "granted") {
+    markPermissionRestartRequired(grantedPermission);
+  }
+
+  updateBadge(micBadge, status.microphone, "microphone");
+  updateBadge(accBadge, status.accessibility, "accessibility");
 }
 
 function updateBadge(
   badge: HTMLElement,
-  status: string,
-  type: "microphone" | "accessibility"
+  status: PermissionStatus[SettingsPermission] | "not-applicable",
+  type: SettingsPermission
 ): void {
   badge.className = "permission-badge";
+  badge.onclick = null;
 
-  if (status === "granted") {
+  if (status === "granted" && permissionRestartRequired.has(type)) {
+    badge.textContent = "Restart";
+    badge.classList.add("action", "restart");
+    badge.onclick = () => {
+      relaunchApp().catch((err) => {
+        console.error("Failed to restart app:", err);
+      });
+    };
+  } else if (status === "granted") {
     badge.textContent = "Granted";
     badge.classList.add("granted");
   } else if (status === "not-applicable") {
     badge.textContent = "N/A";
     badge.classList.add("na");
   } else {
-    badge.textContent = "Grant";
+    badge.textContent = "Allow";
     badge.classList.add("action");
-    badge.style.cursor = "pointer";
     badge.onclick = async () => {
       badge.textContent = "Opening...";
       badge.classList.remove("action");
-      badge.style.cursor = "default";
 
       if (type === "microphone") {
         await requestMicrophonePermission();
@@ -2250,9 +2329,68 @@ function updateBadge(
         await requestAccessibilityPermission();
       }
 
-      setTimeout(updatePermissionStatus, 1500);
+      pollPermissionStatusAfterRequest(type);
     };
   }
+}
+
+function pollPermissionStatusAfterRequest(type: SettingsPermission): void {
+  const startedAt = Date.now();
+  const timeoutMs = 15_000;
+  const intervalMs = 500;
+
+  const refresh = async (): Promise<void> => {
+    await refreshPermissionStatus(type);
+
+    if (
+      permissionRestartRequired.has(type) ||
+      Date.now() - startedAt >= timeoutMs
+    ) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      refresh().catch((err) => {
+        console.error("Failed to refresh permission status:", err);
+      });
+    }, intervalMs);
+  };
+
+  window.setTimeout(() => {
+    refresh().catch((err) => {
+      console.error("Failed to refresh permission status:", err);
+    });
+  }, intervalMs);
+}
+
+function trackPermissionRestartRequirement(status: PermissionStatus): void {
+  if (lastPermissionStatus) {
+    markRestartIfNewlyGranted("microphone", lastPermissionStatus, status);
+    markRestartIfNewlyGranted("accessibility", lastPermissionStatus, status);
+  }
+
+  lastPermissionStatus = status;
+}
+
+function markRestartIfNewlyGranted(
+  type: SettingsPermission,
+  previousStatus: PermissionStatus,
+  currentStatus: PermissionStatus
+): void {
+  if (previousStatus[type] !== "granted" && currentStatus[type] === "granted") {
+    markPermissionRestartRequired(type);
+  }
+}
+
+function markPermissionRestartRequired(type: SettingsPermission): void {
+  if (permissionRestartRequired.has(type)) {
+    return;
+  }
+
+  permissionRestartRequired.add(type);
+  armPermissionRestart().catch((err) => {
+    console.error("Failed to arm permission restart:", err);
+  });
 }
 
 function renderAbout(el: HTMLElement): void {
@@ -2427,19 +2565,62 @@ async function setupHotkeyListener(): Promise<void> {
   }
 }
 
+async function showMissingMacPermissionsDialog(
+  onboardingCompleted: boolean
+): Promise<void> {
+  if (document.body.dataset.platform !== "darwin" || !onboardingCompleted) {
+    return;
+  }
+
+  try {
+    const permissions = await requestPermissions();
+    trackPermissionRestartRequirement(permissions);
+
+    const missingPermissions: string[] = [];
+
+    if (permissions.microphone !== "granted") {
+      missingPermissions.push("Microphone");
+    }
+    if (permissions.accessibility !== "granted") {
+      missingPermissions.push("Accessibility");
+    }
+
+    if (missingPermissions.length === 0) {
+      return;
+    }
+
+    const { message } = await import("@tauri-apps/plugin-dialog");
+    await presentMainWindow(true);
+    try {
+      await message(
+        `Fing needs ${missingPermissions.join(" and ")} permission${missingPermissions.length === 1 ? "" : "s"} to record and paste text.\n\nOpen Fing from the tray, go to Settings > Permissions, and click Allow.`,
+        {
+          title: "Permissions Required",
+          kind: "warning",
+        }
+      );
+    } finally {
+      await presentMainWindow(false);
+    }
+  } catch (err) {
+    console.error("Failed to check permissions on startup:", err);
+  }
+}
+
 async function init(): Promise<void> {
   // Platform detection for platform-specific UI (e.g., hide custom titlebar on Windows)
   const isMac = navigator.userAgent.includes("Mac");
   document.body.dataset.platform = isMac ? "darwin" : "windows";
 
-  await loadSettings({ refreshDevices: true });
+  await loadSettings({ loadDevices: false });
   const settingsHasCompletedOnboarding = settings?.onboardingCompleted === true;
+  let completedByEitherSource = settingsHasCompletedOnboarding;
   let shouldShowOnboarding =
     settings !== null && !settingsHasCompletedOnboarding;
 
   try {
     const bootstrapStatus = await getBootstrapStatus();
-    const completedByEitherSource =
+    completedByEitherSource =
       settingsHasCompletedOnboarding ||
       bootstrapStatus.onboardingCompleted === true;
     currentAppState = bootstrapStatus.appState;
@@ -2450,6 +2631,11 @@ async function init(): Promise<void> {
     updateStatus = await getUpdateStatus();
   } catch (error) {
     console.error("Failed to load bootstrap status:", error);
+  }
+
+  if (!shouldShowOnboarding) {
+    await showMissingMacPermissionsDialog(completedByEitherSource);
+    await loadSettings({ force: true, refreshDevices: true });
   }
 
   await listen("app-state-changed", (event) => {
@@ -2485,6 +2671,12 @@ async function init(): Promise<void> {
     // Now set up the frontend hotkey listener with the user's chosen hotkey
     setupHotkeyListener().catch(console.error);
     getCurrentWindow().hide();
+  });
+
+  window.addEventListener("focus", () => {
+    if (currentView === "settings") {
+      updatePermissionStatus();
+    }
   });
 
   listen("transcript-added", () => {
