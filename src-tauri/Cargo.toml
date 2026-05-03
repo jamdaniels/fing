@@ -1,6 +1,6 @@
 [package]
 name = "fing"
-version = "1.0.2-rc2"
+version = "1.0.2-rc3"
 edition = "2021"
 description = "Fast, private, local speech-to-text"
 authors = ["jamdaniels"]

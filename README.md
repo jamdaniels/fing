@@ -34,7 +34,7 @@ Download the latest [release](https://github.com/jamdaniels/fing/releases).
 
 ### macOS
 
-Fing macOS releases are signed with a Developer ID certificate and notarized by Apple. Open the DMG, move Fing to Applications, and launch it normally.
+Fing macOS releases are signed and notarized by Apple. Open the DMG, move Fing to Applications, and launch it normally.
 
 ### Windows
 
