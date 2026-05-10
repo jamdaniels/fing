@@ -1438,11 +1438,13 @@ body[data-platform="windows"] .titlebar {
 }
 
 .instruction-key {
+  --key-unit: 48px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 48px;
-  padding: 8px 14px;
+  min-width: var(--key-unit);
+  height: 40px;
+  padding: 0 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
   font-size: 14px;
   font-weight: 700;
@@ -1450,6 +1452,11 @@ body[data-platform="windows"] .titlebar {
   border: 2px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 2px 0 var(--border);
+}
+
+.instruction-key svg {
+  width: 18px;
+  height: 18px;
 }
 
 .instruction-icon {
@@ -1735,9 +1742,13 @@ body[data-platform="windows"] .titlebar {
 }
 
 .hotkey-modal-key {
-  display: inline-block;
-  padding: 6px 14px;
-  margin-left: 8px;
+  --key-unit: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--key-unit);
+  height: 36px;
+  padding: 0 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
   font-size: 14px;
   font-weight: 600;
@@ -1745,6 +1756,11 @@ body[data-platform="windows"] .titlebar {
   border: 2px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 2px 0 var(--border);
+}
+
+.hotkey-modal-key svg {
+  width: 18px;
+  height: 18px;
 }
 
 .hotkey-modal-hint {
@@ -2001,11 +2017,13 @@ body[data-platform="windows"] .titlebar {
 }
 
 .hotkey-key {
+  --key-unit: 64px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 64px;
-  padding: 12px 20px;
+  min-width: var(--key-unit);
+  height: 56px;
+  padding: 0 16px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
   font-size: 18px;
   font-weight: 700;
@@ -2013,6 +2031,11 @@ body[data-platform="windows"] .titlebar {
   border: 2px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 3px 0 var(--border);
+}
+
+.hotkey-key svg {
+  width: 24px;
+  height: 24px;
 }
 
 .hotkey-key.captured {
@@ -2108,15 +2131,83 @@ body[data-platform="windows"] .titlebar {
 }
 
 .hotkey-key-inline {
-  display: inline-block;
-  padding: 4px 10px;
+  --key-unit: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--key-unit);
+  height: 24px;
+  padding: 0 8px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
   font-size: 13px;
   font-weight: 600;
+  vertical-align: middle;
   background-color: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 1px 0 var(--border);
+}
+
+.hotkey-key-inline svg {
+  width: 14px;
+  height: 14px;
+}
+
+.hotkey-chips {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  vertical-align: middle;
+}
+
+.is-w-15 {
+  min-width: calc(var(--key-unit, 48px) * 1.5);
+}
+
+.is-w-175 {
+  min-width: calc(var(--key-unit, 48px) * 1.75);
+}
+
+.is-w-2 {
+  min-width: calc(var(--key-unit, 48px) * 2);
+}
+
+.is-w-25 {
+  min-width: calc(var(--key-unit, 48px) * 2.5);
+}
+
+.is-side-left {
+  justify-content: flex-start;
+}
+
+.is-side-right {
+  justify-content: flex-end;
+}
+
+.hotkey-chip-sep {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.hotkey-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  font: inherit;
+  color: var(--text-primary);
+  cursor: default;
+  background: transparent;
+  border: none;
+}
+
+.hotkey-btn .hotkey-key-inline {
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border);
+}
+
+.hotkey-btn:hover .hotkey-key-inline {
+  background-color: var(--border);
 }
 
 .test-error {

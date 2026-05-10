@@ -680,6 +680,8 @@ async fn finish_transcription(
         tokio::time::sleep(Duration::from_millis(crate::indicator::HIDE_ANIMATION_MS)).await;
         crate::state::transition_to(crate::state::AppState::Ready).ok();
         app.emit("app-state-changed", "ready").ok();
+        // Defensive: clear any stale listener state so the next press always works.
+        crate::hotkey_listener::reset_listener_state();
     }
 
     if let Some(t) = text {
@@ -735,12 +737,12 @@ pub fn enable_onboarding_test_mode(app: AppHandle) -> Result<(), String> {
 
     // Set the hotkey from settings
     let settings = load_settings_sync();
-    if let Err(e) = crate::hotkey_config::set_hotkey_from_string_or_default(&settings.hotkey) {
+    if let Err(e) = crate::hotkey_config::set_hotkey_from_string(&settings.hotkey) {
         tracing::warn!(
-            "Failed to parse hotkey from settings: {} - falling back to {}",
-            e,
-            crate::hotkey_config::DEFAULT_HOTKEY
+            "Failed to parse hotkey from settings: {} - onboarding hotkey test will remain inactive",
+            e
         );
+        crate::hotkey_config::clear_hotkey_config()?;
     }
 
     // Register the hotkey listener (idempotent)

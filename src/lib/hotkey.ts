@@ -1,273 +1,346 @@
-const FUNCTION_KEY_REGEX = /^F\d+$/i;
-const SINGLE_KEY_REGEX = /^[A-Z0-9]$/;
-const MODIFIER_EVENT_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
-const SPACE_EVENT_KEYS = new Set([" ", "Space", "Spacebar"]);
+const DEFAULT_HOTKEY = "F9";
+const FUNCTION_KEY_REGEX = /^F(?:[1-9]|1\d|2[0-4])$/;
+const KEY_TOKEN_REGEX = /^Key[A-Z]$/;
+const DIGIT_TOKEN_REGEX = /^Digit\d$/;
+const NUMPAD_TOKEN_REGEX = /^Numpad\d$/;
 
-type HotkeyModifier = "alt" | "ctrl" | "meta" | "shift";
+const EVENT_CODE_ALIASES: Record<string, string> = {
+  AltLeft: "Alt",
+  AltRight: "AltGr",
+  ArrowDown: "DownArrow",
+  ArrowLeft: "LeftArrow",
+  ArrowRight: "RightArrow",
+  ArrowUp: "UpArrow",
+  AudioVolumeDown: "VolumeDown",
+  AudioVolumeMute: "VolumeMute",
+  AudioVolumeUp: "VolumeUp",
+  Backquote: "BackQuote",
+  BracketLeft: "LeftBracket",
+  BracketRight: "RightBracket",
+  ContextMenu: "Apps",
+  Digit0: "Num0",
+  Digit1: "Num1",
+  Digit2: "Num2",
+  Digit3: "Num3",
+  Digit4: "Num4",
+  Digit5: "Num5",
+  Digit6: "Num6",
+  Digit7: "Num7",
+  Digit8: "Num8",
+  Digit9: "Num9",
+  Enter: "Return",
+  Fn: "Function",
+  IntlBackslash: "IntlBackslash",
+  IntlRo: "IntlRo",
+  IntlYen: "IntlYen",
+  KanaMode: "KanaMode",
+  Numpad0: "Kp0",
+  Numpad1: "Kp1",
+  Numpad2: "Kp2",
+  Numpad3: "Kp3",
+  Numpad4: "Kp4",
+  Numpad5: "Kp5",
+  Numpad6: "Kp6",
+  Numpad7: "Kp7",
+  Numpad8: "Kp8",
+  Numpad9: "Kp9",
+  NumpadAdd: "KpPlus",
+  NumpadComma: "KpComma",
+  NumpadDecimal: "KpDecimal",
+  NumpadDivide: "KpDivide",
+  NumpadEnter: "KpReturn",
+  NumpadEqual: "KpEqual",
+  NumpadMultiply: "KpMultiply",
+  NumpadSubtract: "KpMinus",
+  Period: "Dot",
+  Semicolon: "SemiColon",
+};
 
-interface ParsedHotkeyPart {
-  key: string | null;
-  modifier: HotkeyModifier | null;
-}
+const BASE_TOKENS = [
+  "Alt",
+  "AltGr",
+  "Apps",
+  "Backslash",
+  "Backspace",
+  "BackQuote",
+  "Cancel",
+  "CapsLock",
+  "Clear",
+  "Comma",
+  "ControlLeft",
+  "ControlRight",
+  "Delete",
+  "Dot",
+  "DownArrow",
+  "End",
+  "Equal",
+  "Execute",
+  "Final",
+  "Function",
+  "Hangul",
+  "Hanja",
+  "Hanji",
+  "Help",
+  "Home",
+  "Insert",
+  "IntlBackslash",
+  "IntlRo",
+  "IntlYen",
+  "Junja",
+  "Kana",
+  "KanaMode",
+  "KpComma",
+  "KpDecimal",
+  "KpDivide",
+  "KpEqual",
+  "KpMinus",
+  "KpMultiply",
+  "KpPlus",
+  "KpReturn",
+  "Lang1",
+  "Lang2",
+  "Lang3",
+  "Lang4",
+  "Lang5",
+  "LeftArrow",
+  "LeftBracket",
+  "MetaLeft",
+  "MetaRight",
+  "Minus",
+  "NumLock",
+  "PageDown",
+  "PageUp",
+  "Pause",
+  "Print",
+  "PrintScreen",
+  "Quote",
+  "Return",
+  "RightArrow",
+  "RightBracket",
+  "ScrollLock",
+  "Select",
+  "Separator",
+  "SemiColon",
+  "ShiftLeft",
+  "ShiftRight",
+  "Slash",
+  "Sleep",
+  "Space",
+  "Tab",
+  "UpArrow",
+  "VolumeDown",
+  "VolumeMute",
+  "VolumeUp",
+];
+
+const VALID_HOTKEY_TOKENS = new Set([
+  ...BASE_TOKENS,
+  ...Array.from({ length: 24 }, (_, index) => `F${index + 1}`),
+  ...Array.from(
+    { length: 26 },
+    (_, index) => `Key${String.fromCharCode(65 + index)}`
+  ),
+  ...Array.from({ length: 10 }, (_, index) => `Num${index}`),
+  ...Array.from({ length: 10 }, (_, index) => `Kp${index}`),
+]);
+
+const TOKEN_DISPLAY_LABELS: Record<string, string> = {
+  Alt: "Option",
+  AltGr: "Option Right",
+  Apps: "Menu",
+  BackQuote: "`",
+  Backslash: "\\",
+  CapsLock: "Caps Lock",
+  Comma: ",",
+  ControlLeft: "Ctrl Left",
+  ControlRight: "Ctrl Right",
+  Delete: "Delete",
+  Dot: ".",
+  DownArrow: "Down",
+  Equal: "=",
+  Function: "Fn",
+  KpComma: "Numpad ,",
+  KpDecimal: "Numpad .",
+  KpDivide: "Numpad /",
+  KpEqual: "Numpad =",
+  KpMinus: "Numpad -",
+  KpMultiply: "Numpad *",
+  KpPlus: "Numpad +",
+  KpReturn: "Numpad Enter",
+  LeftArrow: "Left",
+  LeftBracket: "[",
+  MetaLeft: "Cmd Left",
+  MetaRight: "Cmd Right",
+  Minus: "-",
+  NumLock: "Num Lock",
+  PageDown: "Page Down",
+  PageUp: "Page Up",
+  PrintScreen: "Print Screen",
+  Quote: "'",
+  Return: "Enter",
+  RightArrow: "Right",
+  RightBracket: "]",
+  ScrollLock: "Scroll Lock",
+  SemiColon: ";",
+  ShiftLeft: "Shift Left",
+  ShiftRight: "Shift Right",
+  Slash: "/",
+  UpArrow: "Up",
+  VolumeDown: "Volume Down",
+  VolumeMute: "Volume Mute",
+  VolumeUp: "Volume Up",
+};
 
 export interface ParsedHotkeyConfig {
-  alt: boolean;
-  ctrl: boolean;
-  key: string | null;
-  meta: boolean;
-  shift: boolean;
+  keySet: ReadonlySet<string>;
+  keys: string[];
 }
 
-function getHotkeyModifiers(e: KeyboardEvent): string[] {
-  const modifiers: string[] = [];
-
-  if (e.ctrlKey) {
-    modifiers.push("Ctrl");
+function normalizeEventCode(code: string): string | null {
+  if (!code || code === "Escape") {
+    return null;
   }
-  if (e.altKey) {
-    modifiers.push("Option");
+  if (EVENT_CODE_ALIASES[code]) {
+    return EVENT_CODE_ALIASES[code];
   }
-  if (e.shiftKey) {
-    modifiers.push("Shift");
+  if (FUNCTION_KEY_REGEX.test(code)) {
+    return code;
   }
-  if (e.metaKey) {
-    modifiers.push("Cmd");
+  if (KEY_TOKEN_REGEX.test(code)) {
+    return code;
   }
-
-  return modifiers;
-}
-
-function normalizeHotkeyBase(key: string): string | null {
-  if (FUNCTION_KEY_REGEX.test(key)) {
-    return key.toUpperCase();
+  if (DIGIT_TOKEN_REGEX.test(code)) {
+    return `Num${code.slice(-1)}`;
   }
-  if (key.length === 1 && SINGLE_KEY_REGEX.test(key.toUpperCase())) {
-    return key.toUpperCase();
+  if (NUMPAD_TOKEN_REGEX.test(code)) {
+    return `Kp${code.slice(-1)}`;
+  }
+  if (VALID_HOTKEY_TOKENS.has(code)) {
+    return code;
   }
 
   return null;
 }
 
-function getParsedModifierCount(config: ParsedHotkeyConfig): number {
-  return (
-    Number(config.ctrl) +
-    Number(config.alt) +
-    Number(config.shift) +
-    Number(config.meta)
-  );
-}
-
-function matchesModifierFlags(
-  e: KeyboardEvent,
-  config: ParsedHotkeyConfig
-): boolean {
-  return (
-    e.ctrlKey === config.ctrl &&
-    e.altKey === config.alt &&
-    e.shiftKey === config.shift &&
-    e.metaKey === config.meta
-  );
-}
-
-function isConfiguredModifierKey(
-  key: string,
-  config: ParsedHotkeyConfig
-): boolean {
-  if (key === "Alt") {
-    return config.alt;
+function normalizeEventKey(key: string): string | null {
+  if (!key || key === "Escape") {
+    return null;
+  }
+  if (key === " ") {
+    return "Space";
   }
   if (key === "Control") {
-    return config.ctrl;
+    return "ControlLeft";
   }
-  if (key === "Meta") {
-    return config.meta;
+  if (key === "Alt") {
+    return "Alt";
   }
   if (key === "Shift") {
-    return config.shift;
+    return "ShiftLeft";
+  }
+  if (key === "Meta") {
+    return "MetaLeft";
+  }
+  if (key === "Fn" || key === "Function") {
+    return "Function";
+  }
+  if (FUNCTION_KEY_REGEX.test(key)) {
+    return key;
   }
 
-  return false;
+  return null;
 }
 
-function parseHotkeyPart(part: string): ParsedHotkeyPart | null {
-  const trimmed = part.trim();
-
-  if (!trimmed) {
-    return null;
-  }
-
-  const lower = trimmed.toLowerCase();
-
-  if (lower === "alt" || lower === "option") {
-    return { key: null, modifier: "alt" };
-  }
-  if (lower === "ctrl" || lower === "control") {
-    return { key: null, modifier: "ctrl" };
-  }
-  if (lower === "meta" || lower === "cmd" || lower === "command") {
-    return { key: null, modifier: "meta" };
-  }
-  if (lower === "shift") {
-    return { key: null, modifier: "shift" };
-  }
-  if (lower === "space") {
-    return { key: "Space", modifier: null };
-  }
-  if (lower === "fn") {
-    return { key: "Fn", modifier: null };
-  }
-
-  const key = normalizeHotkeyBase(trimmed);
-
-  if (!key) {
-    return null;
-  }
-
-  return { key, modifier: null };
-}
-
-function isValidParsedHotkey(
-  config: ParsedHotkeyConfig,
-  partCount: number
+function sameHotkeySet(
+  pressedTokens: ReadonlySet<string>,
+  config: ParsedHotkeyConfig
 ): boolean {
-  const modifierCount = getParsedModifierCount(config);
-
-  if (partCount === 1) {
-    return config.key !== null && config.key !== "Space" && modifierCount === 0;
-  }
-  if (config.key === null) {
-    return modifierCount === 2;
-  }
-
-  return config.key === "Space" && modifierCount === 1;
-}
-
-function matchesConfiguredKey(
-  e: KeyboardEvent,
-  configuredKey: string | null
-): boolean {
-  if (configuredKey === null) {
+  if (pressedTokens.size !== config.keySet.size) {
     return false;
   }
-  if (configuredKey === "Space") {
-    return isSpaceKeyEvent(e);
+
+  for (const key of config.keySet) {
+    if (!pressedTokens.has(key)) {
+      return false;
+    }
   }
 
-  return e.key.toLowerCase() === configuredKey.toLowerCase();
+  return true;
 }
 
-export function isSpaceKeyEvent(e: KeyboardEvent): boolean {
-  return e.code === "Space" || SPACE_EVENT_KEYS.has(e.key);
+export function eventToHotkeyToken(e: KeyboardEvent): string | null {
+  const fromCode = normalizeEventCode(e.code);
+  if (fromCode) {
+    return fromCode;
+  }
+
+  return normalizeEventKey(e.key);
 }
 
-export function keyEventToHotkey(e: KeyboardEvent): string | null {
-  if (e.key === "Escape") {
-    return null;
-  }
+export function formatHotkeyForDisplay(hotkey: string): string {
+  return hotkey
+    .split("+")
+    .map((part) => {
+      if (KEY_TOKEN_REGEX.test(part)) {
+        return part.slice(3);
+      }
+      if (part.startsWith("Num") && part.length === 4) {
+        return part.slice(3);
+      }
+      if (part.startsWith("Kp") && part.length === 3) {
+        return `Numpad ${part.slice(2)}`;
+      }
 
-  const modifiers = getHotkeyModifiers(e);
-
-  if (MODIFIER_EVENT_KEYS.has(e.key)) {
-    return modifiers.length === 2 ? modifiers.join("+") : null;
-  }
-  if (isSpaceKeyEvent(e)) {
-    return modifiers.length === 1 ? [...modifiers, "Space"].join("+") : null;
-  }
-
-  const key = normalizeHotkeyBase(e.key);
-
-  if (!key || modifiers.length !== 0) {
-    return null;
-  }
-
-  return key;
+      return TOKEN_DISPLAY_LABELS[part] ?? part;
+    })
+    .join(" + ");
 }
 
 export function matchesHotkey(
-  e: KeyboardEvent,
+  pressedTokens: ReadonlySet<string>,
   config: ParsedHotkeyConfig
 ): boolean {
-  if (!matchesModifierFlags(e, config)) {
-    return false;
-  }
-  if (config.key === null) {
-    return isConfiguredModifierKey(e.key, config);
-  }
-
-  return matchesConfiguredKey(e, config.key);
+  return sameHotkeySet(pressedTokens, config);
 }
 
 export function matchesHotkeyRelease(
   e: KeyboardEvent,
   config: ParsedHotkeyConfig
 ): boolean {
-  if (!matchesModifierFlags(e, config)) {
-    return true;
-  }
-  if (config.key === null) {
-    return false;
-  }
-
-  return matchesConfiguredKey(e, config.key);
+  const token = eventToHotkeyToken(e);
+  return token !== null && config.keySet.has(token);
 }
 
 export function normalizeStoredHotkey(hotkey?: string | null): string {
   if (hotkey) {
     const parsed = parseHotkeyString(hotkey);
-
     if (parsed) {
-      return parsed.key === "Fn" ? "Fn" : hotkey;
+      return parsed.keys.join("+");
     }
   }
 
-  return "F9";
+  return DEFAULT_HOTKEY;
 }
 
 export function parseHotkeyString(hotkey: string): ParsedHotkeyConfig | null {
-  const parts = hotkey.split("+");
-
-  if (parts.length === 0 || parts.length > 2) {
+  const trimmed = hotkey.trim();
+  if (!trimmed) {
     return null;
   }
 
-  const config: ParsedHotkeyConfig = {
-    alt: false,
-    ctrl: false,
-    key: null,
-    meta: false,
-    shift: false,
-  };
+  const keys = trimmed.split("+");
+  if (keys.length === 0) {
+    return null;
+  }
 
-  for (const part of parts) {
-    const parsedPart = parseHotkeyPart(part);
-
-    if (!parsedPart) {
+  const keySet = new Set<string>();
+  for (const key of keys) {
+    const token = key.trim();
+    if (!VALID_HOTKEY_TOKENS.has(token) || keySet.has(token)) {
       return null;
     }
-    if (parsedPart.modifier) {
-      config[parsedPart.modifier] = true;
-      continue;
-    }
-    if (config.key !== null) {
-      return null;
-    }
-
-    config.key = parsedPart.key;
+    keySet.add(token);
   }
 
-  return isValidParsedHotkey(config, parts.length) ? config : null;
-}
-
-export function shouldReleaseOnKeydown(
-  e: KeyboardEvent,
-  config: ParsedHotkeyConfig
-): boolean {
-  if (!matchesModifierFlags(e, config)) {
-    return true;
-  }
-  if (config.key === null) {
-    return !isConfiguredModifierKey(e.key, config);
-  }
-
-  return false;
+  return { keys: Array.from(keySet), keySet };
 }

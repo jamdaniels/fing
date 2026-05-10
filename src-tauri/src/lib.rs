@@ -530,14 +530,16 @@ fn update_hotkey(hotkey: String) -> Result<(), String> {
     hotkey_config::set_hotkey_from_string(&hotkey)
 }
 
-fn apply_saved_hotkey_with_fallback(app: &tauri::AppHandle, hotkey: &str, warning: &str) {
-    if let Err(e) = hotkey_config::set_hotkey_from_string_or_default(hotkey) {
+fn apply_saved_hotkey(app: &tauri::AppHandle, hotkey: &str, warning: &str) {
+    if let Err(e) = hotkey_config::set_hotkey_from_string(hotkey) {
         tracing::warn!(
-            "{}: {} - falling back to {}",
+            "{}: {} - hotkey listener will remain inactive until the user sets a new hotkey",
             warning,
-            e,
-            hotkey_config::DEFAULT_HOTKEY
+            e
         );
+        if let Err(clear_error) = hotkey_config::clear_hotkey_config() {
+            tracing::warn!("Failed to clear invalid hotkey config: {}", clear_error);
+        }
     }
 
     if let Err(e) = hotkey::register_hotkey(app) {
@@ -593,7 +595,7 @@ async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
 
     // Set hotkey from settings and register listener.
     // Don't fail setup if this fails - user can fix permissions and restart
-    apply_saved_hotkey_with_fallback(
+    apply_saved_hotkey(
         &app,
         &current_settings.hotkey,
         "Failed to parse hotkey from settings",
@@ -794,7 +796,7 @@ pub fn run() {
                     }
                 }
 
-                apply_saved_hotkey_with_fallback(
+                apply_saved_hotkey(
                     &app_handle,
                     &saved_settings.hotkey,
                     "Failed to parse hotkey from settings",

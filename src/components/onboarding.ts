@@ -16,13 +16,13 @@ import {
   Shield,
 } from "lucide";
 import {
-  keyEventToHotkey,
+  eventToHotkeyToken,
   matchesHotkey,
   matchesHotkeyRelease,
   normalizeStoredHotkey,
   parseHotkeyString,
-  shouldReleaseOnKeydown,
 } from "../lib/hotkey";
+import { renderHotkeyChips } from "../lib/hotkey-display";
 import { createIcon, escapeHtml } from "../lib/icons";
 import {
   completeSetup,
@@ -102,6 +102,10 @@ let state: OnboardingState = {
 let container: HTMLElement | null = null;
 let downloadPollInterval: number | null = null;
 let hotkeyKeyHandler: ((e: KeyboardEvent) => void) | null = null;
+let hotkeyKeyupHandler: ((e: KeyboardEvent) => void) | null = null;
+let hotkeyBlurHandler: (() => void) | null = null;
+const hotkeyCaptureTokens = new Set<string>();
+const hotkeyCaptureOrder: string[] = [];
 let testResultUnlisten: UnlistenFn | null = null;
 // Frontend hotkey handling for test step (WebView2 workaround)
 let testHotkeyPressed = false;
@@ -109,6 +113,23 @@ let testHotkeyKeydown: ((e: KeyboardEvent) => void) | null = null;
 let testHotkeyKeyup: ((e: KeyboardEvent) => void) | null = null;
 
 const TOTAL_STEPS = 9;
+
+function cleanupHotkeyCaptureListeners(): void {
+  if (hotkeyKeyHandler) {
+    document.removeEventListener("keydown", hotkeyKeyHandler);
+    hotkeyKeyHandler = null;
+  }
+  if (hotkeyKeyupHandler) {
+    document.removeEventListener("keyup", hotkeyKeyupHandler);
+    hotkeyKeyupHandler = null;
+  }
+  if (hotkeyBlurHandler) {
+    window.removeEventListener("blur", hotkeyBlurHandler);
+    hotkeyBlurHandler = null;
+  }
+  hotkeyCaptureTokens.clear();
+  hotkeyCaptureOrder.length = 0;
+}
 
 function renderStepIndicator(currentStep: OnboardingStep): string {
   if (currentStep === 9) {
@@ -165,21 +186,6 @@ async function persistSelectedDevice(deviceId: string | null): Promise<void> {
     ...currentSettings,
     selectedMicrophoneId: deviceId,
   });
-}
-
-function formatKeyForDisplay(hotkey: string): string {
-  const parts = hotkey.split("+");
-  const formatted = parts.map((part) => {
-    const keyMap: Record<string, string> = {
-      Ctrl: "Ctrl",
-      Option: "Opt",
-      Shift: "Shift",
-      Cmd: "Cmd",
-      " ": "Space",
-    };
-    return keyMap[part] || part;
-  });
-  return formatted.join(" + ");
 }
 
 function getDownloadStatusText(progress: DownloadProgress | null): string {
@@ -286,9 +292,8 @@ function render(): void {
   }
 
   // Remove hotkey listener when leaving step 6
-  if (state.step !== 6 && hotkeyKeyHandler) {
-    document.removeEventListener("keydown", hotkeyKeyHandler);
-    hotkeyKeyHandler = null;
+  if (state.step !== 6 && (hotkeyKeyHandler || hotkeyKeyupHandler)) {
+    cleanupHotkeyCaptureListeners();
   }
 
   switch (state.step) {
@@ -734,6 +739,16 @@ function renderHotkeyStep(): void {
     return;
   }
 
+  const syncCapturedHotkey = () => {
+    const activeTokens = hotkeyCaptureOrder.filter((token) =>
+      hotkeyCaptureTokens.has(token)
+    );
+    if (activeTokens.length > 0) {
+      state.capturedHotkey = activeTokens.join("+");
+    }
+    render();
+  };
+
   const displayKey = state.capturedHotkey ?? state.selectedHotkey;
   const hasNewKey =
     state.capturedHotkey && state.capturedHotkey !== state.selectedHotkey;
@@ -750,7 +765,7 @@ function renderHotkeyStep(): void {
       <div class="onboarding-body">
         <div class="hotkey-capture-area">
           <div class="hotkey-preview">
-            <span class="hotkey-key ${hasNewKey ? "captured" : ""}">${formatKeyForDisplay(displayKey)}</span>
+            ${renderHotkeyChips(displayKey, { chipClass: "hotkey-key", extraChipClass: hasNewKey ? "captured" : "" })}
             ${hasNewKey ? '<span class="hotkey-new-badge">New</span>' : ""}
           </div>
           <button class="hotkey-fn-option" id="use-fn-btn">
@@ -776,21 +791,60 @@ function renderHotkeyStep(): void {
 
       if (e.key === "Escape") {
         state.capturedHotkey = null;
+        hotkeyCaptureTokens.clear();
+        hotkeyCaptureOrder.length = 0;
         render();
         return;
       }
-
-      const hotkey = keyEventToHotkey(e);
-      if (hotkey) {
-        state.capturedHotkey = hotkey;
-        render();
+      if (e.repeat) {
+        return;
       }
+
+      const token = eventToHotkeyToken(e);
+      if (!token) {
+        return;
+      }
+
+      if (!hotkeyCaptureTokens.has(token)) {
+        hotkeyCaptureOrder.push(token);
+      }
+      hotkeyCaptureTokens.add(token);
+      syncCapturedHotkey();
     };
     document.addEventListener("keydown", hotkeyKeyHandler);
   }
+  if (!hotkeyKeyupHandler) {
+    hotkeyKeyupHandler = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const token = eventToHotkeyToken(e);
+      if (!token) {
+        return;
+      }
+
+      hotkeyCaptureTokens.delete(token);
+      const tokenIndex = hotkeyCaptureOrder.indexOf(token);
+      if (tokenIndex !== -1) {
+        hotkeyCaptureOrder.splice(tokenIndex, 1);
+      }
+      syncCapturedHotkey();
+    };
+    document.addEventListener("keyup", hotkeyKeyupHandler);
+  }
+  if (!hotkeyBlurHandler) {
+    hotkeyBlurHandler = () => {
+      hotkeyCaptureTokens.clear();
+      hotkeyCaptureOrder.length = 0;
+      render();
+    };
+    window.addEventListener("blur", hotkeyBlurHandler);
+  }
 
   document.getElementById("use-fn-btn")?.addEventListener("click", () => {
-    state.capturedHotkey = "Fn";
+    state.capturedHotkey = "Function";
+    hotkeyCaptureTokens.clear();
+    hotkeyCaptureOrder.length = 0;
     render();
   });
 
@@ -817,10 +871,7 @@ async function handleHotkeyContinue(): Promise<void> {
     console.error("Failed to save hotkey:", err);
   }
 
-  if (hotkeyKeyHandler) {
-    document.removeEventListener("keydown", hotkeyKeyHandler);
-    hotkeyKeyHandler = null;
-  }
+  cleanupHotkeyCaptureListeners();
 
   goToStep(7);
 }
@@ -890,7 +941,7 @@ function renderTestStep(): void {
           ${createIcon(Mic)}
         </div>
         <h1 class="onboarding-title">Test Transcription</h1>
-        <p class="onboarding-desc">Hold <span class="hotkey-key-inline">${formatKeyForDisplay(hotkey)}</span> and speak</p>
+        <p class="onboarding-desc">Hold ${renderHotkeyChips(hotkey, { chipClass: "hotkey-key-inline" })} and speak</p>
       </div>
       <div class="onboarding-body">
         <div
@@ -941,7 +992,7 @@ function renderCompletion(): void {
         }
         <div class="completion-instructions">
           <div class="instruction-item">
-            <span class="instruction-key">${formatKeyForDisplay(hotkey)}</span>
+            ${renderHotkeyChips(hotkey, { chipClass: "instruction-key" })}
             <span>Press and hold to start recording</span>
           </div>
           <div class="instruction-item">
@@ -1013,16 +1064,21 @@ async function goToStep(step: OnboardingStep): Promise<void> {
         "[onboarding] Setting up frontend hotkey listener for:",
         hotkey
       );
+      const pressedTestTokens = new Set<string>();
 
       testHotkeyKeydown = (e: KeyboardEvent) => {
-        if (testHotkeyPressed) {
-          if (shouldReleaseOnKeydown(e, parsedHotkey)) {
-            testHotkeyPressed = false;
-            hotkeyRelease().catch(console.error);
-          }
+        if (e.repeat) {
           return;
         }
-        if (matchesHotkey(e, parsedHotkey)) {
+        const token = eventToHotkeyToken(e);
+        if (!token) {
+          return;
+        }
+        pressedTestTokens.add(token);
+        if (testHotkeyPressed) {
+          return;
+        }
+        if (matchesHotkey(pressedTestTokens, parsedHotkey)) {
           e.preventDefault();
           e.stopPropagation();
           testHotkeyPressed = true;
@@ -1031,7 +1087,11 @@ async function goToStep(step: OnboardingStep): Promise<void> {
       };
 
       testHotkeyKeyup = (e: KeyboardEvent) => {
+        const token = eventToHotkeyToken(e);
         if (!testHotkeyPressed) {
+          if (token) {
+            pressedTestTokens.delete(token);
+          }
           return;
         }
         if (matchesHotkeyRelease(e, parsedHotkey)) {
@@ -1039,6 +1099,9 @@ async function goToStep(step: OnboardingStep): Promise<void> {
           e.stopPropagation();
           testHotkeyPressed = false;
           hotkeyRelease().catch(console.error);
+        }
+        if (token) {
+          pressedTestTokens.delete(token);
         }
       };
 
@@ -1288,9 +1351,6 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
 
 export function cleanupOnboarding(): void {
   stopPolling();
-  if (hotkeyKeyHandler) {
-    document.removeEventListener("keydown", hotkeyKeyHandler);
-    hotkeyKeyHandler = null;
-  }
+  cleanupHotkeyCaptureListeners();
   container = null;
 }

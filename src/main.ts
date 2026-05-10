@@ -26,13 +26,13 @@ import {
 import { cleanupOnboarding, renderOnboarding } from "./components/onboarding";
 import type { ParsedHotkeyConfig } from "./lib/hotkey";
 import {
-  keyEventToHotkey,
+  eventToHotkeyToken,
   matchesHotkey,
   matchesHotkeyRelease,
   normalizeStoredHotkey,
   parseHotkeyString,
-  shouldReleaseOnKeydown,
 } from "./lib/hotkey";
+import { renderHotkeyChips } from "./lib/hotkey-display";
 import { createIcon, escapeHtml } from "./lib/icons";
 import {
   armPermissionRestart,
@@ -934,40 +934,6 @@ async function canRefreshAudioDevices(): Promise<boolean> {
   return permissions.microphone === "granted";
 }
 
-function formatKeyForDisplay(key: string): string {
-  // Handle combination strings like "Option+Space"
-  const parts = key.split("+");
-  const formatted = parts.map((part) => {
-    const keyMap: Record<string, string> = {
-      Ctrl: "Ctrl",
-      Control: "Ctrl",
-      Option: "Option",
-      Alt: "Option",
-      Shift: "Shift",
-      Cmd: "Cmd",
-      Meta: "Cmd",
-      Fn: "Fn",
-      F1: "F1",
-      F2: "F2",
-      F3: "F3",
-      F4: "F4",
-      F5: "F5",
-      F6: "F6",
-      F7: "F7",
-      F8: "F8",
-      F9: "F9",
-      F10: "F10",
-      F11: "F11",
-      F12: "F12",
-      Space: "Space",
-      Escape: "Esc",
-      " ": "Space",
-    };
-    return keyMap[part] || part;
-  });
-  return formatted.join(" + ");
-}
-
 async function setHotkey(hotkey: string): Promise<boolean> {
   if (!settings) {
     return false;
@@ -996,10 +962,25 @@ function showHotkeyModal(): void {
   closeHotkeyModal();
 
   let capturedHotkey: string | null = null;
+  const pressedTokens = new Set<string>();
+  const pressedOrder: string[] = [];
   const currentHotkey = normalizeStoredHotkey(settings?.hotkey);
 
   const modal = document.createElement("div");
   modal.className = "dialog-overlay";
+
+  const syncCapturedHotkey = () => {
+    const activeTokens = pressedOrder.filter((token) =>
+      pressedTokens.has(token)
+    );
+    if (activeTokens.length === 0) {
+      renderModal();
+      return;
+    }
+
+    capturedHotkey = activeTokens.join("+");
+    renderModal();
+  };
 
   const renderModal = () => {
     modal.innerHTML = `
@@ -1011,7 +992,7 @@ function showHotkeyModal(): void {
         <div class="dialog-body">
           <div class="hotkey-dialog-desc">Press a key or combination</div>
           <div class="hotkey-modal-preview">
-            <span class="hotkey-modal-key ${capturedHotkey ? "captured" : ""}">${formatKeyForDisplay(capturedHotkey ?? currentHotkey)}</span>
+            ${renderHotkeyChips(capturedHotkey ?? currentHotkey, { chipClass: "hotkey-modal-key", extraChipClass: capturedHotkey ? "captured" : "" })}
             ${capturedHotkey && capturedHotkey !== currentHotkey ? '<span class="hotkey-modal-new">New</span>' : ""}
           </div>
           <button class="hotkey-fn-link">Use Fn key instead</button>
@@ -1029,7 +1010,9 @@ function showHotkeyModal(): void {
       ?.addEventListener("click", closeHotkeyModal);
 
     modal.querySelector(".hotkey-fn-link")?.addEventListener("click", () => {
-      capturedHotkey = "Fn";
+      capturedHotkey = "Function";
+      pressedTokens.clear();
+      pressedOrder.length = 0;
       renderModal();
     });
 
@@ -1063,7 +1046,7 @@ function showHotkeyModal(): void {
   renderModal();
   document.body.appendChild(modal);
 
-  const keyHandler = (e: KeyboardEvent) => {
+  const keydownHandler = (e: KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
@@ -1071,13 +1054,42 @@ function showHotkeyModal(): void {
       closeHotkeyModal();
       return;
     }
-
-    const hotkey = keyEventToHotkey(e);
-    if (!hotkey) {
+    if (e.repeat) {
       return;
     }
 
-    capturedHotkey = hotkey;
+    const token = eventToHotkeyToken(e);
+    if (!token) {
+      return;
+    }
+
+    if (!pressedTokens.has(token)) {
+      pressedOrder.push(token);
+    }
+    pressedTokens.add(token);
+    syncCapturedHotkey();
+  };
+
+  const keyupHandler = (e: KeyboardEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const token = eventToHotkeyToken(e);
+    if (!token) {
+      return;
+    }
+
+    pressedTokens.delete(token);
+    const tokenIndex = pressedOrder.indexOf(token);
+    if (tokenIndex !== -1) {
+      pressedOrder.splice(tokenIndex, 1);
+    }
+    syncCapturedHotkey();
+  };
+
+  const blurHandler = () => {
+    pressedTokens.clear();
+    pressedOrder.length = 0;
     renderModal();
   };
 
@@ -1087,11 +1099,15 @@ function showHotkeyModal(): void {
     }
   };
 
-  document.addEventListener("keydown", keyHandler);
+  document.addEventListener("keydown", keydownHandler);
+  document.addEventListener("keyup", keyupHandler);
+  window.addEventListener("blur", blurHandler);
   modal.addEventListener("click", clickHandler);
 
   hotkeyModalCleanup = () => {
-    document.removeEventListener("keydown", keyHandler);
+    document.removeEventListener("keydown", keydownHandler);
+    document.removeEventListener("keyup", keyupHandler);
+    window.removeEventListener("blur", blurHandler);
     modal.removeEventListener("click", clickHandler);
     modal.remove();
     hotkeyModalCleanup = null;
@@ -2102,7 +2118,7 @@ function renderSettingsUI(el: HTMLElement): void {
             <div class="settings-row-label">Hotkey</div>
             <div class="settings-row-desc">Press and hold to record</div>
           </div>
-          <button class="btn btn-secondary hotkey-btn">${formatKeyForDisplay(normalizeStoredHotkey(settings?.hotkey))}</button>
+          <button class="hotkey-btn">${settings?.hotkey && parseHotkeyString(settings.hotkey) ? renderHotkeyChips(settings.hotkey, { chipClass: "hotkey-key-inline", separator: "plus" }) : "Set hotkey"}</button>
         </div>
         <div class="settings-row lang-row">
           <div>
@@ -2508,6 +2524,7 @@ function showMainUI(): void {
 // so we handle hotkeys via JavaScript when the window is focused
 let hotkeyConfig: ParsedHotkeyConfig | null = null;
 let hotkeyPressed = false;
+const pressedHotkeyTokens = new Set<string>();
 
 async function setupHotkeyListener(): Promise<void> {
   if (navigator.userAgent.includes("Mac")) {
@@ -2518,22 +2535,31 @@ async function setupHotkeyListener(): Promise<void> {
   try {
     // Get hotkey from settings (more reliable than backend config which may not be initialized)
     const currentSettings = await getSettings();
-    const hotkeyStr = normalizeStoredHotkey(currentSettings.hotkey);
-    hotkeyConfig = parseHotkeyString(hotkeyStr);
-    console.log("[hotkey] Frontend listener configured for:", hotkeyStr);
+    hotkeyConfig = parseHotkeyString(currentSettings.hotkey);
+    console.log(
+      "[hotkey] Frontend listener configured for:",
+      currentSettings.hotkey
+    );
 
     document.addEventListener("keydown", (e) => {
       if (!hotkeyConfig) {
         return;
       }
-      if (hotkeyPressed) {
-        if (shouldReleaseOnKeydown(e, hotkeyConfig)) {
-          hotkeyPressed = false;
-          hotkeyRelease().catch(console.error);
-        }
+      if (hotkeyModalCleanup) {
         return;
       }
-      if (matchesHotkey(e, hotkeyConfig)) {
+      if (e.repeat) {
+        return;
+      }
+      const token = eventToHotkeyToken(e);
+      if (!token) {
+        return;
+      }
+      pressedHotkeyTokens.add(token);
+      if (hotkeyPressed) {
+        return;
+      }
+      if (matchesHotkey(pressedHotkeyTokens, hotkeyConfig)) {
         e.preventDefault();
         e.stopPropagation();
         hotkeyPressed = true;
@@ -2542,14 +2568,25 @@ async function setupHotkeyListener(): Promise<void> {
     });
 
     document.addEventListener("keyup", (e) => {
-      if (!(hotkeyConfig && hotkeyPressed)) {
+      if (hotkeyModalCleanup) {
         return;
       }
+      if (!(hotkeyConfig && hotkeyPressed)) {
+        const token = eventToHotkeyToken(e);
+        if (token) {
+          pressedHotkeyTokens.delete(token);
+        }
+        return;
+      }
+      const token = eventToHotkeyToken(e);
       if (matchesHotkeyRelease(e, hotkeyConfig)) {
         e.preventDefault();
         e.stopPropagation();
         hotkeyPressed = false;
         hotkeyRelease().catch(console.error);
+      }
+      if (token) {
+        pressedHotkeyTokens.delete(token);
       }
     });
 
@@ -2559,6 +2596,7 @@ async function setupHotkeyListener(): Promise<void> {
         hotkeyPressed = false;
         hotkeyRelease().catch(console.error);
       }
+      pressedHotkeyTokens.clear();
     });
   } catch (err) {
     console.error("Failed to setup hotkey listener:", err);
@@ -2607,6 +2645,37 @@ async function showMissingMacPermissionsDialog(
   }
 }
 
+async function showInvalidHotkeyDialog(
+  onboardingCompleted: boolean
+): Promise<void> {
+  if (!onboardingCompleted) {
+    return;
+  }
+
+  const savedHotkey = settings?.hotkey;
+  if (savedHotkey && parseHotkeyString(savedHotkey)) {
+    return;
+  }
+
+  try {
+    const { message } = await import("@tauri-apps/plugin-dialog");
+    await presentMainWindow(true);
+    try {
+      await message(
+        "Your saved recording hotkey uses an older format and needs to be set again.\n\nOpen Fing from the tray, go to Settings, and choose a new hotkey.",
+        {
+          title: "Set a New Hotkey",
+          kind: "warning",
+        }
+      );
+    } finally {
+      await presentMainWindow(false);
+    }
+  } catch (err) {
+    console.error("Failed to show invalid hotkey dialog:", err);
+  }
+}
+
 async function init(): Promise<void> {
   // Platform detection for platform-specific UI (e.g., hide custom titlebar on Windows)
   const isMac = navigator.userAgent.includes("Mac");
@@ -2635,6 +2704,7 @@ async function init(): Promise<void> {
 
   if (!shouldShowOnboarding) {
     await showMissingMacPermissionsDialog(completedByEitherSource);
+    await showInvalidHotkeyDialog(completedByEitherSource);
     await loadSettings({ force: true, refreshDevices: true });
   }
 

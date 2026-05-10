@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::AppHandle;
 
-use crate::hotkey_config::{get_hotkey_config, HotkeyKey};
+use crate::hotkey_config::{get_hotkey_config, HotkeyConfig};
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use once_cell::sync::Lazy;
@@ -10,6 +10,8 @@ use once_cell::sync::Lazy;
 use rdev::listen;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use rdev::{Event, EventType, Key};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use std::collections::HashSet;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::sync::{mpsc, Mutex, OnceLock};
 
@@ -133,7 +135,7 @@ fn dispatch_hotkey_event(event: HotkeyEvent) {
     }
 }
 
-// macOS uses grab() which can intercept and block key events
+// macOS uses grab() which can intercept and block key events.
 #[cfg(target_os = "macos")]
 fn grab_callback(event: Event) -> Option<Event> {
     let test_mode = crate::hotkey::is_onboarding_test_mode();
@@ -149,10 +151,6 @@ fn grab_callback(event: Event) -> Option<Event> {
     };
     let state = &mut *state_guard;
 
-    // In test mode we run the same detection logic but never swallow events
-    // (return Some(event) instead of None). This ensures macOS delivers
-    // KeyUp even though we intercepted KeyPress — the indicator window
-    // steals focus so we can't rely on WebView JS handlers.
     let passthrough = |event: Event| -> Option<Event> {
         if test_mode {
             Some(event)
@@ -163,97 +161,42 @@ fn grab_callback(event: Event) -> Option<Event> {
 
     match event.event_type {
         EventType::KeyPress(key) => {
-            update_mod_state(&key, true, &mut state.mod_state);
+            if let Some(token) = key_to_token(&key) {
+                state.pressed_keys.insert(token);
+            }
 
-            if let Some(base_key) = config.key.as_ref() {
-                if is_base_key(&key, base_key) && modifiers_match(&state.mod_state, &config) {
-                    if !state.hotkey_active {
-                        if test_mode || crate::state::get_state().can_record() {
-                            state.hotkey_active = true;
-                        }
-                        if state.hotkey_active {
-                            dispatch_hotkey_event(HotkeyEvent::Press);
-                        }
-                    }
-                    passthrough(event)
-                } else if state.hotkey_active {
-                    if !modifiers_match(&state.mod_state, &config) {
-                        state.hotkey_active = false;
-                        dispatch_hotkey_event(HotkeyEvent::Release);
-                    }
-                    // While the hotkey is held, swallow all other key presses so
-                    // system shortcuts (Mission Control, etc.) don't interfere.
-                    passthrough(event)
-                } else {
-                    Some(event)
-                }
-            } else if !state.hotkey_active
-                && is_required_modifier(&key, &config)
-                && modifiers_match(&state.mod_state, &config)
+            if state.hotkey_active {
+                return passthrough(event);
+            }
+
+            if hotkey_matches(&state.pressed_keys, &config)
+                && (test_mode || crate::state::get_state().can_record())
             {
-                if test_mode || crate::state::get_state().can_record() {
-                    state.hotkey_active = true;
-                }
-                if state.hotkey_active {
-                    dispatch_hotkey_event(HotkeyEvent::Press);
-                }
-                passthrough(event)
-            } else if state.hotkey_active {
-                if !modifiers_match(&state.mod_state, &config)
-                    || !is_required_modifier(&key, &config)
+                state.hotkey_active = true;
+                dispatch_hotkey_event(HotkeyEvent::Press);
+                return passthrough(event);
+            }
+
+            Some(event)
+        }
+        EventType::KeyRelease(key) => {
+            let released_token = key_to_token(&key);
+            if let Some(token) = released_token.as_ref() {
+                state.pressed_keys.remove(token);
+            }
+
+            if state.hotkey_active {
+                if released_token
+                    .as_ref()
+                    .is_some_and(|token| config.key_set.contains(token))
                 {
                     state.hotkey_active = false;
                     dispatch_hotkey_event(HotkeyEvent::Release);
                 }
-                passthrough(event)
-            } else {
-                Some(event)
+                return passthrough(event);
             }
-        }
-        EventType::KeyRelease(key) => {
-            update_mod_state(&key, false, &mut state.mod_state);
 
-            if let Some(base_key) = config.key.as_ref() {
-                if is_base_key(&key, base_key) {
-                    if state.hotkey_active {
-                        state.hotkey_active = false;
-                        dispatch_hotkey_event(HotkeyEvent::Release);
-                    }
-                    passthrough(event)
-                } else if state.hotkey_active {
-                    if !modifiers_match(&state.mod_state, &config) {
-                        // A required modifier was released while base key still held
-                        state.hotkey_active = false;
-                        dispatch_hotkey_event(HotkeyEvent::Release);
-                        return passthrough(event);
-                    }
-
-                    if !is_modifier_key(&key) {
-                        // Safety net: a non-modifier, non-base-key release while
-                        // hotkey is active likely means macOS delivered the base
-                        // key release under a different Key variant. Treat it as
-                        // the hotkey release to avoid getting stuck.
-                        tracing::warn!(
-                            "Unexpected KeyRelease {:?} while hotkey active — treating as hotkey release",
-                            key
-                        );
-                        state.hotkey_active = false;
-                        dispatch_hotkey_event(HotkeyEvent::Release);
-                    }
-
-                    passthrough(event)
-                } else {
-                    Some(event)
-                }
-            } else if state.hotkey_active {
-                if !modifiers_match(&state.mod_state, &config) {
-                    state.hotkey_active = false;
-                    dispatch_hotkey_event(HotkeyEvent::Release);
-                }
-                passthrough(event)
-            } else {
-                Some(event)
-            }
+            Some(event)
         }
         _ => Some(event),
     }
@@ -277,224 +220,289 @@ fn listen_callback(event: Event) {
 
     match event.event_type {
         EventType::KeyPress(key) => {
-            update_mod_state(&key, true, &mut state.mod_state);
+            if let Some(token) = key_to_token(&key) {
+                state.pressed_keys.insert(token);
+            }
 
-            if let Some(base_key) = config.key.as_ref() {
-                if is_base_key(&key, base_key)
-                    && modifiers_match(&state.mod_state, &config)
-                    && !state.hotkey_active
-                {
-                    if crate::state::get_state().can_record() {
-                        state.hotkey_active = true;
-                    }
-                    if state.hotkey_active {
-                        dispatch_hotkey_event(HotkeyEvent::Press);
-                    }
-                } else if state.hotkey_active && !modifiers_match(&state.mod_state, &config) {
-                    state.hotkey_active = false;
-                    dispatch_hotkey_event(HotkeyEvent::Release);
-                }
-            } else if !state.hotkey_active
-                && is_required_modifier(&key, &config)
-                && modifiers_match(&state.mod_state, &config)
+            if !state.hotkey_active
+                && hotkey_matches(&state.pressed_keys, &config)
+                && crate::state::get_state().can_record()
             {
-                if crate::state::get_state().can_record() {
-                    state.hotkey_active = true;
-                }
-                if state.hotkey_active {
-                    dispatch_hotkey_event(HotkeyEvent::Press);
-                }
-            } else if state.hotkey_active
-                && (!modifiers_match(&state.mod_state, &config)
-                    || !is_required_modifier(&key, &config))
-            {
-                state.hotkey_active = false;
-                dispatch_hotkey_event(HotkeyEvent::Release);
+                state.hotkey_active = true;
+                dispatch_hotkey_event(HotkeyEvent::Press);
             }
         }
         EventType::KeyRelease(key) => {
-            update_mod_state(&key, false, &mut state.mod_state);
+            let released_token = key_to_token(&key);
+            if let Some(token) = released_token.as_ref() {
+                state.pressed_keys.remove(token);
+            }
 
-            if let Some(base_key) = config.key.as_ref() {
-                if is_base_key(&key, base_key) {
-                    if state.hotkey_active {
-                        state.hotkey_active = false;
-                        dispatch_hotkey_event(HotkeyEvent::Release);
-                    }
-                } else if state.hotkey_active && !modifiers_match(&state.mod_state, &config) {
-                    // If a required modifier is released while the base key is still held,
-                    // treat it as hotkey release.
-                    state.hotkey_active = false;
-                    dispatch_hotkey_event(HotkeyEvent::Release);
-                }
-            } else if state.hotkey_active && !modifiers_match(&state.mod_state, &config) {
+            if state.hotkey_active
+                && released_token
+                    .as_ref()
+                    .is_some_and(|token| config.key_set.contains(token))
+            {
                 state.hotkey_active = false;
                 dispatch_hotkey_event(HotkeyEvent::Release);
             }
         }
         _ => {}
     }
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-#[derive(Default)]
-struct ModState {
-    ctrl: bool,
-    alt: bool,
-    shift: bool,
-    meta: bool,
-    fn_down: bool,
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 #[derive(Default)]
 struct HotkeyState {
-    mod_state: ModState,
     hotkey_active: bool,
+    pressed_keys: HashSet<String>,
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn update_mod_state(key: &Key, is_down: bool, state: &mut ModState) {
-    let value = is_down;
-    match key {
-        Key::ControlLeft | Key::ControlRight => state.ctrl = value,
-        Key::Alt | Key::AltGr => state.alt = value,
-        Key::ShiftLeft | Key::ShiftRight => state.shift = value,
-        Key::MetaLeft | Key::MetaRight => state.meta = value,
-        Key::Function => state.fn_down = value,
-        _ => {}
+pub fn reset_listener_state() {
+    let mut state_guard = match HOTKEY_STATE.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    state_guard.hotkey_active = false;
+    state_guard.pressed_keys.clear();
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn reset_listener_state() {}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn config_contains_function_free_f_key(config: &HotkeyConfig) -> bool {
+    !config.key_set.contains("Function")
+        && config
+            .key_set
+            .iter()
+            .any(|token| token.starts_with('F') && token[1..].parse::<u8>().is_ok())
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn hotkey_matches(pressed_keys: &HashSet<String>, config: &HotkeyConfig) -> bool {
+    if config_contains_function_free_f_key(config) && pressed_keys.contains("Function") {
+        let pressed_without_function = pressed_keys
+            .iter()
+            .filter(|token| token.as_str() != "Function")
+            .collect::<HashSet<_>>();
+        return pressed_without_function.len() == config.key_set.len()
+            && config
+                .key_set
+                .iter()
+                .all(|token| pressed_without_function.contains(token));
     }
+
+    pressed_keys.len() == config.key_set.len()
+        && config
+            .key_set
+            .iter()
+            .all(|token| pressed_keys.contains(token))
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn modifiers_match(state: &ModState, config: &crate::hotkey_config::HotkeyConfig) -> bool {
-    // On MacBook keyboards, Fn transforms media keys into F-keys at hardware level.
-    // When the base key is an F-key and Fn is NOT explicitly required, ignore Fn state.
-    // This allows "F9" hotkey to work whether user presses F9 directly (external kbd)
-    // or Fn+F9 (MacBook with media key defaults).
-    let fn_matches = if !config.require_fn && matches!(config.key, Some(HotkeyKey::F(_))) {
-        // Ignore Fn state for F-key hotkeys that don't explicitly require Fn
-        true
-    } else {
-        state.fn_down == config.require_fn
+fn key_to_token(key: &Key) -> Option<String> {
+    let token = match key {
+        Key::Alt => "Alt",
+        Key::AltGr => "AltGr",
+        Key::Backspace => "Backspace",
+        Key::CapsLock => "CapsLock",
+        Key::ControlLeft => "ControlLeft",
+        Key::ControlRight => "ControlRight",
+        Key::Delete => "Delete",
+        Key::DownArrow => "DownArrow",
+        Key::End => "End",
+        Key::Escape => return None,
+        Key::F1 => "F1",
+        Key::F2 => "F2",
+        Key::F3 => "F3",
+        Key::F4 => "F4",
+        Key::F5 => "F5",
+        Key::F6 => "F6",
+        Key::F7 => "F7",
+        Key::F8 => "F8",
+        Key::F9 => "F9",
+        Key::F10 => "F10",
+        Key::F11 => "F11",
+        Key::F12 => "F12",
+        Key::F13 => "F13",
+        Key::F14 => "F14",
+        Key::F15 => "F15",
+        Key::F16 => "F16",
+        Key::F17 => "F17",
+        Key::F18 => "F18",
+        Key::F19 => "F19",
+        Key::F20 => "F20",
+        Key::F21 => "F21",
+        Key::F22 => "F22",
+        Key::F23 => "F23",
+        Key::F24 => "F24",
+        Key::Home => "Home",
+        Key::LeftArrow => "LeftArrow",
+        Key::MetaLeft => "MetaLeft",
+        Key::MetaRight => "MetaRight",
+        Key::PageDown => "PageDown",
+        Key::PageUp => "PageUp",
+        Key::Return => "Return",
+        Key::RightArrow => "RightArrow",
+        Key::ShiftLeft => "ShiftLeft",
+        Key::ShiftRight => "ShiftRight",
+        Key::Space => "Space",
+        Key::Tab => "Tab",
+        Key::UpArrow => "UpArrow",
+        Key::PrintScreen => "PrintScreen",
+        Key::ScrollLock => "ScrollLock",
+        Key::Pause => "Pause",
+        Key::NumLock => "NumLock",
+        Key::BackQuote => "BackQuote",
+        Key::Num0 => "Num0",
+        Key::Num1 => "Num1",
+        Key::Num2 => "Num2",
+        Key::Num3 => "Num3",
+        Key::Num4 => "Num4",
+        Key::Num5 => "Num5",
+        Key::Num6 => "Num6",
+        Key::Num7 => "Num7",
+        Key::Num8 => "Num8",
+        Key::Num9 => "Num9",
+        Key::Minus => "Minus",
+        Key::Equal => "Equal",
+        Key::KeyQ => "KeyQ",
+        Key::KeyW => "KeyW",
+        Key::KeyE => "KeyE",
+        Key::KeyR => "KeyR",
+        Key::KeyT => "KeyT",
+        Key::KeyY => "KeyY",
+        Key::KeyU => "KeyU",
+        Key::KeyI => "KeyI",
+        Key::KeyO => "KeyO",
+        Key::KeyP => "KeyP",
+        Key::LeftBracket => "LeftBracket",
+        Key::RightBracket => "RightBracket",
+        Key::KeyA => "KeyA",
+        Key::KeyS => "KeyS",
+        Key::KeyD => "KeyD",
+        Key::KeyF => "KeyF",
+        Key::KeyG => "KeyG",
+        Key::KeyH => "KeyH",
+        Key::KeyJ => "KeyJ",
+        Key::KeyK => "KeyK",
+        Key::KeyL => "KeyL",
+        Key::SemiColon => "SemiColon",
+        Key::Quote => "Quote",
+        Key::BackSlash => "Backslash",
+        Key::IntlBackslash => "IntlBackslash",
+        Key::IntlRo => "IntlRo",
+        Key::IntlYen => "IntlYen",
+        Key::KanaMode => "KanaMode",
+        Key::KeyZ => "KeyZ",
+        Key::KeyX => "KeyX",
+        Key::KeyC => "KeyC",
+        Key::KeyV => "KeyV",
+        Key::KeyB => "KeyB",
+        Key::KeyN => "KeyN",
+        Key::KeyM => "KeyM",
+        Key::Comma => "Comma",
+        Key::Dot => "Dot",
+        Key::Slash => "Slash",
+        Key::Insert => "Insert",
+        Key::KpReturn => "KpReturn",
+        Key::KpMinus => "KpMinus",
+        Key::KpPlus => "KpPlus",
+        Key::KpMultiply => "KpMultiply",
+        Key::KpDivide => "KpDivide",
+        Key::KpDecimal => "KpDecimal",
+        Key::KpEqual => "KpEqual",
+        Key::KpComma => "KpComma",
+        Key::Kp0 => "Kp0",
+        Key::Kp1 => "Kp1",
+        Key::Kp2 => "Kp2",
+        Key::Kp3 => "Kp3",
+        Key::Kp4 => "Kp4",
+        Key::Kp5 => "Kp5",
+        Key::Kp6 => "Kp6",
+        Key::Kp7 => "Kp7",
+        Key::Kp8 => "Kp8",
+        Key::Kp9 => "Kp9",
+        Key::VolumeUp => "VolumeUp",
+        Key::VolumeDown => "VolumeDown",
+        Key::VolumeMute => "VolumeMute",
+        Key::Lang1 => "Lang1",
+        Key::Lang2 => "Lang2",
+        Key::Lang3 => "Lang3",
+        Key::Lang4 => "Lang4",
+        Key::Lang5 => "Lang5",
+        Key::Function => "Function",
+        Key::Apps => "Apps",
+        Key::Cancel => "Cancel",
+        Key::Clear => "Clear",
+        Key::Kana => "Kana",
+        Key::Hangul => "Hangul",
+        Key::Junja => "Junja",
+        Key::Final => "Final",
+        Key::Hanja => "Hanja",
+        Key::Hanji => "Hanji",
+        Key::Print => "Print",
+        Key::Select => "Select",
+        Key::Execute => "Execute",
+        Key::Help => "Help",
+        Key::Sleep => "Sleep",
+        Key::Separator => "Separator",
+        Key::Unknown(_) | Key::RawKey(_) => return None,
     };
 
-    state.ctrl == config.require_ctrl
-        && state.alt == config.require_alt
-        && state.shift == config.require_shift
-        && state.meta == config.require_meta
-        && fn_matches
+    Some(token.to_string())
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn is_base_key(key: &Key, base: &HotkeyKey) -> bool {
-    match base {
-        HotkeyKey::Function => matches!(key, Key::Function),
-        HotkeyKey::Space => matches!(key, Key::Space),
-        HotkeyKey::F(n) => matches!(
-            (n, key),
-            (1, Key::F1)
-                | (2, Key::F2)
-                | (3, Key::F3)
-                | (4, Key::F4)
-                | (5, Key::F5)
-                | (6, Key::F6)
-                | (7, Key::F7)
-                | (8, Key::F8)
-                | (9, Key::F9)
-                | (10, Key::F10)
-                | (11, Key::F11)
-                | (12, Key::F12)
-                | (13, Key::F13)
-                | (14, Key::F14)
-                | (15, Key::F15)
-                | (16, Key::F16)
-                | (17, Key::F17)
-                | (18, Key::F18)
-                | (19, Key::F19)
-                | (20, Key::F20)
-                | (21, Key::F21)
-                | (22, Key::F22)
-                | (23, Key::F23)
-                | (24, Key::F24)
-        ),
-        HotkeyKey::Char(ch) => match char_to_key(*ch) {
-            Some(expected) => *key == expected,
-            None => false,
-        },
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn key_set(keys: &[&str]) -> HashSet<String> {
+        keys.iter().map(|key| key.to_string()).collect()
     }
-}
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn is_required_modifier(key: &Key, config: &crate::hotkey_config::HotkeyConfig) -> bool {
-    match key {
-        Key::ControlLeft | Key::ControlRight => config.require_ctrl,
-        Key::Alt | Key::AltGr => config.require_alt,
-        Key::ShiftLeft | Key::ShiftRight => config.require_shift,
-        Key::MetaLeft | Key::MetaRight => config.require_meta,
-        Key::Function => config.require_fn,
-        _ => false,
+    #[test]
+    fn matches_exact_key_sets() {
+        let config = HotkeyConfig {
+            key_set: key_set(&["ControlLeft", "KeyK"]),
+            keys: vec!["ControlLeft".to_string(), "KeyK".to_string()],
+        };
+
+        assert!(hotkey_matches(&key_set(&["ControlLeft", "KeyK"]), &config));
+        assert!(!hotkey_matches(&key_set(&["ControlLeft"]), &config));
+        assert!(!hotkey_matches(
+            &key_set(&["ControlLeft", "KeyK", "Space"]),
+            &config
+        ));
     }
-}
 
-/// Returns true for modifier keys that should not trigger the safety net release.
-#[cfg(target_os = "macos")]
-fn is_modifier_key(key: &Key) -> bool {
-    matches!(
-        key,
-        Key::ControlLeft
-            | Key::ControlRight
-            | Key::Alt
-            | Key::AltGr
-            | Key::ShiftLeft
-            | Key::ShiftRight
-            | Key::MetaLeft
-            | Key::MetaRight
-            | Key::Function
-            | Key::CapsLock
-            | Key::NumLock
-    )
-}
+    #[test]
+    fn ignores_function_for_function_key_hotkeys() {
+        let config = HotkeyConfig {
+            key_set: key_set(&["F9"]),
+            keys: vec!["F9".to_string()],
+        };
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn char_to_key(ch: char) -> Option<Key> {
-    match ch {
-        'A' => Some(Key::KeyA),
-        'B' => Some(Key::KeyB),
-        'C' => Some(Key::KeyC),
-        'D' => Some(Key::KeyD),
-        'E' => Some(Key::KeyE),
-        'F' => Some(Key::KeyF),
-        'G' => Some(Key::KeyG),
-        'H' => Some(Key::KeyH),
-        'I' => Some(Key::KeyI),
-        'J' => Some(Key::KeyJ),
-        'K' => Some(Key::KeyK),
-        'L' => Some(Key::KeyL),
-        'M' => Some(Key::KeyM),
-        'N' => Some(Key::KeyN),
-        'O' => Some(Key::KeyO),
-        'P' => Some(Key::KeyP),
-        'Q' => Some(Key::KeyQ),
-        'R' => Some(Key::KeyR),
-        'S' => Some(Key::KeyS),
-        'T' => Some(Key::KeyT),
-        'U' => Some(Key::KeyU),
-        'V' => Some(Key::KeyV),
-        'W' => Some(Key::KeyW),
-        'X' => Some(Key::KeyX),
-        'Y' => Some(Key::KeyY),
-        'Z' => Some(Key::KeyZ),
-        '0' => Some(Key::Num0),
-        '1' => Some(Key::Num1),
-        '2' => Some(Key::Num2),
-        '3' => Some(Key::Num3),
-        '4' => Some(Key::Num4),
-        '5' => Some(Key::Num5),
-        '6' => Some(Key::Num6),
-        '7' => Some(Key::Num7),
-        '8' => Some(Key::Num8),
-        '9' => Some(Key::Num9),
-        _ => None,
+        assert!(hotkey_matches(&key_set(&["F9"]), &config));
+        assert!(hotkey_matches(&key_set(&["Function", "F9"]), &config));
+    }
+
+    #[test]
+    fn requires_function_when_configured() {
+        let config = HotkeyConfig {
+            key_set: key_set(&["Function", "F9"]),
+            keys: vec!["Function".to_string(), "F9".to_string()],
+        };
+
+        assert!(hotkey_matches(&key_set(&["Function", "F9"]), &config));
+        assert!(!hotkey_matches(&key_set(&["F9"]), &config));
+    }
+
+    #[test]
+    fn does_not_map_escape() {
+        assert_eq!(key_to_token(&Key::Escape), None);
     }
 }
