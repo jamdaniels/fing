@@ -1,6 +1,8 @@
+<img src="./public/icon.png" width="64" height="64">
+
 # Fing
 
-**Talk to type. Locally.**
+**Private dictation for every app.**
 
 ![Fing](./assets/screenshot.png)
 
@@ -28,17 +30,10 @@ Hold your hotkey, speak, release — transcribed text is pasted instantly. Your 
 
 Windows 10+ / macOS 11.0+ (Big Sur)
 
-## Install
+## Download
 
-Download the latest [release](https://github.com/jamdaniels/fing/releases).
-
-### macOS
-
-Fing macOS releases are signed and notarized by Apple. Open the DMG, move Fing to Applications, and launch it normally.
-
-### Windows
-
-Windows SmartScreen may show a warning. Click "More info" then "Run anyway" to proceed.
+- **[macOS (Universal)](https://github.com/jamdaniels/fing/releases/download/v1.0.2/Fing_1.0.2_universal.dmg)** — signed and notarized, open the DMG and move Fing to Applications
+- **[Windows](https://github.com/jamdaniels/fing/releases/download/v1.0.2/Fing_1.0.2_x64-setup.exe)** — if SmartScreen warns you, click "More info" then "Run anyway"
 
 ## License
 
