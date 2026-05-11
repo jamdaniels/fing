@@ -111,6 +111,7 @@ let testResultUnlisten: UnlistenFn | null = null;
 let testHotkeyPressed = false;
 let testHotkeyKeydown: ((e: KeyboardEvent) => void) | null = null;
 let testHotkeyKeyup: ((e: KeyboardEvent) => void) | null = null;
+let pendingEnterClass: string | null = null;
 
 const TOTAL_STEPS = 9;
 
@@ -269,9 +270,9 @@ function renderMicPermissionStatus(status: string | undefined): string {
     return `<div class="permission-status granted">Granted</div>`;
   }
   if (status === "prompt") {
-    return `<button class="btn btn-secondary btn-sm" id="grant-microphone-btn">Allow</button>`;
+    return `<button class="btn btn-info btn-sm" id="grant-microphone-btn">Allow</button>`;
   }
-  return `<button class="btn btn-secondary btn-sm" id="grant-microphone-btn">Allow</button>`;
+  return `<button class="btn btn-info btn-sm" id="grant-microphone-btn">Allow</button>`;
 }
 
 function renderAccessibilityPermissionStatus(
@@ -283,7 +284,7 @@ function renderAccessibilityPermissionStatus(
   if (status === "not-applicable") {
     return `<div class="permission-status">N/A</div>`;
   }
-  return `<button class="btn btn-secondary btn-sm" id="grant-accessibility-btn">Allow</button>`;
+  return `<button class="btn btn-info btn-sm" id="grant-accessibility-btn">Allow</button>`;
 }
 
 function render(): void {
@@ -327,6 +328,20 @@ function render(): void {
     default:
       break;
   }
+
+  if (pendingEnterClass && container) {
+    const header = container.querySelector(".onboarding-header");
+    const body = container.querySelector(".onboarding-body");
+    header?.classList.add(pendingEnterClass);
+    body?.classList.add(pendingEnterClass);
+    // First load animates the footer too (action button + step dots).
+    // Step-to-step transitions keep the footer static.
+    if (pendingEnterClass === "onb-enter-up") {
+      const footer = container.querySelector(".onboarding-footer");
+      footer?.classList.add(pendingEnterClass);
+    }
+    pendingEnterClass = null;
+  }
 }
 
 function renderWelcome(): void {
@@ -339,7 +354,7 @@ function renderWelcome(): void {
       <div class="onboarding-header">
         <img class="onboarding-logo" src="/icon.png" alt="Fing" />
         <h1 class="onboarding-title">Welcome to Fing</h1>
-        <p class="onboarding-desc">Fast, private, local speech-to-text</p>
+        <p class="onboarding-desc">Private dictation for every app.</p>
       </div>
       <div class="onboarding-body">
         <ul class="onboarding-features">
@@ -740,11 +755,10 @@ function renderHotkeyStep(): void {
   }
 
   const syncCapturedHotkey = () => {
-    const activeTokens = hotkeyCaptureOrder.filter((token) =>
-      hotkeyCaptureTokens.has(token)
-    );
-    if (activeTokens.length > 0) {
-      state.capturedHotkey = activeTokens.join("+");
+    if (hotkeyCaptureOrder.length > 0) {
+      state.capturedHotkey = hotkeyCaptureOrder.join("+");
+    } else {
+      state.capturedHotkey = null;
     }
     render();
   };
@@ -766,12 +780,11 @@ function renderHotkeyStep(): void {
         <div class="hotkey-capture-area">
           <div class="hotkey-preview">
             ${renderHotkeyChips(displayKey, { chipClass: "hotkey-key", extraChipClass: hasNewKey ? "captured" : "" })}
-            ${hasNewKey ? '<span class="hotkey-new-badge">New</span>' : ""}
           </div>
-          <button class="hotkey-fn-option" id="use-fn-btn">
-            <span class="hotkey-fn-key">fn</span>
-            <span>Use Fn key instead</span>
-          </button>
+          <div class="hotkey-fn-pick hotkey-capture-fn-pick">
+            <span class="hotkey-fn-pick-label">Press here for fn →</span>
+            <button class="hotkey-modal-key hotkey-fn-chip" type="button" id="use-fn-btn" aria-label="Use Fn key">fn</button>
+          </div>
         </div>
       </div>
       <div class="onboarding-footer">
@@ -805,10 +818,15 @@ function renderHotkeyStep(): void {
         return;
       }
 
-      if (!hotkeyCaptureTokens.has(token)) {
-        hotkeyCaptureOrder.push(token);
+      // Starting a fresh press session — clear the previously captured chord
+      // so this new keypress begins a new binding attempt.
+      if (hotkeyCaptureTokens.size === 0) {
+        hotkeyCaptureOrder.length = 0;
       }
       hotkeyCaptureTokens.add(token);
+      if (!hotkeyCaptureOrder.includes(token)) {
+        hotkeyCaptureOrder.push(token);
+      }
       syncCapturedHotkey();
     };
     document.addEventListener("keydown", hotkeyKeyHandler);
@@ -823,20 +841,15 @@ function renderHotkeyStep(): void {
         return;
       }
 
+      // Release order doesn't matter; the captured chord stays put until the
+      // next fresh press session (when no keys are held).
       hotkeyCaptureTokens.delete(token);
-      const tokenIndex = hotkeyCaptureOrder.indexOf(token);
-      if (tokenIndex !== -1) {
-        hotkeyCaptureOrder.splice(tokenIndex, 1);
-      }
-      syncCapturedHotkey();
     };
     document.addEventListener("keyup", hotkeyKeyupHandler);
   }
   if (!hotkeyBlurHandler) {
     hotkeyBlurHandler = () => {
       hotkeyCaptureTokens.clear();
-      hotkeyCaptureOrder.length = 0;
-      render();
     };
     window.addEventListener("blur", hotkeyBlurHandler);
   }
@@ -948,8 +961,10 @@ function renderTestStep(): void {
           id="test-input"
           class="test-input test-input-readonly"
         >${state.testText ? escapeHtml(state.testText) : '<span class="test-input-placeholder">Your transcription will appear here...</span>'}</div>
-        <p class="onboarding-hint ${hasText ? "invisible" : ""}">Complete a test transcription to continue</p>
-        <p class="onboarding-hint ${hasText ? "invisible" : ""}">First transcription may take a few seconds while the model loads.</p>
+        <div class="test-hint-group">
+          <p class="onboarding-hint ${hasText ? "invisible" : ""}">Complete a test transcription to continue</p>
+          <p class="onboarding-hint ${hasText ? "invisible" : ""}">First transcription may take a few seconds while the model loads.</p>
+        </div>
       </div>
       <div class="onboarding-footer">
         <button class="btn btn-accent btn-lg" id="finish-btn" ${hasText ? "" : "disabled"}>
@@ -1018,6 +1033,20 @@ function renderCompletion(): void {
 }
 
 async function goToStep(step: OnboardingStep): Promise<void> {
+  const prevStep = state.step;
+  if (container && step !== prevStep) {
+    const direction = step > prevStep ? "forward" : "back";
+    const exitClass =
+      direction === "forward" ? "onb-exit-left" : "onb-exit-right";
+    const header = container.querySelector(".onboarding-header");
+    const body = container.querySelector(".onboarding-body");
+    header?.classList.add(exitClass);
+    body?.classList.add(exitClass);
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    pendingEnterClass =
+      direction === "forward" ? "onb-enter-right" : "onb-enter-left";
+  }
+
   await stopPolling();
   state.step = step;
 
@@ -1346,6 +1375,7 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     models,
   };
 
+  pendingEnterClass = "onb-enter-up";
   render();
 }
 

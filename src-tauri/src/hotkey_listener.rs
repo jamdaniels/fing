@@ -16,6 +16,17 @@ use std::collections::HashSet;
 use std::sync::{mpsc, Mutex, OnceLock};
 
 static LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
+static SUPPRESSED: AtomicBool = AtomicBool::new(false);
+
+/// Suppress global hotkey activation (e.g. while the rebind modal is open).
+/// Pass-through still occurs so the modal can capture the keys; the listener
+/// just stops dispatching press/release events and clears any in-flight state.
+pub fn set_suppressed(suppressed: bool) {
+    SUPPRESSED.store(suppressed, Ordering::SeqCst);
+    if suppressed {
+        reset_listener_state();
+    }
+}
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
@@ -138,6 +149,10 @@ fn dispatch_hotkey_event(event: HotkeyEvent) {
 // macOS uses grab() which can intercept and block key events.
 #[cfg(target_os = "macos")]
 fn grab_callback(event: Event) -> Option<Event> {
+    if SUPPRESSED.load(Ordering::SeqCst) {
+        return Some(event);
+    }
+
     let test_mode = crate::hotkey::is_onboarding_test_mode();
 
     let config = match get_hotkey_config() {
@@ -207,6 +222,10 @@ fn grab_callback(event: Event) -> Option<Event> {
 // See: https://github.com/tauri-apps/tauri/issues/13919
 #[cfg(target_os = "windows")]
 fn listen_callback(event: Event) {
+    if SUPPRESSED.load(Ordering::SeqCst) {
+        return;
+    }
+
     let config = match get_hotkey_config() {
         Some(c) => c,
         None => return,

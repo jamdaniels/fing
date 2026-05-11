@@ -15,6 +15,7 @@ import {
   Mic,
   Monitor,
   Moon,
+  Plus,
   Power,
   RefreshCw,
   Search,
@@ -63,6 +64,7 @@ import {
   searchTranscripts,
   setActiveModel,
   setAutoStart,
+  setHotkeySuppressed,
   startMicTest,
   stopMicTest,
   updateSettings,
@@ -90,6 +92,37 @@ declare global {
   interface Window {
     __navigateTo?: (tab: SidebarItem) => void;
   }
+}
+
+const scrollFadeObservers = new WeakMap<HTMLElement, ResizeObserver>();
+
+function updateScrollFade(el: HTMLElement): void {
+  const { scrollTop, scrollHeight, clientHeight } = el;
+  const canScrollUp = scrollTop > 1;
+  const canScrollDown = scrollTop + clientHeight < scrollHeight - 1;
+  el.classList.toggle("fade-top", canScrollUp);
+  el.classList.toggle("fade-bottom", canScrollDown);
+}
+
+function setupScrollFade(el: HTMLElement | null): void {
+  if (!el) {
+    return;
+  }
+  let ro = scrollFadeObservers.get(el);
+  if (!ro) {
+    el.classList.add("scroll-fade");
+    el.addEventListener("scroll", () => updateScrollFade(el), {
+      passive: true,
+    });
+    ro = new ResizeObserver(() => updateScrollFade(el));
+    scrollFadeObservers.set(el, ro);
+  }
+  ro.disconnect();
+  ro.observe(el);
+  for (const child of Array.from(el.children)) {
+    ro.observe(child);
+  }
+  updateScrollFade(el);
 }
 
 function applyTheme(theme: Theme): void {
@@ -297,6 +330,15 @@ function renderContent(): void {
     default:
       break;
   }
+
+  applyContentScrollFade(content);
+}
+
+function applyContentScrollFade(content: HTMLElement): void {
+  const scroller = content.querySelector<HTMLElement>(
+    ".history-scrollable, .dictionary-scrollable"
+  );
+  setupScrollFade(scroller ?? content);
 }
 
 function renderHome(el: HTMLElement): void {
@@ -720,6 +762,8 @@ function renderHistory(
       searchInput.focus();
       searchInput.setSelectionRange(searchQuery.length, searchQuery.length);
     }
+
+    setupScrollFade(el.querySelector<HTMLElement>(".history-scrollable"));
   };
 
   if (skipLoad) {
@@ -962,23 +1006,21 @@ function showHotkeyModal(): void {
   closeHotkeyModal();
 
   let capturedHotkey: string | null = null;
+  // Currently held keys; once this is empty, the next keypress starts a fresh chord.
   const pressedTokens = new Set<string>();
-  const pressedOrder: string[] = [];
+  // The chord being built. Releases do NOT remove from this — only a fresh
+  // press session (after full release) clears and restarts it.
+  const capturedTokens: string[] = [];
   const currentHotkey = normalizeStoredHotkey(settings?.hotkey);
+
+  setHotkeySuppressed(true).catch(console.error);
 
   const modal = document.createElement("div");
   modal.className = "dialog-overlay";
 
   const syncCapturedHotkey = () => {
-    const activeTokens = pressedOrder.filter((token) =>
-      pressedTokens.has(token)
-    );
-    if (activeTokens.length === 0) {
-      renderModal();
-      return;
-    }
-
-    capturedHotkey = activeTokens.join("+");
+    capturedHotkey =
+      capturedTokens.length > 0 ? capturedTokens.join("+") : null;
     renderModal();
   };
 
@@ -988,17 +1030,18 @@ function showHotkeyModal(): void {
         <button class="dialog-close">${createIcon(X)}</button>
         <div class="dialog-header">
           <div class="dialog-title">Set recording hotkey</div>
-        </div>
-        <div class="dialog-body">
           <div class="hotkey-dialog-desc">Press a key or combination</div>
+        </div>
+        <div class="dialog-body hotkey-dialog-body">
           <div class="hotkey-modal-preview">
             ${renderHotkeyChips(capturedHotkey ?? currentHotkey, { chipClass: "hotkey-modal-key", extraChipClass: capturedHotkey ? "captured" : "" })}
-            ${capturedHotkey && capturedHotkey !== currentHotkey ? '<span class="hotkey-modal-new">New</span>' : ""}
           </div>
-          <button class="hotkey-fn-link">Use Fn key instead</button>
         </div>
         <div class="dialog-footer hotkey-dialog-footer">
-          <span class="hotkey-dialog-hint">Press Escape to cancel</span>
+          <div class="hotkey-fn-pick">
+            <span class="hotkey-fn-pick-label">Press here for fn →</span>
+            <button class="hotkey-modal-key hotkey-fn-chip" type="button" aria-label="Use Fn key">fn</button>
+          </div>
           <button class="btn btn-accent hotkey-confirm-btn" ${capturedHotkey ? "" : "disabled"}>Set hotkey</button>
         </div>
       </div>
@@ -1009,10 +1052,11 @@ function showHotkeyModal(): void {
       .querySelector(".dialog-close")
       ?.addEventListener("click", closeHotkeyModal);
 
-    modal.querySelector(".hotkey-fn-link")?.addEventListener("click", () => {
+    modal.querySelector(".hotkey-fn-chip")?.addEventListener("click", () => {
       capturedHotkey = "Function";
       pressedTokens.clear();
-      pressedOrder.length = 0;
+      capturedTokens.length = 0;
+      capturedTokens.push("Function");
       renderModal();
     });
 
@@ -1063,10 +1107,15 @@ function showHotkeyModal(): void {
       return;
     }
 
-    if (!pressedTokens.has(token)) {
-      pressedOrder.push(token);
+    // Starting a fresh press session — clear the previously captured chord
+    // so the new keypress begins a new binding attempt.
+    if (pressedTokens.size === 0) {
+      capturedTokens.length = 0;
     }
     pressedTokens.add(token);
+    if (!capturedTokens.includes(token)) {
+      capturedTokens.push(token);
+    }
     syncCapturedHotkey();
   };
 
@@ -1079,18 +1128,13 @@ function showHotkeyModal(): void {
       return;
     }
 
+    // Release order doesn't matter; capturedTokens stays put until the next
+    // fresh press session (when pressedTokens is empty on keydown).
     pressedTokens.delete(token);
-    const tokenIndex = pressedOrder.indexOf(token);
-    if (tokenIndex !== -1) {
-      pressedOrder.splice(tokenIndex, 1);
-    }
-    syncCapturedHotkey();
   };
 
   const blurHandler = () => {
     pressedTokens.clear();
-    pressedOrder.length = 0;
-    renderModal();
   };
 
   const clickHandler = (e: MouseEvent) => {
@@ -1111,6 +1155,7 @@ function showHotkeyModal(): void {
     modal.removeEventListener("click", clickHandler);
     modal.remove();
     hotkeyModalCleanup = null;
+    setHotkeySuppressed(false).catch(console.error);
   };
 }
 
@@ -1439,6 +1484,7 @@ function showConfirmDialog(options: ConfirmDialogOptions): Promise<boolean> {
     modal.className = "dialog-overlay";
     modal.innerHTML = `
       <div class="dialog">
+        <button class="dialog-close" id="dialog-close-btn" aria-label="Close">${createIcon(X)}</button>
         <div class="dialog-header">
           <div class="dialog-title">${title}</div>
         </div>
@@ -1452,12 +1498,18 @@ function showConfirmDialog(options: ConfirmDialogOptions): Promise<boolean> {
 
     document.body.appendChild(modal);
 
+    const dismiss = () => {
+      modal.remove();
+      resolve(false);
+    };
+
+    document
+      .getElementById("dialog-close-btn")
+      ?.addEventListener("click", dismiss);
+
     document
       .getElementById("dialog-cancel-btn")
-      ?.addEventListener("click", () => {
-        modal.remove();
-        resolve(false);
-      });
+      ?.addEventListener("click", dismiss);
 
     document
       .getElementById("dialog-confirm-btn")
@@ -2017,7 +2069,7 @@ function renderDictionary(el: HTMLElement): void {
       (term, index) => `
       <div class="dictionary-item">
         <span class="dictionary-term">${escapeHtml(term)}</span>
-        <button class="btn btn-secondary btn-sm dictionary-remove-btn" data-index="${index}">Remove</button>
+        <button class="dictionary-remove-btn" data-index="${index}" title="Remove" aria-label="Remove">${createIcon(Trash2)}</button>
       </div>
     `
     )
@@ -2039,7 +2091,7 @@ function renderDictionary(el: HTMLElement): void {
             autocomplete="off"
             ${atCapacity ? "disabled" : ""}
           >
-          <button class="btn btn-accent dictionary-add-btn" ${atCapacity ? "disabled" : ""}>Add</button>
+          <button class="btn btn-accent dictionary-add-btn" ${atCapacity ? "disabled" : ""} title="Add" aria-label="Add">${createIcon(Plus)}</button>
         </div>
         <div class="dictionary-hint">
           ${terms.length}/${MAX_DICTIONARY_TERMS} terms used · Up to ${MAX_DICTIONARY_WORDS_PER_TERM} words each
@@ -2116,7 +2168,7 @@ function renderSettingsUI(el: HTMLElement): void {
         <div class="settings-row">
           <div>
             <div class="settings-row-label">Hotkey</div>
-            <div class="settings-row-desc">Press and hold to record</div>
+            <div class="settings-row-desc">Set recording hotkey</div>
           </div>
           <button class="hotkey-btn">${settings?.hotkey && parseHotkeyString(settings.hotkey) ? renderHotkeyChips(settings.hotkey, { chipClass: "hotkey-key-inline", separator: "plus" }) : "Set hotkey"}</button>
         </div>
@@ -2147,7 +2199,7 @@ function renderSettingsUI(el: HTMLElement): void {
         <div class="settings-row">
           <div>
             <div class="settings-row-label">Sound feedback</div>
-            <div class="settings-row-desc">Play sounds for recording start/stop</div>
+            <div class="settings-row-desc">Play sounds for recording start</div>
           </div>
           <div class="toggle ${settings?.soundEnabled ? "active" : ""}" data-setting="soundEnabled"></div>
         </div>
@@ -2195,7 +2247,7 @@ function renderSettingsUI(el: HTMLElement): void {
         <div class="settings-row">
           <div>
             <div class="settings-row-label">Transcript history</div>
-            <div class="settings-row-desc">Store transcripts locally for search</div>
+            <div class="settings-row-desc">Store transcripts locally</div>
           </div>
           <div class="appearance-selector" data-setting="historyMode">
             <button class="appearance-option ${settings?.historyMode === "off" ? "selected" : ""}" data-history-mode="off">
@@ -2232,6 +2284,7 @@ function renderSettingsUI(el: HTMLElement): void {
   `;
 
   updatePermissionStatus();
+  setupScrollFade(el);
 }
 
 function renderSettings(el: HTMLElement): void {
@@ -2415,17 +2468,32 @@ function renderAbout(el: HTMLElement): void {
     <div class="about-center">
 <img class="about-icon" src="/icon.png" alt="Fing" />
       <h1>Fing</h1>
-      <div class="about-version">
-        Version: ${info?.version ?? "0.1.0"} (${info?.commit ?? "unknown"})
-      </div>
-      <p class="about-tagline">Fast, private, local speech-to-text</p>
-      <div class="about-backend">Backend: ${info?.inferenceBackend ?? "Unknown"}</div>
+      <p class="about-tagline">Private dictation for every app.</p>
+      <div class="about-backend">v${info?.version ?? "0.1.0"} · ${info?.commit ?? "unknown"} · ${info?.inferenceBackend ?? "Unknown"}</div>
       <div class="about-actions">
-        <a href="https://github.com/jamdaniels/fing" target="_blank" rel="noreferrer" class="btn btn-secondary">GitHub ${createIcon(ArrowUpRight)}</a>
-        <a href="https://x.com/coding_jam" target="_blank" rel="noreferrer" class="btn btn-secondary">Feedback ${createIcon(ArrowUpRight)}</a>
+        <div class="about-actions-row">
+          <a href="https://getfing.com" target="_blank" rel="noreferrer" class="btn btn-secondary">Homepage ${createIcon(ArrowUpRight)}</a>
+          <a href="https://getfing.com/privacy" target="_blank" rel="noreferrer" class="btn btn-secondary">Privacy ${createIcon(ArrowUpRight)}</a>
+        </div>
+        <div class="about-actions-row">
+          <a href="https://github.com/jamdaniels/fing" target="_blank" rel="noreferrer" class="btn btn-secondary">GitHub ${createIcon(ArrowUpRight)}</a>
+          <a href="mailto:contact@getfing.com" class="btn btn-secondary" data-contact-link>Contact ${createIcon(ArrowUpRight)}</a>
+        </div>
       </div>
     </div>
   `;
+
+  const contactLink = el.querySelector<HTMLAnchorElement>(
+    "[data-contact-link]"
+  );
+  if (contactLink) {
+    contactLink.addEventListener("click", (event) => {
+      event.preventDefault();
+      invoke("plugin:shell|open", { path: "mailto:contact@getfing.com" }).catch(
+        (err) => console.error("Failed to open contact email:", err)
+      );
+    });
+  }
 }
 
 async function showOnboarding(): Promise<void> {

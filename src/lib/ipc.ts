@@ -178,3 +178,7 @@ export async function hotkeyRelease(): Promise<void> {
 export async function updateHotkey(hotkey: string): Promise<void> {
   return await invoke("update_hotkey", { hotkey });
 }
+
+export async function setHotkeySuppressed(suppressed: boolean): Promise<void> {
+  return await invoke("set_hotkey_suppressed", { suppressed });
+}

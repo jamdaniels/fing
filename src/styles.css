@@ -24,6 +24,10 @@
   --warning-15: rgba(245, 158, 11, 0.15);
   --warning-30: rgba(245, 158, 11, 0.3);
   --warning-text: #92400e;
+  --info: #3b82f6;
+  --info-15: rgba(59, 130, 246, 0.15);
+  --info-30: rgba(59, 130, 246, 0.3);
+  --info-text: #1e40af;
   --border: #e5e5e5;
   --sidebar-item-hover: rgba(0, 0, 0, 0.04);
   --sidebar-item-active: rgba(0, 0, 0, 0.08);
@@ -55,6 +59,10 @@
   --warning-15: rgba(251, 191, 36, 0.15);
   --warning-30: rgba(251, 191, 36, 0.3);
   --warning-text: #fbbf24;
+  --info: #60a5fa;
+  --info-15: rgba(96, 165, 250, 0.15);
+  --info-30: rgba(96, 165, 250, 0.3);
+  --info-text: #93c5fd;
   --border: #333333;
   --sidebar-item-hover: rgba(255, 255, 255, 0.05);
   --sidebar-item-active: rgba(255, 255, 255, 0.1);
@@ -87,6 +95,10 @@
     --warning-15: rgba(251, 191, 36, 0.15);
     --warning-30: rgba(251, 191, 36, 0.3);
     --warning-text: #fbbf24;
+    --info: #60a5fa;
+    --info-15: rgba(96, 165, 250, 0.15);
+    --info-30: rgba(96, 165, 250, 0.3);
+    --info-text: #93c5fd;
     --border: #333333;
     --sidebar-item-hover: rgba(255, 255, 255, 0.05);
     --sidebar-item-active: rgba(255, 255, 255, 0.1);
@@ -155,7 +167,7 @@ body[data-platform="windows"] .titlebar {
   display: flex;
   flex-direction: column;
   width: 180px;
-  padding: 12px 8px 8px;
+  padding: 2px 8px 8px;
   color: var(--text-primary);
   background-color: var(--bg-primary);
 }
@@ -202,7 +214,7 @@ body[data-platform="windows"] .titlebar {
 .content {
   flex: 1;
   min-height: 0;
-  padding: 20px 24px 32px;
+  padding: 12px 24px 32px;
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -219,6 +231,53 @@ body[data-platform="windows"] .titlebar {
   flex-direction: column;
   padding: 0;
   overflow: hidden;
+}
+
+.scroll-fade {
+  --scroll-fade-size: 24px;
+}
+
+.scroll-fade.fade-top.fade-bottom {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black var(--scroll-fade-size),
+    black calc(100% - var(--scroll-fade-size)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black var(--scroll-fade-size),
+    black calc(100% - var(--scroll-fade-size)),
+    transparent 100%
+  );
+}
+
+.scroll-fade.fade-top:not(.fade-bottom) {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black var(--scroll-fade-size)
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    black var(--scroll-fade-size)
+  );
+}
+
+.scroll-fade.fade-bottom:not(.fade-top) {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    black calc(100% - var(--scroll-fade-size)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    black calc(100% - var(--scroll-fade-size)),
+    transparent 100%
+  );
 }
 
 .content h1 {
@@ -247,6 +306,10 @@ body[data-platform="windows"] .titlebar {
   height: 13px;
 }
 
+.dictionary-add-btn svg {
+  stroke-width: 2.5;
+}
+
 .btn-primary {
   color: var(--bg-primary);
   background-color: var(--text-primary);
@@ -273,6 +336,16 @@ body[data-platform="windows"] .titlebar {
 
 .btn-secondary:hover {
   background-color: var(--border);
+}
+
+.btn-info {
+  color: var(--info-text);
+  background-color: var(--info-15);
+  border: 1px solid var(--info-30);
+}
+
+.btn-info:hover {
+  background-color: var(--info-30);
 }
 
 .btn-outline {
@@ -625,7 +698,7 @@ body[data-platform="windows"] .titlebar {
 
 .dictionary-sticky-header {
   flex-shrink: 0;
-  padding: 20px 24px 12px;
+  padding: 12px 24px 12px;
   background-color: var(--bg-primary);
 }
 
@@ -719,6 +792,26 @@ body[data-platform="windows"] .titlebar {
   word-break: break-word;
 }
 
+.dictionary-remove-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+}
+
+.dictionary-remove-btn:hover {
+  color: var(--text-primary);
+}
+
+.dictionary-remove-btn svg {
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
+
 @media (max-width: 640px) {
   .dictionary-list {
     grid-template-columns: 1fr;
@@ -749,13 +842,13 @@ body[data-platform="windows"] .titlebar {
 }
 
 .permission-badge.action {
-  color: var(--text-primary);
-  background-color: var(--bg-primary);
-  border: 1px solid var(--border);
+  color: var(--info-text);
+  background-color: var(--info-15);
+  border: 1px solid var(--info-30);
 }
 
 .permission-badge.action:hover {
-  background-color: var(--border);
+  background-color: var(--info-30);
 }
 
 .permission-badge.restart {
@@ -883,13 +976,12 @@ body[data-platform="windows"] .titlebar {
   border-radius: 16px;
 }
 
-.about-version {
-  margin: 8px 0;
-  color: var(--text-secondary);
+.about-center h1 {
+  margin-bottom: 10px;
 }
 
 .about-tagline {
-  margin: 16px 0;
+  margin: 0;
   color: var(--text-secondary);
 }
 
@@ -897,20 +989,24 @@ body[data-platform="windows"] .titlebar {
   display: block;
   width: fit-content;
   padding: 10px 18px;
-  margin-top: 24px;
-  margin-right: auto;
-  margin-bottom: 22px;
-  margin-left: auto;
+  margin: 32px auto;
+  cursor: default;
   background-color: var(--bg-secondary);
   border-radius: 6px;
 }
 
 .about-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  margin-top: 0;
+}
+
+.about-actions-row {
+  display: flex;
   gap: 8px;
   justify-content: center;
-  margin-top: 0;
 }
 
 .about-actions .btn {
@@ -948,6 +1044,81 @@ body[data-platform="windows"] .titlebar {
   max-width: 520px;
   height: 100%;
   padding: 32px;
+}
+
+@keyframes onb-enter-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes onb-enter-right {
+  from {
+    opacity: 0;
+    transform: translateX(40px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes onb-enter-left {
+  from {
+    opacity: 0;
+    transform: translateX(-40px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes onb-exit-left {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-40px);
+  }
+}
+
+@keyframes onb-exit-right {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(40px);
+  }
+}
+
+.onb-enter-up {
+  animation: onb-enter-up 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.onb-enter-right {
+  animation: onb-enter-right 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.onb-enter-left {
+  animation: onb-enter-left 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.onb-exit-left {
+  animation: onb-exit-left 180ms ease-in both;
+}
+
+.onb-exit-right {
+  animation: onb-exit-right 180ms ease-in both;
 }
 
 .onboarding-skip {
@@ -1478,7 +1649,7 @@ body[data-platform="windows"] .titlebar {
 
 .history-sticky-header {
   flex-shrink: 0;
-  padding: 20px 24px 16px;
+  padding: 12px 24px 16px;
   background-color: var(--bg-primary);
 }
 
@@ -1539,8 +1710,7 @@ body[data-platform="windows"] .titlebar {
   display: flex;
   flex-direction: column;
   min-width: 320px;
-  padding: 24px;
-  text-align: center;
+  padding: 18px 20px;
   background-color: var(--bg-primary);
   border-radius: 16px;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
@@ -1549,8 +1719,9 @@ body[data-platform="windows"] .titlebar {
 .dialog-header {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  align-items: center;
+  gap: 6px;
+  align-items: flex-start;
+  padding-right: 32px;
 }
 
 .dialog-icon {
@@ -1597,13 +1768,13 @@ body[data-platform="windows"] .titlebar {
 
 .dialog-close {
   position: absolute;
-  top: 12px;
-  right: 12px;
-  padding: 8px;
+  top: 14px;
+  right: 14px;
+  padding: 4px;
   color: var(--text-secondary);
   background: none;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
 }
 
 .dialog-close:hover {
@@ -1618,11 +1789,19 @@ body[data-platform="windows"] .titlebar {
 
 /* Hotkey Dialog */
 .hotkey-dialog {
-  min-width: 340px;
+  min-width: 380px;
+}
+
+.hotkey-dialog-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 140px;
+  padding: 28px 0;
 }
 
 .hotkey-dialog-desc {
-  margin-bottom: 16px;
+  margin-top: -4px;
   font-size: 14px;
   color: var(--text-secondary);
 }
@@ -1633,12 +1812,24 @@ body[data-platform="windows"] .titlebar {
 
 .hotkey-dialog-footer {
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
 }
 
-.hotkey-dialog-hint {
+.hotkey-fn-pick {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-right: auto;
+}
+
+.hotkey-fn-pick-label {
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.hotkey-fn-chip:hover {
+  background-color: var(--accent-10);
+  border-color: var(--accent);
 }
 
 /* Mic Test Dialog */
@@ -1752,6 +1943,7 @@ body[data-platform="windows"] .titlebar {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
   font-size: 14px;
   font-weight: 600;
+  color: var(--text-primary);
   background-color: var(--bg-secondary);
   border: 2px solid var(--border);
   border-radius: 8px;
@@ -1774,7 +1966,7 @@ body[data-platform="windows"] .titlebar {
   gap: 8px;
   align-items: center;
   justify-content: center;
-  margin-bottom: 24px;
+  cursor: default;
 }
 
 .hotkey-modal-key.captured {
@@ -1782,31 +1974,8 @@ body[data-platform="windows"] .titlebar {
   border-color: var(--accent);
 }
 
-.hotkey-modal-new {
-  padding: 2px 6px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent);
-  text-transform: uppercase;
-  background-color: var(--accent-15);
-  border-radius: 4px;
-}
-
 .hotkey-modal-actions {
   margin-bottom: 16px;
-}
-
-.hotkey-fn-link {
-  padding: 4px 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  text-decoration: underline;
-  background: none;
-  border: none;
-}
-
-.hotkey-fn-link:hover {
-  color: var(--text-primary);
 }
 
 /* Fn key option button */
@@ -1965,6 +2134,14 @@ body[data-platform="windows"] .titlebar {
   visibility: hidden;
 }
 
+.test-hint-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  margin-top: 24px;
+}
+
 /* Onboarding unified layout - fixed values for 800x600 window */
 .onboarding-header {
   display: flex;
@@ -2000,14 +2177,24 @@ body[data-platform="windows"] .titlebar {
 
 /* Hotkey capture area */
 .hotkey-capture-area {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 16px;
   align-items: center;
+  justify-content: center;
   width: 100%;
-  padding: 24px;
+  min-height: 180px;
+  padding: 40px 24px 56px;
   background-color: var(--bg-secondary);
   border-radius: 12px;
+}
+
+.hotkey-capture-fn-pick {
+  position: absolute;
+  bottom: 14px;
+  left: 16px;
+  margin-right: 0;
 }
 
 .hotkey-preview {
@@ -2041,16 +2228,6 @@ body[data-platform="windows"] .titlebar {
 .hotkey-key.captured {
   background-color: var(--accent-10);
   border-color: var(--accent);
-}
-
-.hotkey-new-badge {
-  padding: 4px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent);
-  text-transform: uppercase;
-  background-color: var(--accent-15);
-  border-radius: 4px;
 }
 
 .hotkey-hint {
@@ -2136,8 +2313,8 @@ body[data-platform="windows"] .titlebar {
   align-items: center;
   justify-content: center;
   min-width: var(--key-unit);
-  height: 24px;
-  padding: 0 8px;
+  height: 30px;
+  padding: 0 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
   font-size: 13px;
   font-weight: 600;
@@ -2399,6 +2576,8 @@ body[data-platform="windows"] .titlebar {
   font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
+  cursor: default;
+  user-select: none;
   background-color: var(--bg-primary);
   border-radius: 5px;
 }

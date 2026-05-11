@@ -530,6 +530,11 @@ fn update_hotkey(hotkey: String) -> Result<(), String> {
     hotkey_config::set_hotkey_from_string(&hotkey)
 }
 
+#[tauri::command]
+fn set_hotkey_suppressed(suppressed: bool) {
+    hotkey_listener::set_suppressed(suppressed);
+}
+
 fn apply_saved_hotkey(app: &tauri::AppHandle, hotkey: &str, warning: &str) {
     if let Err(e) = hotkey_config::set_hotkey_from_string(hotkey) {
         tracing::warn!(
@@ -914,6 +919,7 @@ pub fn run() {
             request_microphone_permission,
             request_permissions,
             update_hotkey,
+            set_hotkey_suppressed,
             // Frontend hotkey handling (WebView2 workaround)
             hotkey_press,
             hotkey_release,

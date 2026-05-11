@@ -158,7 +158,7 @@ const TOKEN_DISPLAY_LABELS: Record<string, string> = {
   Dot: ".",
   DownArrow: "Down",
   Equal: "=",
-  Function: "Fn",
+  Function: "fn",
   KpComma: "Numpad ,",
   KpDecimal: "Numpad .",
   KpDivide: "Numpad /",
