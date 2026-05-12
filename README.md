@@ -32,8 +32,8 @@ Windows 10+ / macOS 11.0+ (Big Sur)
 
 ## Download
 
-- **[macOS (Universal)](https://github.com/jamdaniels/fing/releases/download/v1.0.2/Fing_1.0.2_universal.dmg)** — signed and notarized, open the DMG and move Fing to Applications
-- **[Windows](https://github.com/jamdaniels/fing/releases/download/v1.0.2/Fing_1.0.2_x64-setup.exe)** — if SmartScreen warns you, click "More info" then "Run anyway"
+- **[macOS (Universal)](https://github.com/jamdaniels/fing/releases/download/v1.1.0/Fing_1.1.0_universal.dmg)** — signed and notarized, open the DMG and move Fing to Applications
+- **[Windows](https://github.com/jamdaniels/fing/releases/download/v1.1.0/Fing_1.1.0_x64-setup.exe)** — if SmartScreen warns you, click "More info" then "Run anyway"
 
 ## License
 
