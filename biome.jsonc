@@ -1,10 +1,119 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-  "extends": ["ultracite/biome/core"],
   "files": {
-    "includes": ["!!**/src-tauri/gen", "!!**/src-tauri/target"]
+    "ignoreUnknown": true,
+    "includes": [
+      "**",
+      "!!**/dist",
+      "!!**/build",
+      "!!**/coverage",
+      "!!**/src-tauri/gen",
+      "!!**/src-tauri/target",
+      "!!**/target",
+      "!!**/bun.lock",
+      "!!**/.env",
+      "!!**/.env.*"
+    ]
+  },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true,
+    "defaultBranch": "main"
+  },
+  "formatter": {
+    "enabled": true,
+    "formatWithErrors": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineEnding": "lf",
+    "lineWidth": 80
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "complexity": {
+        "noExcessiveCognitiveComplexity": {
+          "level": "error",
+          "options": {
+            "maxAllowedComplexity": 20
+          }
+        },
+        "noImportantStyles": "off"
+      },
+      "correctness": {
+        "noUnusedImports": {
+          "level": "error",
+          "fix": "safe"
+        }
+      },
+      "suspicious": {
+        "noExplicitAny": "error"
+      }
+    }
   },
   "javascript": {
-    "globals": ["Bun"]
-  }
+    "globals": ["Bun"],
+    "formatter": {
+      "semicolons": "always",
+      "trailingCommas": "es5"
+    }
+  },
+  "css": {
+    "formatter": {
+      "enabled": true
+    }
+  },
+  "html": {
+    "formatter": {
+      "enabled": true
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "**/*.jsonc",
+        "**/{tsconfig,jsconfig}.json",
+        "**/tsconfig.*.json"
+      ],
+      "json": {
+        "parser": {
+          "allowComments": true,
+          "allowTrailingCommas": true
+        }
+      }
+    },
+    {
+      "includes": ["**/*.d.ts"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnusedVariables": "off",
+            "noUndeclaredVariables": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/*.{test,spec}.{ts,tsx,js,jsx}"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": "off"
+          },
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    }
+  ]
 }

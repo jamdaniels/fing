@@ -13,8 +13,8 @@
     "test:ts": "bun test",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "typecheck": "tsc --noEmit",
-    "lint": "bunx --bun ultracite check",
-    "lint:fix": "bunx --bun ultracite fix",
+    "lint": "bunx --bun biome check --no-errors-on-unmatched .",
+    "lint:fix": "bunx --bun biome check --write --no-errors-on-unmatched .",
     "release:version": "bun run scripts/release.ts bump",
     "release:verify-tag": "bun run scripts/release.ts verify-tag",
     "release:notes": "bun run scripts/release.ts notes"
@@ -31,10 +31,6 @@
     "@tauri-apps/cli": "^2.10.1",
     "esbuild": "^0.28.0",
     "typescript": "^6.0.3",
-    "ultracite": "^7.6.2",
     "vite": "^8.0.10"
-  },
-  "overrides": {
-    "brace-expansion": "5.0.5"
   }
 }
