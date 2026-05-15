@@ -723,6 +723,35 @@ mod tests {
     }
 
     #[test]
+    fn verify_with_expected_size_requires_matching_sha256() {
+        let path = unique_test_path("model-sha");
+        write_test_model_file(&path, 100, GGML_MAGIC_GGML);
+
+        let expected_sha256 = compute_file_sha256(&path).expect("test file should hash");
+        let valid = verify_with_expected_size(&path, Some(100), Some(&expected_sha256));
+
+        assert!(valid.exists);
+        assert!(valid.size_valid);
+        assert!(valid.format_valid);
+        assert!(valid.hash_valid);
+        assert!(valid.is_valid);
+
+        let invalid = verify_with_expected_size(
+            &path,
+            Some(100),
+            Some("0000000000000000000000000000000000000000000000000000000000000000"),
+        );
+
+        assert!(invalid.exists);
+        assert!(invalid.size_valid);
+        assert!(invalid.format_valid);
+        assert!(!invalid.hash_valid);
+        assert!(!invalid.is_valid);
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn download_status_reports_public_strings_and_errors() {
         assert_eq!(DownloadStatus::NotStarted.as_str(), "not-started");
         assert_eq!(DownloadStatus::Downloading.as_str(), "downloading");

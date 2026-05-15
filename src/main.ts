@@ -418,7 +418,7 @@ function renderHome(el: HTMLElement): void {
       </div>`
           )
           .join("")
-      : '<div class="stat-empty">No data yet</div>';
+      : '<div class="stat-value">0</div>';
 
   el.innerHTML = `
     <h1>Dashboard</h1>
@@ -745,7 +745,7 @@ function renderHistory(
         ${
           hasTranscripts
             ? `<div class="transcript-list">${listHtml}</div>
-               ${hasMoreTranscripts ? `<button class="btn btn-secondary load-more-btn">Load more</button>` : ""}`
+               ${hasMoreTranscripts ? `<button class="btn btn-outline load-more-btn">Load more</button>` : ""}`
             : `
           <div class="empty-state">
             ${searchQuery ? "" : `<div class="empty-state-icon">${createIcon(Mic)}</div>`}
@@ -1039,7 +1039,6 @@ function showHotkeyModal(): void {
         </div>
         <div class="dialog-footer hotkey-dialog-footer">
           <div class="hotkey-fn-pick">
-            <span class="hotkey-fn-pick-label">Press here for fn →</span>
             <button class="hotkey-modal-key hotkey-fn-chip" type="button" aria-label="Use Fn key">fn</button>
           </div>
           <button class="btn btn-accent hotkey-confirm-btn" ${capturedHotkey ? "" : "disabled"}>Set hotkey</button>
@@ -1438,7 +1437,7 @@ function showRestartDialog(previousVariant?: ModelVariant): void {
       </div>
       <div class="dialog-body">Fing needs to restart to load the new model.</div>
       <div class="dialog-footer">
-        <button class="btn btn-outline" id="restart-later-btn">Later</button>
+        <button class="btn btn-ghost" id="restart-later-btn">Later</button>
         <button class="btn btn-accent" id="restart-now-btn">Restart Now</button>
       </div>
     </div>
@@ -1490,7 +1489,7 @@ function showConfirmDialog(options: ConfirmDialogOptions): Promise<boolean> {
         </div>
         <div class="dialog-body">${body}</div>
         <div class="dialog-footer">
-          <button class="btn btn-outline" id="dialog-cancel-btn">${cancelText}</button>
+          <button class="btn btn-ghost" id="dialog-cancel-btn">${cancelText}</button>
           <button class="btn ${danger ? "btn-danger" : "btn-accent"}" id="dialog-confirm-btn">${confirmText}</button>
         </div>
       </div>
@@ -1793,6 +1792,29 @@ function handleSettingsClick(e: MouseEvent): void {
     return;
   }
 
+  // Handle language chip toggle
+  const langChip = target.closest(".lang-chip") as HTMLElement | null;
+  if (langChip) {
+    const lang = langChip.dataset.lang;
+    if (!(lang && settings)) {
+      return;
+    }
+    const current = settings.languages ?? ["en"];
+    const isOn = current.includes(lang);
+    let next: string[];
+    if (isOn) {
+      if (current.length <= 1) {
+        return;
+      }
+      next = current.filter((l) => l !== lang);
+    } else {
+      next = [...current, lang];
+    }
+    langChip.classList.toggle("on", !isOn);
+    handleSettingChange("languages", next);
+    return;
+  }
+
   // Handle toggle clicks
   const toggle = target.closest(".toggle") as HTMLElement | null;
   if (toggle) {
@@ -1963,24 +1985,6 @@ function handleSettingsChange(e: Event): void {
     const value = select.value || null;
     handleSettingChange("selectedMicrophoneId", value);
   }
-
-  // Handle language checkbox change
-  if (target.classList.contains("lang-check")) {
-    const checkboxes = document.querySelectorAll(
-      ".lang-check"
-    ) as NodeListOf<HTMLInputElement>;
-    const selected = Array.from(checkboxes)
-      .filter((cb) => cb.checked)
-      .map((cb) => cb.dataset.lang as string);
-
-    // Require at least one language
-    if (selected.length === 0) {
-      (target as HTMLInputElement).checked = true;
-      return;
-    }
-
-    handleSettingChange("languages", selected);
-  }
 }
 
 const SUPPORTED_LANGUAGES = [
@@ -2040,11 +2044,11 @@ function renderModelList(): string {
         }
       } else if (model.isDownloaded) {
         actions = `
-          <button class="btn btn-secondary btn-sm activate-model-btn" data-variant="${model.variant}">Activate</button>
-          <button class="btn btn-secondary btn-sm delete-model-btn" data-variant="${model.variant}">Delete</button>
+          <button class="btn btn-outline btn-sm activate-model-btn" data-variant="${model.variant}">Activate</button>
+          <button class="btn btn-outline btn-sm delete-model-btn" data-variant="${model.variant}">Delete</button>
         `;
       } else {
-        actions = `<button class="btn btn-secondary btn-sm download-model-btn" data-variant="${model.variant}">Download</button>`;
+        actions = `<button class="btn btn-outline btn-sm download-model-btn" data-variant="${model.variant}">Download</button>`;
       }
 
       return `
@@ -2129,12 +2133,13 @@ function renderSettingsUI(el: HTMLElement): void {
     .join("");
 
   const selectedLangs = settings?.languages ?? ["en"];
-  const langCheckboxes = SUPPORTED_LANGUAGES.map(
+  const langChips = SUPPORTED_LANGUAGES.map(
     (lang) => `
-      <label class="lang-checkbox">
-        <input type="checkbox" class="lang-check" data-lang="${lang.code}" ${selectedLangs.includes(lang.code) ? "checked" : ""}>
-        <span>${lang.name}</span>
-      </label>
+      <button
+        class="lang-chip ${selectedLangs.includes(lang.code) ? "on" : ""}"
+        data-lang="${lang.code}"
+        type="button"
+      >${lang.name}</button>
     `
   ).join("");
 
@@ -2177,7 +2182,7 @@ function renderSettingsUI(el: HTMLElement): void {
             <div class="settings-row-label">Language</div>
             <div class="settings-row-desc">Select one for best accuracy, or multiple for auto-detection</div>
           </div>
-          <div class="lang-checkboxes">${langCheckboxes}</div>
+          <div class="lang-chiprow">${langChips}</div>
         </div>
       </div>
     </div>
@@ -2208,7 +2213,7 @@ function renderSettingsUI(el: HTMLElement): void {
             <div class="settings-row-label">Test microphone</div>
             <div class="settings-row-desc">Check if your microphone is working</div>
           </div>
-          <button class="btn btn-secondary mic-test-btn">Test</button>
+          <button class="btn btn-outline mic-test-btn">Test</button>
         </div>
       </div>
     </div>
@@ -2268,7 +2273,7 @@ function renderSettingsUI(el: HTMLElement): void {
             <div class="settings-row-label">Application updates</div>
             <div class="settings-row-desc">Check for and install the latest version</div>
           </div>
-          <button class="btn btn-secondary check-updates-btn" ${updateCheckInProgress ? "disabled" : ""}>
+          <button class="btn btn-outline check-updates-btn" ${updateCheckInProgress ? "disabled" : ""}>
             ${updateCheckInProgress ? "Checking..." : getUpdateButtonLabel()}
           </button>
         </div>
@@ -2472,12 +2477,12 @@ function renderAbout(el: HTMLElement): void {
       <div class="about-backend">v${info?.version ?? "0.1.0"} · ${info?.commit ?? "unknown"} · ${info?.inferenceBackend ?? "Unknown"}</div>
       <div class="about-actions">
         <div class="about-actions-row">
-          <a href="https://getfing.com" target="_blank" rel="noreferrer" class="btn btn-secondary">Homepage ${createIcon(ArrowUpRight)}</a>
-          <a href="https://getfing.com/privacy" target="_blank" rel="noreferrer" class="btn btn-secondary">Privacy ${createIcon(ArrowUpRight)}</a>
+          <a href="https://getfing.com" target="_blank" rel="noreferrer" class="btn btn-outline">Homepage ${createIcon(ArrowUpRight)}</a>
+          <a href="https://getfing.com/privacy" target="_blank" rel="noreferrer" class="btn btn-outline">Privacy ${createIcon(ArrowUpRight)}</a>
         </div>
         <div class="about-actions-row">
-          <a href="https://github.com/jamdaniels/fing" target="_blank" rel="noreferrer" class="btn btn-secondary">GitHub ${createIcon(ArrowUpRight)}</a>
-          <a href="mailto:contact@getfing.com" class="btn btn-secondary" data-contact-link>Contact ${createIcon(ArrowUpRight)}</a>
+          <a href="https://github.com/jamdaniels/fing" target="_blank" rel="noreferrer" class="btn btn-outline">GitHub ${createIcon(ArrowUpRight)}</a>
+          <a href="mailto:contact@getfing.com" class="btn btn-outline" data-contact-link>Contact ${createIcon(ArrowUpRight)}</a>
         </div>
       </div>
     </div>

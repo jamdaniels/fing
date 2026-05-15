@@ -100,11 +100,7 @@ function chipContent(token: string): string {
 }
 
 export interface RenderHotkeyChipsOptions {
-  chipClass:
-    | "hotkey-key"
-    | "hotkey-modal-key"
-    | "instruction-key"
-    | "hotkey-key-inline";
+  chipClass: "hotkey-key" | "hotkey-modal-key" | "hotkey-key-inline";
   extraChipClass?: string;
   separator?: "plus";
 }
