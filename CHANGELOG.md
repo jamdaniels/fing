@@ -2,6 +2,10 @@
 
 All notable changes to Fing will be documented in this file.
 
+## 1.1.1-rc1 - 2026-05-19
+
+- Onboarding and UI polish
+
 ## 1.1.0 - 2026-05-13
 
 - General hotkey overhaul
