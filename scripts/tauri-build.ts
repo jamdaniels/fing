@@ -32,16 +32,9 @@ if (process.platform === "darwin") {
   }
 }
 
-if (process.platform === "win32" && !env.CMAKE_GENERATOR) {
-  const ninjaPath = Bun.which("ninja") ?? Bun.which("ninja.exe");
-  if (!ninjaPath) {
-    console.error(
-      "Windows Vulkan builds require Ninja in PATH or an explicit CMAKE_GENERATOR. Install Ninja and retry."
-    );
-    process.exit(1);
-  }
-
-  env.CMAKE_GENERATOR = "Ninja Multi-Config";
+if (process.platform === "win32") {
+  env.CARGO_TARGET_DIR ??= "C:\\ft";
+  env.GGML_CCACHE ??= "OFF";
 }
 
 if (!env.TAURI_SIGNING_PRIVATE_KEY) {
