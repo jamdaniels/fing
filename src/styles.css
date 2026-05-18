@@ -222,6 +222,10 @@ body {
   height: 100%;
 }
 
+html.window-route-preparing #app {
+  opacity: 0;
+}
+
 .titlebar {
   flex-shrink: 0;
   height: 28px;

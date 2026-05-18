@@ -43,6 +43,7 @@ import {
   deleteModel,
   deleteTranscript,
   downloadModel,
+  finishMainWindowPresentation,
   getAppInfo,
   getAutoStart,
   getBootstrapStatus,
@@ -86,13 +87,8 @@ import type {
   Transcript,
   UpdateCheckResult,
   UpdateStatus,
+  WindowPresentationRequest,
 } from "./lib/types";
-
-declare global {
-  interface Window {
-    __navigateTo?: (tab: SidebarItem) => void;
-  }
-}
 
 const scrollFadeObservers = new WeakMap<HTMLElement, ResizeObserver>();
 
@@ -166,6 +162,8 @@ let updateStatus: UpdateStatus = {
 type SettingsPermission = "microphone" | "accessibility";
 const permissionRestartRequired = new Set<SettingsPermission>();
 let lastPermissionStatus: PermissionStatus | null = null;
+let onboardingCompletionInFlight = false;
+let latestPresentationRequestId = 0;
 
 interface ModelDownloadProgressState {
   percentage: number;
@@ -245,6 +243,51 @@ function navigateToTab(tab: SidebarItem): void {
   currentView = tab;
   renderSidebar();
   renderContent();
+}
+
+function waitForAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
+async function waitForPaintFrames(count = 1): Promise<void> {
+  for (let i = 0; i < count; i += 1) {
+    await waitForAnimationFrame();
+  }
+}
+
+async function handleMainWindowPresentationRequest(
+  request: WindowPresentationRequest
+): Promise<void> {
+  latestPresentationRequestId = request.requestId;
+
+  const window = getCurrentWindow();
+  const isVisible = await window.isVisible().catch(() => true);
+  if (isVisible) {
+    document.documentElement.classList.remove("window-route-preparing");
+    navigateToTab(request.tab);
+    try {
+      await finishMainWindowPresentation(request.requestId);
+    } catch (err) {
+      console.error("Failed to finish main window presentation:", err);
+    }
+    return;
+  }
+
+  document.documentElement.classList.add("window-route-preparing");
+  navigateToTab(request.tab);
+  await waitForPaintFrames();
+
+  try {
+    await finishMainWindowPresentation(request.requestId);
+    if (latestPresentationRequestId === request.requestId) {
+      await waitForPaintFrames();
+      document.documentElement.classList.remove("window-route-preparing");
+    }
+  } catch (err) {
+    console.error("Failed to finish main window presentation:", err);
+  }
 }
 
 function setupSidebarListener(): void {
@@ -2781,11 +2824,21 @@ async function init(): Promise<void> {
     await loadSettings({ force: true, refreshDevices: true });
   }
 
+  window.addEventListener("setup-completion-started", () => {
+    onboardingCompletionInFlight = true;
+  });
+
+  window.addEventListener("setup-completion-failed", () => {
+    onboardingCompletionInFlight = false;
+  });
+
   await listen("app-state-changed", (event) => {
     const newState = event.payload as AppState;
     if (newState !== "needs-setup" && currentAppState === "needs-setup") {
-      cleanupOnboarding();
-      showMainUI(); // Rebuild DOM so tray menu can navigate properly
+      if (!onboardingCompletionInFlight) {
+        cleanupOnboarding();
+        showMainUI();
+      }
     }
     currentAppState = newState;
   });
@@ -2810,10 +2863,9 @@ async function init(): Promise<void> {
     await loadSettings({ force: true, refreshDevices: true });
     stats = await getStats().catch(() => null);
     updateStatus = await getUpdateStatus().catch(() => updateStatus);
-    showMainUI(); // Rebuild DOM to main UI structure before hiding
-    // Now set up the frontend hotkey listener with the user's chosen hotkey
+    showMainUI();
     setupHotkeyListener().catch(console.error);
-    getCurrentWindow().hide();
+    onboardingCompletionInFlight = false;
   });
 
   window.addEventListener("focus", () => {
@@ -2837,9 +2889,17 @@ async function init(): Promise<void> {
       });
   });
 
-  // Listen for navigation events from tray menu
-  listen<string>("navigate-to-tab", (event) => {
-    navigateToTab(event.payload as SidebarItem);
+  listen<WindowPresentationRequest>(
+    "main-window-presentation-request",
+    (event) => {
+      void handleMainWindowPresentationRequest(event.payload);
+    }
+  );
+
+  listen("main-window-hidden", () => {
+    if (currentAppState !== "needs-setup") {
+      document.documentElement.classList.add("window-route-preparing");
+    }
   });
 
   listen<UpdateStatus>("update-status-changed", (event) => {
@@ -2858,10 +2918,5 @@ async function init(): Promise<void> {
     });
   });
 }
-
-// Allow backend to navigate before showing the window.
-window.__navigateTo = (tab: SidebarItem) => {
-  navigateToTab(tab);
-};
 
 init();

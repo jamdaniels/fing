@@ -154,6 +154,12 @@ export async function presentMainWindow(frontmost: boolean): Promise<void> {
   return await invoke("present_main_window", { frontmost });
 }
 
+export async function finishMainWindowPresentation(
+  requestId: number
+): Promise<void> {
+  return await invoke("finish_main_window_presentation", { requestId });
+}
+
 export async function armPermissionRestart(): Promise<void> {
   return await invoke("arm_permission_restart");
 }

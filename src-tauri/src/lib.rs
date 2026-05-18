@@ -24,7 +24,7 @@ mod update;
 use audio::{AudioCapture, AudioDevice, MicrophoneTest};
 use state::AppState;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc, Mutex, OnceLock,
 };
 #[cfg(target_os = "macos")]
@@ -52,6 +52,10 @@ lazy_static::lazy_static! {
 }
 
 static PERMISSION_RESTART_ARMED: AtomicBool = AtomicBool::new(false);
+static NEXT_MAIN_WINDOW_PRESENTATION_REQUEST_ID: AtomicU64 = AtomicU64::new(0);
+static PENDING_MAIN_WINDOW_PRESENTATION_REQUEST_ID: AtomicU64 = AtomicU64::new(0);
+
+const MAIN_WINDOW_PRESENTATION_FALLBACK_MS: u64 = 250;
 
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -407,6 +411,35 @@ fn present_main_window(app: tauri::AppHandle, frontmost: bool) {
     }
 }
 
+fn show_main_window_now(app: &tauri::AppHandle) -> Result<(), String> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Err("Main window not found".to_string());
+    };
+
+    let _ = window.unminimize();
+    window
+        .show()
+        .map_err(|e| format!("Failed to show main window: {e}"))?;
+    let _ = window.set_focus();
+
+    #[cfg(target_os = "macos")]
+    platform::activate_current_app();
+
+    Ok(())
+}
+
+#[tauri::command]
+fn finish_main_window_presentation(app: tauri::AppHandle, request_id: u64) -> Result<(), String> {
+    if PENDING_MAIN_WINDOW_PRESENTATION_REQUEST_ID
+        .compare_exchange(request_id, 0, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Ok(());
+    }
+
+    show_main_window_now(&app)
+}
+
 #[tauri::command]
 fn arm_permission_restart() {
     PERMISSION_RESTART_ARMED.store(true, Ordering::Relaxed);
@@ -675,6 +708,13 @@ fn build_tray_menu_for_state(
 /// Tray icon ID constant
 const TRAY_ID: &str = "fing-tray";
 
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MainWindowPresentationRequest {
+    request_id: u64,
+    tab: String,
+}
+
 /// Rebuild the tray menu based on current app state
 pub(crate) fn rebuild_tray_menu(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let current_state = state::get_state();
@@ -691,14 +731,53 @@ pub(crate) fn rebuild_tray_menu(app: &tauri::AppHandle) -> Result<(), Box<dyn st
     Ok(())
 }
 
-fn show_window_for_tab(app: &tauri::AppHandle, tab: &str) {
-    if let Some(window) = app.get_webview_window("main") {
-        let tab_json = serde_json::to_string(tab).unwrap_or_else(|_| "\"home\"".to_string());
-        let script = format!("window.__navigateTo && window.__navigateTo({tab_json});");
-        let _ = window.eval(&script);
-        let _ = window.show();
-        let _ = window.set_focus();
+fn show_pending_main_window_request(app: &tauri::AppHandle, request_id: u64, source: &str) {
+    if PENDING_MAIN_WINDOW_PRESENTATION_REQUEST_ID
+        .compare_exchange(request_id, 0, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
     }
+
+    if let Err(error) = show_main_window_now(app) {
+        tracing::warn!("Failed to show main window after {source}: {error}");
+    }
+}
+
+fn present_main_window_for_tab(app: &tauri::AppHandle, tab: &str) {
+    let request_id = NEXT_MAIN_WINDOW_PRESENTATION_REQUEST_ID.fetch_add(1, Ordering::Relaxed) + 1;
+    PENDING_MAIN_WINDOW_PRESENTATION_REQUEST_ID.store(request_id, Ordering::SeqCst);
+
+    let Some(window) = app.get_webview_window("main") else {
+        tracing::warn!("Main window not found while presenting tab: {tab}");
+        let _ = PENDING_MAIN_WINDOW_PRESENTATION_REQUEST_ID.compare_exchange(
+            request_id,
+            0,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        );
+        return;
+    };
+
+    let request = MainWindowPresentationRequest {
+        request_id,
+        tab: tab.to_string(),
+    };
+
+    if let Err(error) = window.emit("main-window-presentation-request", request) {
+        tracing::warn!("Failed to request frontend window presentation: {error}");
+        show_pending_main_window_request(app, request_id, "presentation request failure");
+        return;
+    }
+
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(
+            MAIN_WINDOW_PRESENTATION_FALLBACK_MS,
+        ))
+        .await;
+        show_pending_main_window_request(&app_handle, request_id, "presentation timeout");
+    });
 }
 
 fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
@@ -708,13 +787,13 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
             app.exit(0);
         }
         "open" => {
-            show_window_for_tab(app, "home");
+            present_main_window_for_tab(app, "home");
         }
         "history" => {
-            show_window_for_tab(app, "history");
+            present_main_window_for_tab(app, "history");
         }
         "settings" => {
-            show_window_for_tab(app, "settings");
+            present_main_window_for_tab(app, "settings");
         }
         "setup" => {
             // Open main window for onboarding
@@ -725,7 +804,7 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
         }
         "check_updates" => {
             // Open main window and trigger the settings update flow.
-            show_window_for_tab(app, "settings");
+            present_main_window_for_tab(app, "settings");
             let _ = app.emit("check-for-updates", ());
         }
         _ => {
@@ -742,7 +821,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tracing::info!("Second launch detected, focusing existing window");
-            show_window_for_tab(app, "home");
+            present_main_window_for_tab(app, "home");
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
@@ -848,6 +927,7 @@ pub fn run() {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
                         let _ = window_clone.hide();
+                        let _ = window_clone.emit("main-window-hidden", ());
                     }
                 });
             }
@@ -902,6 +982,7 @@ pub fn run() {
             // Window management
             quit_app,
             present_main_window,
+            finish_main_window_presentation,
             arm_permission_restart,
             // Model management
             download_model,

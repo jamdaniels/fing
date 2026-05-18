@@ -1278,6 +1278,34 @@ async function stopPolling(): Promise<void> {
   }
 }
 
+function waitForAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
+async function waitForPaintFrames(count = 2): Promise<void> {
+  for (let i = 0; i < count; i += 1) {
+    await waitForAnimationFrame();
+  }
+}
+
+async function showOnboardingCompletionError(): Promise<void> {
+  document.documentElement.classList.add("window-route-preparing");
+  render();
+
+  try {
+    const window = getCurrentWindow();
+    await window.show();
+    await window.setFocus();
+    await waitForPaintFrames();
+  } catch (err) {
+    console.error("Failed to show onboarding completion error:", err);
+  } finally {
+    document.documentElement.classList.remove("window-route-preparing");
+  }
+}
+
 async function handleComplete(): Promise<void> {
   if (state.isCompleting) {
     return;
@@ -1285,19 +1313,25 @@ async function handleComplete(): Promise<void> {
 
   state.isCompleting = true;
   state.completeError = null;
-  render();
 
   stopPolling().catch(() => undefined);
+  window.dispatchEvent(new CustomEvent("setup-completion-started"));
+
+  try {
+    await getCurrentWindow().hide();
+  } catch (err) {
+    console.error("Failed to hide onboarding window:", err);
+  }
 
   try {
     await completeSetup();
     window.dispatchEvent(new CustomEvent("setup-complete"));
-    await getCurrentWindow().hide();
   } catch {
+    window.dispatchEvent(new CustomEvent("setup-completion-failed"));
     state.isCompleting = false;
     state.completeError =
       "Setup did not finish. Please confirm the model download and try again.";
-    render();
+    await showOnboardingCompletionError();
   }
 }
 

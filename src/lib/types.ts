@@ -101,6 +101,11 @@ export type SidebarItem =
   | "settings"
   | "about";
 
+export interface WindowPresentationRequest {
+  requestId: number;
+  tab: SidebarItem;
+}
+
 export interface DownloadProgress {
   bytesDownloaded: number;
   errorMessage?: string;
