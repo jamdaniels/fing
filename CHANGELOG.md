@@ -2,7 +2,7 @@
 
 All notable changes to Fing will be documented in this file.
 
-## 1.1.1-rc1 - 2026-05-19
+## 1.1.1 - 2026-05-19
 
 - Onboarding and UI polish
 
