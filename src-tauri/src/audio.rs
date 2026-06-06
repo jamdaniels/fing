@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 
 static OVERFLOW_LOGGED: AtomicBool = AtomicBool::new(false);
 
-/// Maximum recording duration in seconds (2 minutes).
-pub const MAX_RECORDING_DURATION_SECS: u32 = 120;
+/// Maximum recording duration in seconds (5 minutes).
+pub const MAX_RECORDING_DURATION_SECS: u32 = 5 * 60;
 /// Whisper model input sample rate.
 pub const WHISPER_SAMPLE_RATE: u32 = 16000;
 /// Initial audio buffer capacity before the input device sample rate is known.
@@ -411,7 +411,10 @@ impl AudioCapture {
         }
         self.is_recording = false;
         if OVERFLOW_LOGGED.swap(false, Ordering::Relaxed) {
-            tracing::warn!("Audio buffer full (120s max), samples dropped");
+            tracing::warn!(
+                "Audio buffer full ({}s max), samples dropped",
+                MAX_RECORDING_DURATION_SECS
+            );
         }
 
         // Extract buffer

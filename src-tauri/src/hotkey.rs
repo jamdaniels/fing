@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
-use crate::audio::AudioCapture;
+use crate::audio::{AudioCapture, MAX_RECORDING_DURATION_SECS};
 use crate::db::{save_transcript, NewTranscript};
 use crate::model::{ensure_variant_verified, model_path_for_variant, ModelVariant};
 use crate::paste::paste_text;
@@ -14,8 +14,8 @@ use crate::transcribe::{
     init_transcriber, is_transcriber_loaded, transcribe_audio, unload_transcriber,
 };
 
-// Maximum recording duration (2 minutes) in milliseconds
-const MAX_RECORDING_DURATION_MS: u64 = 2 * 60 * 1000;
+const MAX_RECORDING_DURATION_MS: u64 = MAX_RECORDING_DURATION_SECS as u64 * 1000;
+const MAX_RECORDING_DURATION_MINS: u32 = MAX_RECORDING_DURATION_SECS / 60;
 const LAZY_MODEL_IDLE_UNLOAD_SECS: u64 = 10;
 const SPEECH_FRAME_SAMPLES: usize = 320; // 20ms at whisper's 16kHz input rate.
 const MIN_RECORDING_SAMPLES_FOR_SPEECH: usize = 4_000; // 250ms.
@@ -448,7 +448,7 @@ pub fn on_key_down(app: &AppHandle) {
         *start = Some(Instant::now());
     }
 
-    // Increment session ID and start auto-stop timer (2 min max)
+    // Increment session ID and start auto-stop timer.
     let session_id = RECORDING_SESSION_ID.fetch_add(1, Ordering::SeqCst) + 1;
     set_recording_start_status(RecordingStartStatus::Idle);
     let app_for_timer = app.clone();
@@ -458,11 +458,17 @@ pub fn on_key_down(app: &AppHandle) {
         // Only trigger auto-stop if this session is still active
         let current_session = RECORDING_SESSION_ID.load(Ordering::SeqCst);
         if current_session == session_id && KEY_HELD.load(Ordering::SeqCst) {
-            tracing::info!("Auto-stopping recording after 2 minutes");
+            tracing::info!(
+                "Auto-stopping recording after {} minutes",
+                MAX_RECORDING_DURATION_MINS
+            );
             crate::notifications::show_info(
                 &app_for_timer,
                 "Recording Stopped",
-                "Maximum recording duration (2 min) reached",
+                &format!(
+                    "Maximum recording length reached. Processing the last {} minutes now.",
+                    MAX_RECORDING_DURATION_MINS
+                ),
             );
             on_key_up(&app_for_timer);
         }
