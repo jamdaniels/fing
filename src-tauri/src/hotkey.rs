@@ -17,6 +17,13 @@ use crate::transcribe::{
 // Maximum recording duration (2 minutes) in milliseconds
 const MAX_RECORDING_DURATION_MS: u64 = 2 * 60 * 1000;
 const LAZY_MODEL_IDLE_UNLOAD_SECS: u64 = 10;
+const SPEECH_FRAME_SAMPLES: usize = 320; // 20ms at whisper's 16kHz input rate.
+const MIN_RECORDING_SAMPLES_FOR_SPEECH: usize = 4_000; // 250ms.
+const MIN_ACTIVE_SPEECH_MS: usize = 100;
+const MIN_TOTAL_RMS_FOR_SPEECH: f32 = 0.0008;
+const MIN_FRAME_RMS_FOR_SPEECH: f32 = 0.0015;
+const MIN_MAX_FRAME_RMS_FOR_SPEECH: f32 = 0.0018;
+const NOISE_FLOOR_MULTIPLIER: f32 = 2.5;
 
 // Track if key is currently held
 static KEY_HELD: AtomicBool = AtomicBool::new(false);
@@ -48,6 +55,72 @@ fn is_blank_audio(text: &str) -> bool {
             | "(no speech)"
             | "[inaudible]"
     )
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SpeechActivity {
+    has_speech: bool,
+    total_rms: f32,
+    max_frame_rms: f32,
+    active_ms: usize,
+}
+
+fn detect_speech_activity(audio: &[f32]) -> SpeechActivity {
+    if audio.len() < MIN_RECORDING_SAMPLES_FOR_SPEECH {
+        return SpeechActivity {
+            has_speech: false,
+            total_rms: calculate_rms(audio),
+            max_frame_rms: 0.0,
+            active_ms: 0,
+        };
+    }
+
+    let total_rms = calculate_rms(audio);
+    let mut frame_rms_values: Vec<f32> = audio
+        .chunks(SPEECH_FRAME_SAMPLES)
+        .filter(|frame| frame.len() == SPEECH_FRAME_SAMPLES)
+        .map(calculate_rms)
+        .collect();
+
+    if frame_rms_values.is_empty() {
+        return SpeechActivity {
+            has_speech: false,
+            total_rms,
+            max_frame_rms: 0.0,
+            active_ms: 0,
+        };
+    }
+
+    frame_rms_values.sort_by(|a, b| a.total_cmp(b));
+    let noise_floor_index = frame_rms_values.len() / 10;
+    let noise_floor = frame_rms_values[noise_floor_index];
+    let active_threshold = MIN_FRAME_RMS_FOR_SPEECH.max(noise_floor * NOISE_FLOOR_MULTIPLIER);
+
+    let active_frames = frame_rms_values
+        .iter()
+        .filter(|&&rms| rms >= active_threshold)
+        .count();
+    let active_ms = active_frames * 20;
+    let max_frame_rms = frame_rms_values.last().copied().unwrap_or(0.0);
+    let has_speech = total_rms >= MIN_TOTAL_RMS_FOR_SPEECH
+        && max_frame_rms >= MIN_MAX_FRAME_RMS_FOR_SPEECH
+        && active_ms >= MIN_ACTIVE_SPEECH_MS;
+
+    SpeechActivity {
+        has_speech,
+        total_rms,
+        max_frame_rms,
+        active_ms,
+    }
+}
+
+fn calculate_rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+
+    let sum_squares = samples.iter().map(|sample| sample * sample).sum::<f32>();
+    (sum_squares / samples.len() as f32).sqrt()
 }
 
 // Commands sent to the audio thread
@@ -553,6 +626,18 @@ pub fn on_key_up(app: &AppHandle) {
             audio_buffer.len() as f32 / 16000.0
         );
 
+        let speech_activity = detect_speech_activity(&audio_buffer);
+        if !speech_activity.has_speech {
+            tracing::info!(
+                "No speech detected in audio buffer, skipping transcription/paste (rms={:.4}, max_frame_rms={:.4}, active_ms={})",
+                speech_activity.total_rms,
+                speech_activity.max_frame_rms,
+                speech_activity.active_ms
+            );
+            finish_transcription(&app_handle, None, duration_ms, test_mode).await;
+            return;
+        }
+
         // Load settings for model variant and language
         let settings = load_settings().await;
 
@@ -763,6 +848,56 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::thread;
+
+    #[test]
+    fn speech_activity_rejects_silence_and_low_noise() {
+        let silence = vec![0.0; 16_000];
+        let low_noise = vec![0.001; 16_000];
+
+        assert!(!detect_speech_activity(&silence).has_speech);
+        assert!(!detect_speech_activity(&low_noise).has_speech);
+    }
+
+    #[test]
+    fn speech_activity_rejects_short_transients() {
+        let mut audio = vec![0.0; 16_000];
+        for sample in audio.iter_mut().take(SPEECH_FRAME_SAMPLES * 2) {
+            *sample = 0.05;
+        }
+
+        let activity = detect_speech_activity(&audio);
+
+        assert!(!activity.has_speech);
+        assert_eq!(activity.active_ms, 40);
+    }
+
+    #[test]
+    fn speech_activity_accepts_sustained_voice_like_audio() {
+        let mut audio = vec![0.0; 16_000];
+        for (idx, sample) in audio.iter_mut().enumerate().skip(4_000).take(4_800) {
+            let phase = idx as f32 * 440.0 * std::f32::consts::TAU / 16_000.0;
+            *sample = phase.sin() * 0.03;
+        }
+
+        let activity = detect_speech_activity(&audio);
+
+        assert!(activity.has_speech);
+        assert!(activity.active_ms >= 280);
+    }
+
+    #[test]
+    fn speech_activity_accepts_quiet_sustained_audio() {
+        let mut audio = vec![0.0; 16_000];
+        for (idx, sample) in audio.iter_mut().enumerate().skip(4_000).take(4_800) {
+            let phase = idx as f32 * 220.0 * std::f32::consts::TAU / 16_000.0;
+            *sample = phase.sin() * 0.003;
+        }
+
+        let activity = detect_speech_activity(&audio);
+
+        assert!(activity.has_speech);
+        assert!(activity.active_ms >= 280);
+    }
 
     #[test]
     fn failed_start_does_not_leak_into_next_stop_response() {
