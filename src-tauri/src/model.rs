@@ -221,6 +221,10 @@ lazy_static::lazy_static! {
 }
 
 const HASH_CACHE_MAX_ENTRIES: usize = 64;
+/// Abort if a connection can't be established within this window.
+const DOWNLOAD_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Abort if the byte stream goes idle for this long mid-download.
+const DOWNLOAD_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 fn lock_download_state() -> std::sync::MutexGuard<'static, InternalDownloadState> {
     match DOWNLOAD_STATE.lock() {
@@ -496,7 +500,17 @@ pub async fn download_variant(variant: ModelVariant) -> Result<PathBuf, String> 
     }
 
     // Download
-    let client = Client::new();
+    let client = Client::builder()
+        .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
+        .read_timeout(DOWNLOAD_READ_TIMEOUT)
+        .build()
+        .map_err(|e| {
+            let err_msg = format!("Failed to create download client: {e}");
+            tracing::error!("{}", err_msg);
+            let mut state = lock_download_state();
+            state.status = DownloadStatus::Failed(err_msg.clone());
+            err_msg
+        })?;
     tracing::info!("Fetching model from {}", def.url);
 
     let response = client.get(def.url).send().await.map_err(|e| {
