@@ -1,4 +1,5 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 
 use tauri::AppHandle;
 
@@ -17,6 +18,12 @@ use std::sync::{mpsc, Mutex, OnceLock};
 
 static LISTENER_STARTED: AtomicBool = AtomicBool::new(false);
 static SUPPRESSED: AtomicBool = AtomicBool::new(false);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+static LISTENER_THREAD_GENERATION: AtomicU64 = AtomicU64::new(0);
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+static RESTART_REQUEST_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+const HOTKEY_RESTART_DEBOUNCE_MS: u64 = 250;
 
 /// Suppress global hotkey activation (e.g. while the rebind modal is open).
 /// Pass-through still occurs so the modal can capture the keys; the listener
@@ -40,6 +47,25 @@ static HOTKEY_EVENT_TX: OnceLock<mpsc::Sender<HotkeyEvent>> = OnceLock::new();
 enum HotkeyEvent {
     Press,
     Release,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HotkeyRestartReason {
+    KeyboardDeviceChanged,
+    SystemResumed,
+}
+
+impl HotkeyRestartReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::KeyboardDeviceChanged => "keyboard device changed",
+            Self::SystemResumed => "system resumed",
+        }
+    }
+
+    fn should_release_recording(self) -> bool {
+        matches!(self, Self::KeyboardDeviceChanged | Self::SystemResumed)
+    }
 }
 
 pub fn start_hotkey_listener(app: AppHandle) -> Result<(), String> {
@@ -79,9 +105,9 @@ fn start_hotkey_listener_impl(app: AppHandle) -> Result<(), String> {
         rdev::set_is_main_thread(false);
     }
 
-    APP_HANDLE
-        .set(app)
-        .map_err(|_| "Hotkey listener already initialized".to_string())?;
+    if APP_HANDLE.get().is_none() {
+        let _ = APP_HANDLE.set(app);
+    }
 
     HOTKEY_EVENT_TX.get_or_init(|| {
         let (tx, rx) = mpsc::channel::<HotkeyEvent>();
@@ -102,7 +128,8 @@ fn start_hotkey_listener_impl(app: AppHandle) -> Result<(), String> {
         tx
     });
 
-    std::thread::spawn(|| {
+    let listener_generation = LISTENER_THREAD_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    std::thread::spawn(move || {
         #[cfg(target_os = "macos")]
         {
             if let Err(error) = grab(grab_callback) {
@@ -118,9 +145,89 @@ fn start_hotkey_listener_impl(app: AppHandle) -> Result<(), String> {
                 tracing::error!("Global hotkey listener failed: {:?}", error);
             }
         }
+
+        if LISTENER_THREAD_GENERATION.load(Ordering::SeqCst) == listener_generation {
+            LISTENER_STARTED.store(false, Ordering::SeqCst);
+        }
     });
 
     Ok(())
+}
+
+pub fn restart_hotkey_listener(app: AppHandle, reason: HotkeyRestartReason) {
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        reset_listener_state();
+
+        if reason.should_release_recording()
+            && matches!(crate::state::get_state(), crate::state::AppState::Recording)
+        {
+            dispatch_hotkey_event(HotkeyEvent::Release);
+        }
+
+        let request_generation = next_restart_request_generation();
+        tracing::info!(
+            "Scheduling hotkey listener recovery: reason={}, generation={}",
+            reason.as_str(),
+            request_generation
+        );
+
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(HOTKEY_RESTART_DEBOUNCE_MS));
+
+            if !is_latest_restart_request(request_generation) {
+                return;
+            }
+
+            #[cfg(target_os = "macos")]
+            {
+                if let Err(error) = rdev::exit_grab() {
+                    tracing::warn!(
+                        "Failed to stop macOS hotkey grab during recovery: {:?}",
+                        error
+                    );
+                }
+
+                std::thread::sleep(Duration::from_millis(50));
+                LISTENER_STARTED.store(false, Ordering::SeqCst);
+
+                if let Err(error) = start_hotkey_listener_impl(app) {
+                    tracing::warn!(
+                        "Failed to restart hotkey listener after {}: {}",
+                        reason.as_str(),
+                        error
+                    );
+                } else {
+                    tracing::info!("Hotkey listener recovered after {}", reason.as_str());
+                }
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                let _ = app;
+                tracing::debug!(
+                    "Hotkey listener state reset after {}; native listener left running",
+                    reason.as_str()
+                );
+            }
+        });
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = (app, reason);
+        reset_listener_state();
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn next_restart_request_generation() -> u64 {
+    RESTART_REQUEST_GENERATION.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn is_latest_restart_request(request_generation: u64) -> bool {
+    RESTART_REQUEST_GENERATION.load(Ordering::SeqCst) == request_generation
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -285,6 +392,25 @@ pub fn reset_listener_state() {
     };
     state_guard.hotkey_active = false;
     state_guard.pressed_keys.clear();
+}
+
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
+pub(crate) fn set_test_listener_state(hotkey_active: bool, pressed_keys: &[&str]) {
+    let mut state_guard = match HOTKEY_STATE.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    state_guard.hotkey_active = hotkey_active;
+    state_guard.pressed_keys = pressed_keys.iter().map(|key| key.to_string()).collect();
+}
+
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
+pub(crate) fn test_listener_state_snapshot() -> (bool, HashSet<String>) {
+    let state_guard = match HOTKEY_STATE.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    (state_guard.hotkey_active, state_guard.pressed_keys.clone())
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -523,5 +649,25 @@ mod tests {
     #[test]
     fn does_not_map_escape() {
         assert_eq!(key_to_token(&Key::Escape), None);
+    }
+
+    #[test]
+    fn restart_generation_only_accepts_latest_request() {
+        let stale_generation = next_restart_request_generation();
+        let latest_generation = next_restart_request_generation();
+
+        assert!(!is_latest_restart_request(stale_generation));
+        assert!(is_latest_restart_request(latest_generation));
+    }
+
+    #[test]
+    fn reset_listener_state_clears_active_pressed_keys() {
+        set_test_listener_state(true, &["ControlLeft", "KeyK"]);
+
+        reset_listener_state();
+
+        let (hotkey_active, pressed_keys) = test_listener_state_snapshot();
+        assert!(!hotkey_active);
+        assert!(pressed_keys.is_empty());
     }
 }

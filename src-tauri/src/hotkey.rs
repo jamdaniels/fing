@@ -676,21 +676,24 @@ pub fn on_key_up(app: &AppHandle) {
         let dictionary_terms = crate::dictionary::sanitize_terms(&settings.dictionary_terms);
         let dictionary_prompt = crate::dictionary::build_prompt(&dictionary_terms);
 
-        // Transcribe
-        let text =
-            match transcribe_audio(&audio_buffer, lang.as_deref(), dictionary_prompt.as_deref()) {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::error!("Transcription failed: {}", e);
-                    crate::notifications::show_error(
-                        &app_handle,
-                        "Transcription Error",
-                        &format!("{e}"),
-                    );
-                    finish_transcription(&app_handle, None, duration_ms, test_mode).await;
-                    return;
-                }
-            };
+        // Transcribe on a blocking thread; whisper inference is CPU-bound and
+        // must not pin an async runtime worker.
+        let transcribe_result = tauri::async_runtime::spawn_blocking(move || {
+            transcribe_audio(&audio_buffer, lang.as_deref(), dictionary_prompt.as_deref())
+        })
+        .await
+        .map_err(|e| format!("Transcription task failed: {e}"))
+        .and_then(|result| result.map_err(|e| e.to_string()));
+
+        let text = match transcribe_result {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!("Transcription failed: {}", e);
+                crate::notifications::show_error(&app_handle, "Transcription Error", &e);
+                finish_transcription(&app_handle, None, duration_ms, test_mode).await;
+                return;
+            }
+        };
 
         // Apply user dictionary corrections and normalize whitespace edges.
         let text = crate::dictionary::apply_dictionary_corrections(text.trim(), &dictionary_terms)

@@ -560,7 +560,9 @@ fn request_microphone_permission() {
 
 #[tauri::command]
 fn update_hotkey(hotkey: String) -> Result<(), String> {
-    hotkey_config::set_hotkey_from_string(&hotkey)
+    hotkey_config::set_hotkey_from_string(&hotkey)?;
+    hotkey_listener::reset_listener_state();
+    Ok(())
 }
 
 #[tauri::command]
@@ -943,6 +945,9 @@ pub fn run() {
                 update::schedule_startup_check(&app_handle);
             }
 
+            #[cfg(target_os = "macos")]
+            platform::start_keyboard_device_observer(app_handle);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1008,14 +1013,24 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            let _ = (&app, &event);
-
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::ExitRequested { code: None, .. } = event {
-                if PERMISSION_RESTART_ARMED.load(Ordering::Relaxed) {
-                    app.request_restart();
+            match event {
+                tauri::RunEvent::Resumed => {
+                    hotkey_listener::restart_hotkey_listener(
+                        app.clone(),
+                        hotkey_listener::HotkeyRestartReason::SystemResumed,
+                    );
                 }
+                tauri::RunEvent::ExitRequested { code: None, .. } => {
+                    if PERMISSION_RESTART_ARMED.load(Ordering::Relaxed) {
+                        app.request_restart();
+                    }
+                }
+                _ => {}
             }
+
+            #[cfg(not(target_os = "macos"))]
+            let _ = (&app, &event);
         });
 }
 
@@ -1044,5 +1059,21 @@ mod bootstrap_tests {
 
         assert_eq!(decision.app_state, AppState::NeedsSetup);
         assert!(decision.should_show_onboarding);
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn update_hotkey_updates_runtime_config_and_resets_listener_state() {
+        crate::hotkey_listener::set_test_listener_state(true, &["ControlLeft", "KeyK"]);
+
+        update_hotkey("F10".to_string()).expect("hotkey update should succeed");
+
+        let config =
+            crate::hotkey_config::get_hotkey_config().expect("runtime hotkey config should be set");
+        assert_eq!(config.keys, vec!["F10"]);
+
+        let (hotkey_active, pressed_keys) = crate::hotkey_listener::test_listener_state_snapshot();
+        assert!(!hotkey_active);
+        assert!(pressed_keys.is_empty());
     }
 }
