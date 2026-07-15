@@ -853,6 +853,24 @@ pub fn run() {
                 Err(e) => tracing::warn!("Failed to prune old transcripts: {e}"),
             }
 
+            // Keep retention enforced for tray-app instances that remain open
+            // for longer than the configured 30-day history window.
+            tauri::async_runtime::spawn(async {
+                let mut interval =
+                    tokio::time::interval(std::time::Duration::from_secs(60 * 60 * 24));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                interval.tick().await;
+
+                loop {
+                    interval.tick().await;
+                    match db::prune_old_transcripts() {
+                        Ok(0) => {}
+                        Ok(n) => tracing::info!("Pruned {n} old transcripts"),
+                        Err(e) => tracing::warn!("Failed to prune old transcripts: {e}"),
+                    }
+                }
+            });
+
             // Check if onboarding was previously completed
             let app_handle = app.handle().clone();
             let bootstrap_context = tauri::async_runtime::block_on(load_bootstrap_context("setup"));

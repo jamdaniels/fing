@@ -39,24 +39,40 @@ jobs:
       - name: Resolve release tag
         id: release_tag
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_TAG"
           else
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            tag="$GITHUB_REF_NAME"
           fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag"
+            exit 1
+          fi
+
+          git check-ref-format "refs/tags/$tag" >/dev/null
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
 
       - name: Check out release tag
         shell: bash
+        env:
+          TAG: ${{ steps.release_tag.outputs.tag }}
         run: |
           git fetch --tags --force
-          git checkout "${{ steps.release_tag.outputs.tag }}"
+          git rev-parse --verify --quiet "refs/tags/$TAG^{commit}" >/dev/null
+          git checkout --detach "refs/tags/$TAG"
 
       - name: Resolve release type
         id: release_type
         shell: bash
+        env:
+          TAG: ${{ steps.release_tag.outputs.tag }}
         run: |
-          if [[ "${{ steps.release_tag.outputs.tag }}" == *-rc* ]]; then
+          if [[ "$TAG" == *-rc* ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
@@ -81,16 +97,21 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Verify tag matches version files
-        run: bun run release:verify-tag "${{ steps.release_tag.outputs.tag }}"
+        env:
+          TAG: ${{ steps.release_tag.outputs.tag }}
+        run: bun run release:verify-tag "$TAG"
 
       - name: Resolve release notes
         id: release_notes
         shell: bash
+        env:
+          TAG: ${{ steps.release_tag.outputs.tag }}
         run: |
+          delimiter="notes_$(openssl rand -hex 8)"
           {
-            echo "body<<EOF"
-            bun run release:notes "${{ steps.release_tag.outputs.tag }}"
-            echo "EOF"
+            echo "body<<${delimiter}"
+            bun run release:notes "$TAG"
+            echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust

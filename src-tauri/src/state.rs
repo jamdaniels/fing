@@ -47,6 +47,24 @@ pub fn transition_to(new_state: AppState) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Atomically transition from `from` to `to` when the current state matches.
+pub fn try_transition(from: AppState, to: AppState) -> bool {
+    let mut state = match APP_STATE.write() {
+        Ok(state) => state,
+        Err(poisoned) => {
+            tracing::warn!("App state write lock poisoned in try_transition, recovering");
+            poisoned.into_inner()
+        }
+    };
+
+    if *state != from {
+        return false;
+    }
+
+    *state = to;
+    true
+}
+
 /// Set state and emit event to frontend
 pub fn set_state(app: &tauri::AppHandle, new_state: AppState) -> Result<(), String> {
     use tauri::Emitter;
@@ -128,5 +146,45 @@ mod tests {
 
         transition_to(AppState::Processing).expect("transition to processing should succeed");
         assert_eq!(get_state(), AppState::Processing);
+    }
+
+    #[test]
+    fn try_transition_updates_matching_state() {
+        let _guard = STATE_TEST_MUTEX
+            .lock()
+            .expect("state test mutex should lock");
+        let _reset = StateReset(get_state());
+
+        transition_to(AppState::Ready).expect("transition to ready should succeed");
+
+        assert!(try_transition(AppState::Ready, AppState::Recording));
+        assert_eq!(get_state(), AppState::Recording);
+    }
+
+    #[test]
+    fn try_transition_leaves_non_matching_state_unchanged() {
+        let _guard = STATE_TEST_MUTEX
+            .lock()
+            .expect("state test mutex should lock");
+        let _reset = StateReset(get_state());
+
+        transition_to(AppState::Processing).expect("transition to processing should succeed");
+
+        assert!(!try_transition(AppState::Ready, AppState::Recording));
+        assert_eq!(get_state(), AppState::Processing);
+    }
+
+    #[test]
+    fn try_transition_allows_only_one_sequential_claim() {
+        let _guard = STATE_TEST_MUTEX
+            .lock()
+            .expect("state test mutex should lock");
+        let _reset = StateReset(get_state());
+
+        transition_to(AppState::Ready).expect("transition to ready should succeed");
+
+        assert!(try_transition(AppState::Ready, AppState::Recording));
+        assert!(!try_transition(AppState::Ready, AppState::Recording));
+        assert_eq!(get_state(), AppState::Recording);
     }
 }

@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
@@ -75,6 +75,7 @@ struct AudioThread {
 
 static AUDIO_THREAD: Mutex<Option<AudioThread>> = Mutex::new(None);
 static RECORDING_START_STATUS: Mutex<RecordingStartStatus> = Mutex::new(RecordingStartStatus::Idle);
+static RECORDING_LIFECYCLE: Mutex<()> = Mutex::new(());
 
 // Recording start time for duration tracking
 static RECORDING_START: Mutex<Option<Instant>> = Mutex::new(None);
@@ -175,6 +176,16 @@ fn current_recording_start_status() -> RecordingStartStatus {
         }
     };
     start_status.clone()
+}
+
+fn lock_recording_lifecycle() -> MutexGuard<'static, ()> {
+    match RECORDING_LIFECYCLE.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!("Recording lifecycle mutex poisoned, recovering");
+            poisoned.into_inner()
+        }
+    }
 }
 
 fn send_start_recording_command(
@@ -319,16 +330,14 @@ fn schedule_lazy_unload_if_idle() {
 
 /// Called when F8 is pressed down
 pub fn on_key_down(app: &AppHandle) {
+    let _lifecycle_guard = lock_recording_lifecycle();
     let is_test_mode = ONBOARDING_TEST_MODE.load(Ordering::SeqCst);
-    let settings_snapshot = load_settings_sync();
 
-    // Check current state - only proceed if Ready (or in test mode)
-    if !is_test_mode {
-        let state = crate::state::get_state();
-        if !state.can_record() {
-            return;
-        }
+    if KEY_HELD.load(Ordering::SeqCst) {
+        return;
     }
+
+    let settings_snapshot = load_settings_sync();
 
     if !is_test_mode && settings_snapshot.lazy_model_loading {
         // Invalidate any pending lazy unload timer from older activity.
@@ -355,7 +364,12 @@ pub fn on_key_down(app: &AppHandle) {
 
     // Transition to Recording (skip state transition in test mode to avoid triggering main.ts)
     if !is_test_mode {
-        crate::state::transition_to(crate::state::AppState::Recording).ok();
+        if !crate::state::try_transition(
+            crate::state::AppState::Ready,
+            crate::state::AppState::Recording,
+        ) {
+            return;
+        }
         app.emit("app-state-changed", "recording").ok();
     }
     KEY_HELD.store(true, Ordering::SeqCst);
@@ -443,19 +457,11 @@ pub fn on_key_down(app: &AppHandle) {
 
 /// Called when F8 is released
 pub fn on_key_up(app: &AppHandle) {
+    let _lifecycle_guard = lock_recording_lifecycle();
     let is_test_mode = ONBOARDING_TEST_MODE.load(Ordering::SeqCst);
 
-    if !KEY_HELD.load(Ordering::SeqCst) {
+    if !KEY_HELD.swap(false, Ordering::SeqCst) {
         return;
-    }
-    KEY_HELD.store(false, Ordering::SeqCst);
-
-    // Check we're in Recording state (skip in test mode)
-    if !is_test_mode {
-        let state = crate::state::get_state();
-        if !matches!(state, crate::state::AppState::Recording) {
-            return;
-        }
     }
 
     // Calculate recording duration
@@ -497,14 +503,23 @@ pub fn on_key_up(app: &AppHandle) {
 
     set_recording_start_status(RecordingStartStatus::Idle);
 
-    // Transition to Processing (skip state events in test mode)
-    if !is_test_mode {
-        crate::state::transition_to(crate::state::AppState::Processing).ok();
+    // Transition to Processing (skip state events in test mode). If another
+    // subsystem changed the state unexpectedly, still stop the captured audio
+    // below, but do not emit a misleading Processing event.
+    let processing_claimed = is_test_mode
+        || crate::state::try_transition(
+            crate::state::AppState::Recording,
+            crate::state::AppState::Processing,
+        );
+    if !is_test_mode && processing_claimed {
         app.emit("app-state-changed", "processing").ok();
+    } else if !processing_claimed {
+        tracing::warn!("Recording stop could not claim the Processing state");
     }
 
-    // Show processing indicator
-    crate::indicator::show_processing(app).ok();
+    if processing_claimed {
+        crate::indicator::show_processing(app).ok();
+    }
 
     let duration_ms = duration_ms as i64;
 
@@ -763,6 +778,36 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn recording_lifecycle_lock_serializes_owners() {
+        let guard = lock_recording_lifecycle();
+        let (waiting_tx, waiting_rx) = mpsc::channel();
+        let (acquired_tx, acquired_rx) = mpsc::channel();
+
+        let worker = thread::spawn(move || {
+            waiting_tx
+                .send(())
+                .expect("worker should report that it is waiting");
+            let _guard = lock_recording_lifecycle();
+            acquired_tx
+                .send(())
+                .expect("worker should report acquiring the lifecycle lock");
+        });
+
+        waiting_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("worker should start");
+        assert!(acquired_rx.recv_timeout(Duration::from_millis(50)).is_err());
+
+        drop(guard);
+
+        acquired_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("worker should acquire the released lifecycle lock");
+        worker.join().expect("worker thread should complete");
+    }
 
     #[test]
     fn failed_start_does_not_leak_into_next_stop_response() {

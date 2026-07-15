@@ -155,18 +155,7 @@ fn backfill_recent_term_index(conn: &Connection) -> Result<u64, rusqlite::Error>
     Ok(missing_rows.len() as u64)
 }
 
-/// Initialize the database, creating tables and FTS5 index if needed.
-pub fn init_db() -> Result<(), String> {
-    let path = crate::paths::db_path().ok_or_else(|| "App paths not initialized".to_string())?;
-
-    // Ensure directory exists
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create database directory: {e}"))?;
-    }
-
-    let conn = Connection::open(&path).map_err(|e| format!("Failed to open database: {e}"))?;
-
+fn initialize_connection(conn: &Connection) -> Result<(), String> {
     if let Err(e) = conn.execute("PRAGMA foreign_keys=ON", []) {
         tracing::warn!("Could not enable foreign key enforcement: {}", e);
     }
@@ -254,11 +243,27 @@ pub fn init_db() -> Result<(), String> {
     )
     .map_err(|e| format!("Failed to create transcript_terms word index: {e}"))?;
 
-    match backfill_recent_term_index(&conn) {
+    match backfill_recent_term_index(conn) {
         Ok(0) => {}
         Ok(n) => tracing::info!("Backfilled term index for {n} transcripts"),
         Err(e) => tracing::warn!("Failed to backfill term index: {e}"),
     }
+
+    Ok(())
+}
+
+/// Initialize the database, creating tables and FTS5 index if needed.
+pub fn init_db() -> Result<(), String> {
+    let path = crate::paths::db_path().ok_or_else(|| "App paths not initialized".to_string())?;
+
+    // Ensure directory exists
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create database directory: {e}"))?;
+    }
+
+    let conn = Connection::open(&path).map_err(|e| format!("Failed to open database: {e}"))?;
+    initialize_connection(&conn)?;
 
     let mut db = DB
         .lock()
@@ -314,6 +319,11 @@ pub struct NewTranscript {
 
 /// Save a new transcription to the database.
 pub fn save_transcript(transcript: &NewTranscript) -> Result<Transcript, String> {
+    // Retention cleanup is best effort and must never prevent a new save.
+    if let Err(e) = prune_old_transcripts() {
+        tracing::warn!("Retention prune on save failed: {e}");
+    }
+
     let word_count = transcript.text.split_whitespace().count() as i64;
 
     with_db(|conn| {
@@ -544,7 +554,53 @@ pub fn db_delete_all() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_term_counts, sanitize_pagination};
+    use super::*;
+    use std::sync::Mutex;
+
+    static DB_TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+    struct DbReset;
+
+    impl Drop for DbReset {
+        fn drop(&mut self) {
+            let mut db = match DB.lock() {
+                Ok(db) => db,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            *db = None;
+        }
+    }
+
+    fn setup_test_db() -> DbReset {
+        let reset = DbReset;
+        let conn = Connection::open_in_memory().expect("in-memory database should open");
+        initialize_connection(&conn).expect("test database schema should initialize");
+
+        let mut db = DB.lock().expect("database mutex should lock");
+        *db = Some(conn);
+        drop(db);
+
+        reset
+    }
+
+    fn new_transcript(text: &str) -> NewTranscript {
+        NewTranscript {
+            text: text.to_string(),
+            duration_ms: 1_000,
+            app_context: None,
+        }
+    }
+
+    fn backdate_transcript(id: i64) {
+        with_db(|conn| {
+            conn.execute(
+                "UPDATE transcripts SET created_at = datetime('now', '-31 days') WHERE id = ?1",
+                [id],
+            )?;
+            Ok(())
+        })
+        .expect("transcript should be backdated");
+    }
 
     #[test]
     fn sanitize_pagination_clamps_limit_and_offset() {
@@ -565,5 +621,80 @@ mod tests {
         assert_eq!(counts.get("the"), None);
         assert_eq!(counts.get("and"), None);
         assert_eq!(counts.get("it"), None);
+    }
+
+    #[test]
+    fn prune_removes_only_expired_transcripts() {
+        let _guard = DB_TEST_MUTEX
+            .lock()
+            .expect("database test mutex should lock");
+        let _reset = setup_test_db();
+
+        let expired = save_transcript(&new_transcript("obsoletequartz archive"))
+            .expect("expired transcript should save");
+        let fresh = save_transcript(&new_transcript("currentzephyr retained"))
+            .expect("fresh transcript should save");
+        backdate_transcript(expired.id);
+
+        assert_eq!(prune_old_transcripts(), Ok(1));
+
+        let remaining = get_recent_transcripts(25, 0).expect("transcripts should load");
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, fresh.id);
+    }
+
+    #[test]
+    fn prune_keeps_search_and_term_indexes_consistent() {
+        let _guard = DB_TEST_MUTEX
+            .lock()
+            .expect("database test mutex should lock");
+        let _reset = setup_test_db();
+
+        let expired = save_transcript(&new_transcript("obsoletequartz archive"))
+            .expect("expired transcript should save");
+        save_transcript(&new_transcript("currentzephyr retained"))
+            .expect("fresh transcript should save");
+        backdate_transcript(expired.id);
+
+        prune_old_transcripts().expect("expired transcript should prune");
+
+        assert!(search_transcripts("obsoletequartz", 25, 0)
+            .expect("expired search should run")
+            .is_empty());
+        assert_eq!(
+            search_transcripts("currentzephyr", 25, 0)
+                .expect("fresh search should run")
+                .len(),
+            1
+        );
+
+        let expired_term_count: i64 = with_db(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM transcript_terms WHERE transcript_id = ?1",
+                [expired.id],
+                |row| row.get(0),
+            )
+        })
+        .expect("term count should load");
+        assert_eq!(expired_term_count, 0);
+    }
+
+    #[test]
+    fn save_transcript_prunes_expired_rows() {
+        let _guard = DB_TEST_MUTEX
+            .lock()
+            .expect("database test mutex should lock");
+        let _reset = setup_test_db();
+
+        let expired = save_transcript(&new_transcript("obsoletequartz archive"))
+            .expect("expired transcript should save");
+        backdate_transcript(expired.id);
+
+        let fresh = save_transcript(&new_transcript("currentzephyr retained"))
+            .expect("fresh transcript should save");
+
+        let remaining = get_recent_transcripts(25, 0).expect("transcripts should load");
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, fresh.id);
     }
 }

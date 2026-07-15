@@ -35,3 +35,4 @@ src-tauri/.cargo/
 
 # Local stuff
 dev/
+plans/
