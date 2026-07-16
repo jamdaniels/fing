@@ -12,10 +12,11 @@
     "frontend:build": "bunx --bun vite build",
     "test": "bun run test:ts && bun run test:rust",
     "test:ts": "bun test",
-    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:rust": "bun run frontend:build && cargo test --manifest-path src-tauri/Cargo.toml",
     "typecheck": "tsc --noEmit",
     "lint": "bunx --bun biome check --no-errors-on-unmatched .",
     "lint:fix": "bunx --bun biome check --write --no-errors-on-unmatched .",
+    "verify": "bun run lint && bun run typecheck && bun run test:ts && bun run test:rust",
     "release:version": "bun run scripts/release.ts bump",
     "release:verify-tag": "bun run scripts/release.ts verify-tag",
     "release:notes": "bun run scripts/release.ts notes"

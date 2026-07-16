@@ -481,25 +481,33 @@ impl AudioCapture {
 
         let mut output = vec![0.0f32; resampler.process_all_needed_output_len(input_frames)];
         let output_capacity = output.len();
-        let mut output_adapter = match InterleavedSlice::new_mut(&mut output, 1, output_capacity) {
-            Ok(adapter) => adapter,
-            Err(e) => {
-                tracing::error!("Failed to create output adapter: {}", e);
-                return Self::simple_resample(
-                    &buffer,
-                    self.native_sample_rate,
-                    WHISPER_SAMPLE_RATE,
-                );
-            }
+        let process_result = {
+            let mut output_adapter =
+                match InterleavedSlice::new_mut(&mut output, 1, output_capacity) {
+                    Ok(adapter) => adapter,
+                    Err(e) => {
+                        tracing::error!("Failed to create output adapter: {}", e);
+                        return Self::simple_resample(
+                            &buffer,
+                            self.native_sample_rate,
+                            WHISPER_SAMPLE_RATE,
+                        );
+                    }
+                };
+
+            resampler.process_all_into_buffer(
+                &input_adapter,
+                &mut output_adapter,
+                input_frames,
+                None,
+            )
         };
 
-        match resampler.process_all_into_buffer(
-            &input_adapter,
-            &mut output_adapter,
-            input_frames,
-            None,
-        ) {
-            Ok((_, output_frames)) => output[..output_frames].to_vec(),
+        match process_result {
+            Ok((_, output_frames)) => {
+                output.truncate(output_frames);
+                output
+            }
             Err(e) => {
                 tracing::error!("Resampling error: {}", e);
                 Self::simple_resample(&buffer, self.native_sample_rate, WHISPER_SAMPLE_RATE)
@@ -642,5 +650,113 @@ impl Drop for AudioCapture {
             tracing::debug!("AudioCapture dropped with active stream, closing");
             self.close_capture();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sine_wave(sample_rate: u32, sample_count: usize, frequency: f32) -> Vec<f32> {
+        (0..sample_count)
+            .map(|index| {
+                let time = index as f32 / sample_rate as f32;
+                (2.0 * std::f32::consts::PI * frequency * time).sin()
+            })
+            .collect()
+    }
+
+    fn assert_length_near(actual: usize, expected: usize) {
+        let tolerance = (expected as f64 * 0.02).ceil() as usize;
+        assert!(
+            actual.abs_diff(expected) <= tolerance,
+            "expected output length near {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn max_buffer_size_scales_with_sample_rate() {
+        assert_eq!(
+            max_buffer_size_for_sample_rate(WHISPER_SAMPLE_RATE),
+            INITIAL_BUFFER_CAPACITY
+        );
+        assert_eq!(max_buffer_size_for_sample_rate(16_000), 120 * 16_000);
+        assert_eq!(max_buffer_size_for_sample_rate(48_000), 120 * 48_000);
+    }
+
+    #[test]
+    fn simple_resample_preserves_identity_rate() {
+        let input = vec![-0.5, 0.0, 0.25, 1.0];
+
+        assert_eq!(AudioCapture::simple_resample(&input, 16_000, 16_000), input);
+    }
+
+    #[test]
+    fn simple_resample_downsamples_expected_length_and_constant_signal() {
+        let input = vec![0.5; 4_800];
+        let output = AudioCapture::simple_resample(&input, 48_000, 16_000);
+
+        assert_eq!(output.len(), 1_600);
+        assert!(output.iter().all(|sample| (*sample - 0.5).abs() < 1e-6));
+    }
+
+    #[test]
+    fn simple_resample_handles_empty_and_sub_ratio_inputs() {
+        assert!(AudioCapture::simple_resample(&[], 48_000, 16_000).is_empty());
+        assert!(AudioCapture::simple_resample(&[0.5], 48_000, 16_000).is_empty());
+    }
+
+    #[test]
+    fn simple_resample_produces_finite_bounded_samples() {
+        let input = sine_wave(44_100, 44_100, 440.0);
+        let output = AudioCapture::simple_resample(&input, 44_100, 16_000);
+
+        assert_length_near(output.len(), 16_000);
+        assert!(output
+            .iter()
+            .all(|sample| sample.is_finite() && sample.abs() <= 1.0 + 1e-3));
+    }
+
+    #[test]
+    fn resample_to_16k_passes_native_rate_through() {
+        let capture = AudioCapture::new();
+        let input = vec![-0.25, 0.0, 0.5, 1.0];
+        let input_ptr = input.as_ptr();
+        let output = capture.resample_to_16k(input);
+
+        assert_eq!(output, vec![-0.25, 0.0, 0.5, 1.0]);
+        assert_eq!(output.as_ptr(), input_ptr);
+    }
+
+    #[test]
+    fn resample_to_16k_returns_empty_for_empty_input() {
+        let mut capture = AudioCapture::new();
+        capture.native_sample_rate = 48_000;
+
+        assert!(capture.resample_to_16k(Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn resample_to_16k_downsamples_with_finite_bounded_output() {
+        let mut capture = AudioCapture::new();
+        capture.native_sample_rate = 48_000;
+        let input = sine_wave(48_000, 48_000, 440.0);
+        let output = capture.resample_to_16k(input);
+
+        assert_length_near(output.len(), 16_000);
+        assert!(output
+            .iter()
+            .all(|sample| sample.is_finite() && sample.abs() <= 1.1));
+    }
+
+    #[test]
+    fn resample_to_16k_handles_odd_native_rate() {
+        let mut capture = AudioCapture::new();
+        capture.native_sample_rate = 44_100;
+        let input = sine_wave(44_100, 44_100, 440.0);
+        let output = capture.resample_to_16k(input);
+
+        assert_length_near(output.len(), 16_000);
+        assert!(output.iter().all(|sample| sample.is_finite()));
     }
 }

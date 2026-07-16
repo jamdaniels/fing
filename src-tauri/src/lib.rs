@@ -91,8 +91,7 @@ fn frontend_hotkey_sender() -> &'static mpsc::Sender<FrontendHotkeyCommand> {
 
 #[tauri::command]
 fn get_app_state() -> String {
-    let state = state::APP_STATE.read().unwrap();
-    state.as_str().to_string()
+    state::get_state().as_str().to_string()
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -880,19 +879,27 @@ pub fn run() {
 
             if bootstrap_context.decision.app_state == AppState::Ready {
                 let variant = saved_settings.active_model_variant;
-                let model_path = model::model_path_for_variant(variant);
 
                 // Try to pre-load the transcriber, but don't block Ready state
                 // on failure. The hotkey handler will retry on first use.
                 if !saved_settings.lazy_model_loading {
-                    let model_path_str = model_path.to_string_lossy().to_string();
                     if let Err(e) = tauri::async_runtime::block_on(async move {
                         tauri::async_runtime::spawn_blocking(move || {
+                            let verification_started = std::time::Instant::now();
+                            let model_path = model::ensure_variant_verified(variant)
+                                .map_err(|_| "active model verification failed")?;
+                            tracing::info!(
+                                "Verified {:?} model in {} ms",
+                                variant,
+                                verification_started.elapsed().as_millis()
+                            );
+
+                            let model_path_str = model_path.to_string_lossy().to_string();
                             transcribe::init_transcriber(&model_path_str)
+                                .map_err(|_| "transcriber initialization failed")
                         })
                         .await
-                        .map_err(|e| format!("{e}"))?
-                        .map_err(|e| format!("{e}"))
+                        .map_err(|_| "transcriber preload task failed")?
                     }) {
                         tracing::warn!("Transcriber init deferred to first use: {}", e);
                     }

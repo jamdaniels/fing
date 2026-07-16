@@ -7,7 +7,7 @@
 
 ## Commands
 - `bun run dev`, `bun run build`, or `bun run frontend:build`.
-- Checks: `bun run typecheck`, `bun run lint` (`lint:fix`), and `bun run test` (`test:ts` / `test:rust`).
+- Checks: `bun run verify`, or individually `bun run typecheck`, `bun run lint` (`lint:fix`), and `bun run test` (`test:ts` / `test:rust`).
 
 ## Guardrails
 - Never read, write, or modify `.env` or `.env.local` directly.

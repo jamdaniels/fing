@@ -143,7 +143,7 @@ pub fn init_transcriber(model_path: &str) -> Result<(), TranscribeError> {
         return Ok(());
     }
 
-    tracing::info!("Initializing transcriber from {}", model_path);
+    tracing::info!("Initializing transcriber");
     *guard = Some(Arc::new(Transcriber::new(model_path)?));
 
     Ok(())

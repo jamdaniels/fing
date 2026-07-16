@@ -72,8 +72,8 @@ export async function deleteTranscript(id: number): Promise<void> {
   return await invoke("db_delete", { id });
 }
 
-export async function deleteAllTranscripts(): Promise<number> {
-  return await invoke<number>("db_delete_all");
+export async function deleteAllTranscripts(): Promise<void> {
+  return await invoke("db_delete_all");
 }
 
 export async function getAudioDevices(): Promise<AudioDevice[]> {
@@ -84,8 +84,8 @@ export async function refreshAudioDevices(): Promise<AudioDevice[]> {
   return await invoke<AudioDevice[]>("refresh_audio_devices");
 }
 
-export async function downloadModel(variant: ModelVariant): Promise<void> {
-  return await invoke("download_model", { variant });
+export async function downloadModel(variant: ModelVariant): Promise<string> {
+  return await invoke<string>("download_model", { variant });
 }
 
 export async function getDownloadProgress(): Promise<DownloadProgress> {
