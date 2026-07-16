@@ -2,6 +2,12 @@
 
 All notable changes to Fing will be documented in this file.
 
+## Unreleased
+
+- Added speech model recovery
+- Improved recording reliability
+- Improved 30d transcript history deletion
+
 ## 1.1.1 - 2026-05-19
 
 - Onboarding and UI polish
