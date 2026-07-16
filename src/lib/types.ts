@@ -56,8 +56,15 @@ export interface Settings {
 export interface BootstrapStatus {
   appState: AppState;
   onboardingCompleted: boolean;
+  reason: BootstrapReason;
   shouldShowOnboarding: boolean;
 }
+
+export type BootstrapReason =
+  | "ready"
+  | "incomplete_onboarding"
+  | "model_missing"
+  | "model_invalid";
 
 export interface AppInfo {
   buildDate: string;

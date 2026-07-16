@@ -41,6 +41,7 @@ import {
 } from "../lib/ipc";
 import type {
   AudioDevice,
+  BootstrapReason,
   DownloadProgress,
   HistoryMode,
   ModelInfo,
@@ -68,6 +69,12 @@ interface OnboardingState {
   selectedModelVariant: ModelVariant;
   step: OnboardingStep;
   testText: string;
+  modelRepairReason: BootstrapReason | null;
+  invalidModelVariant: ModelVariant | null;
+}
+
+interface RenderOnboardingOptions {
+  modelRepairReason?: BootstrapReason;
 }
 
 const SUPPORTED_LANGUAGES = [
@@ -94,6 +101,8 @@ let state: OnboardingState = {
   selectedModelVariant: "small",
   selectedHistoryMode: "30d",
   models: [],
+  modelRepairReason: null,
+  invalidModelVariant: null,
 };
 
 let container: HTMLElement | null = null;
@@ -396,6 +405,73 @@ function renderModelVariantCards(): string {
     .join("");
 }
 
+function renderDownloadFooterButton(
+  isComplete: boolean,
+  isVerifying: boolean,
+  isDownloading: boolean,
+  isFailed: boolean
+): string {
+  if (isComplete) {
+    const label = state.modelRepairReason ? "Finish repair" : "Continue";
+    return `<button class="btn btn-accent btn-lg btn-block" id="continue-btn">${label}</button>`;
+  }
+  if (isVerifying) {
+    return `<button class="btn btn-accent btn-lg btn-block" disabled>Verifying…</button>`;
+  }
+  if (isDownloading) {
+    return `<button class="btn btn-accent btn-lg btn-block" disabled>Downloading…</button>`;
+  }
+  if (isFailed) {
+    return `<button class="btn btn-accent btn-lg btn-block" id="retry-btn">Retry download</button>`;
+  }
+  return `<button class="btn btn-accent btn-lg btn-block" id="download-btn">Download model</button>`;
+}
+
+function getDownloadHeading(
+  selectedModel: ModelInfo | undefined,
+  isDownloading: boolean,
+  isVerifying: boolean,
+  isComplete: boolean,
+  isFailed: boolean
+): { title: string; subtitle: string } {
+  if (isDownloading || isVerifying) {
+    return {
+      title: "Downloading model",
+      subtitle: "This usually takes under a minute on a fast connection.",
+    };
+  }
+  if (isComplete) {
+    return {
+      title: "Model ready",
+      subtitle: `${selectedModel?.displayName ?? "Model"} downloaded and verified.`,
+    };
+  }
+  if (isFailed) {
+    return {
+      title: "Download failed",
+      subtitle: "Check your connection and try again.",
+    };
+  }
+  if (state.modelRepairReason === "model_missing") {
+    return {
+      title: "Restore your speech model",
+      subtitle:
+        "The selected model is missing and needs to be downloaded again.",
+    };
+  }
+  if (state.modelRepairReason === "model_invalid") {
+    return {
+      title: "Repair your speech model",
+      subtitle:
+        "The selected model could not be verified and needs to be replaced.",
+    };
+  }
+  return {
+    title: "Choose a speech model",
+    subtitle: "Pick what fits your needs.",
+  };
+}
+
 function renderDownloadModel(): void {
   if (!container) {
     return;
@@ -404,41 +480,32 @@ function renderDownloadModel(): void {
   const selectedModel = state.models.find(
     (model) => model.variant === state.selectedModelVariant
   );
-  const progress = state.downloadProgress;
+  const progress =
+    state.downloadProgress?.variant === state.selectedModelVariant
+      ? state.downloadProgress
+      : null;
   const isDownloading = progress?.status === "downloading";
   const isVerifying = progress?.status === "verifying";
-  const isDownloaded = selectedModel?.isDownloaded === true;
+  const isRepairingInvalidSelection =
+    state.modelRepairReason !== null &&
+    state.invalidModelVariant === state.selectedModelVariant;
+  const isDownloaded =
+    selectedModel?.isDownloaded === true && !isRepairingInvalidSelection;
   const isComplete = progress?.status === "complete" || isDownloaded;
   const isFailed = progress?.status === "failed";
-
-  // Determine footer button state
-  let footerButton: string;
-  if (isComplete) {
-    footerButton = `<button class="btn btn-accent btn-lg btn-block" id="continue-btn">Continue</button>`;
-  } else if (isVerifying) {
-    footerButton = `<button class="btn btn-accent btn-lg btn-block" disabled>Verifying…</button>`;
-  } else if (isDownloading) {
-    footerButton = `<button class="btn btn-accent btn-lg btn-block" disabled>Downloading…</button>`;
-  } else if (isFailed) {
-    footerButton = `<button class="btn btn-accent btn-lg btn-block" id="retry-btn">Retry download</button>`;
-  } else {
-    footerButton = `<button class="btn btn-accent btn-lg btn-block" id="download-btn">Download model</button>`;
-  }
-
-  // Dynamic title/subtitle based on download state
-  let stepTitle = "Choose a speech model";
-  let stepSubtitle = "Pick what fits your needs.";
-  if (isDownloading || isVerifying) {
-    stepTitle = "Downloading model";
-    stepSubtitle = "This usually takes under a minute on a fast connection.";
-  } else if (isComplete) {
-    stepTitle = "Model ready";
-    const modelName = selectedModel?.displayName ?? "Model";
-    stepSubtitle = `${modelName} downloaded and verified.`;
-  } else if (isFailed) {
-    stepTitle = "Download failed";
-    stepSubtitle = "Check your connection and try again.";
-  }
+  const footerButton = renderDownloadFooterButton(
+    isComplete,
+    isVerifying,
+    isDownloading,
+    isFailed
+  );
+  const heading = getDownloadHeading(
+    selectedModel,
+    isDownloading,
+    isVerifying,
+    isComplete,
+    isFailed
+  );
 
   // Body content - either selection or progress
   let bodyContent: string;
@@ -463,8 +530,8 @@ function renderDownloadModel(): void {
         <div class="onboarding-icon">
           ${createIcon(Download)}
         </div>
-        <h1 class="onboarding-title">${stepTitle}</h1>
-        <p class="onboarding-desc">${stepSubtitle}</p>
+        <h1 class="onboarding-title">${heading.title}</h1>
+        <p class="onboarding-desc">${heading.subtitle}</p>
       </div>
       <div class="onboarding-body">
         ${state.downloadError ? `<div class="download-status error">${escapeHtml(state.downloadError)}</div>` : ""}
@@ -472,7 +539,7 @@ function renderDownloadModel(): void {
       </div>
       <div class="onboarding-footer">
         ${footerButton}
-        ${renderStepIndicator(2)}
+        ${state.modelRepairReason ? "" : renderStepIndicator(2)}
       </div>
     </div>
   `;
@@ -509,8 +576,46 @@ async function handleDownloadContinue(): Promise<void> {
     });
   } catch (err) {
     console.error("Failed to save model variant selection:", err);
+    state.downloadError =
+      "Could not save the selected model. Please try again.";
+    render();
+    return;
   }
+
+  if (state.modelRepairReason) {
+    await finishModelRepair();
+    return;
+  }
+
   goToStep(3);
+}
+
+async function finishModelRepair(): Promise<void> {
+  if (state.isCompleting) {
+    return;
+  }
+
+  state.isCompleting = true;
+  state.downloadError = null;
+  window.dispatchEvent(new CustomEvent("setup-completion-started"));
+
+  try {
+    await completeSetup();
+    window.dispatchEvent(new CustomEvent("setup-complete"));
+  } catch {
+    window.dispatchEvent(new CustomEvent("setup-completion-failed"));
+    state.isCompleting = false;
+    state.invalidModelVariant = state.selectedModelVariant;
+    state.downloadProgress = null;
+    state.downloadError =
+      "Model repair did not finish. Download the model again and retry.";
+    try {
+      state.models = await getModels();
+    } catch {
+      // Keep the existing model list so the recovery screen remains usable.
+    }
+    render();
+  }
 }
 
 function renderPreferences(): void {
@@ -1335,7 +1440,10 @@ async function handleComplete(): Promise<void> {
   }
 }
 
-export async function renderOnboarding(el: HTMLElement): Promise<void> {
+export async function renderOnboarding(
+  el: HTMLElement,
+  options: RenderOnboardingOptions = {}
+): Promise<void> {
   container = el;
 
   // Load saved settings and models first
@@ -1348,7 +1456,7 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
   }
 
   state = {
-    step: 1,
+    step: options.modelRepairReason ? 2 : 1,
     downloadProgress: null,
     downloadError: null,
     completeError: null,
@@ -1364,6 +1472,10 @@ export async function renderOnboarding(el: HTMLElement): Promise<void> {
     selectedModelVariant: savedSettings?.activeModelVariant ?? "small",
     selectedHistoryMode: savedSettings?.historyMode ?? "30d",
     models,
+    modelRepairReason: options.modelRepairReason ?? null,
+    invalidModelVariant: options.modelRepairReason
+      ? (savedSettings?.activeModelVariant ?? "small")
+      : null,
   };
 
   pendingEnterClass = "onb-enter-up";

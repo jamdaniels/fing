@@ -300,7 +300,7 @@ fn verify_with_expected_size(
         if let Some(expected_hash) = expected_sha256 {
             verification.hash_valid = verify_sha256_with_cache(path, expected_hash);
             if !verification.hash_valid {
-                tracing::warn!("Model file SHA256 mismatch: {:?}", path);
+                tracing::warn!("Model file SHA256 mismatch");
             }
         }
     }
@@ -342,7 +342,7 @@ fn inspect_model_file(path: &Path, expected_size: Option<u64>) -> (bool, bool, b
         if size_valid {
             format_valid = validate_ggml_magic(path);
             if !format_valid {
-                tracing::warn!("Model file has invalid GGML magic bytes: {:?}", path);
+                tracing::warn!("Model file has invalid GGML magic bytes");
                 size_valid = false;
             }
         }
@@ -379,7 +379,7 @@ fn verify_sha256_with_cache(path: &Path, expected_sha256: &str) -> bool {
     if normalized_expected.len() != 64
         || !normalized_expected.chars().all(|c| c.is_ascii_hexdigit())
     {
-        tracing::error!("Invalid expected SHA256 for {:?}", path);
+        tracing::error!("Invalid expected model SHA256");
         return false;
     }
 
@@ -398,7 +398,7 @@ fn verify_sha256_with_cache(path: &Path, expected_sha256: &str) -> bool {
     let computed = match compute_file_sha256(path) {
         Ok(hash) => hash,
         Err(e) => {
-            tracing::error!("Failed to compute SHA256 for {:?}: {}", path, e);
+            tracing::error!("Failed to compute model SHA256: {}", e);
             return false;
         }
     };

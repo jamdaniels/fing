@@ -74,6 +74,7 @@ import type {
   AppInfo,
   AppState,
   AudioDevice,
+  BootstrapReason,
   HistoryMode,
   MicrophoneTest,
   MicTestStartResult,
@@ -2544,7 +2545,7 @@ function renderAbout(el: HTMLElement): void {
   }
 }
 
-async function showOnboarding(): Promise<void> {
+async function showOnboarding(reason: BootstrapReason): Promise<void> {
   const app = document.getElementById("app");
   if (!app) {
     return;
@@ -2557,7 +2558,12 @@ async function showOnboarding(): Promise<void> {
   setupTitlebarDrag();
   const container = document.getElementById("onboarding-container");
   if (container) {
-    await renderOnboarding(container);
+    await renderOnboarding(container, {
+      modelRepairReason:
+        reason === "model_missing" || reason === "model_invalid"
+          ? reason
+          : undefined,
+    });
   }
 }
 
@@ -2802,6 +2808,7 @@ async function init(): Promise<void> {
   let completedByEitherSource = settingsHasCompletedOnboarding;
   let shouldShowOnboarding =
     settings !== null && !settingsHasCompletedOnboarding;
+  let bootstrapReason: BootstrapReason = "incomplete_onboarding";
 
   try {
     const bootstrapStatus = await getBootstrapStatus();
@@ -2809,8 +2816,8 @@ async function init(): Promise<void> {
       settingsHasCompletedOnboarding ||
       bootstrapStatus.onboardingCompleted === true;
     currentAppState = bootstrapStatus.appState;
-    shouldShowOnboarding =
-      bootstrapStatus.shouldShowOnboarding && !completedByEitherSource;
+    shouldShowOnboarding = bootstrapStatus.shouldShowOnboarding;
+    bootstrapReason = bootstrapStatus.reason;
     appInfo = await getAppInfo();
     stats = await getStats().catch(() => null);
     updateStatus = await getUpdateStatus();
@@ -2844,7 +2851,7 @@ async function init(): Promise<void> {
   });
 
   if (shouldShowOnboarding) {
-    await showOnboarding();
+    await showOnboarding(bootstrapReason);
     // Don't set up frontend hotkey listener during onboarding
     // The onboarding flow has its own temporary listener for the test step
   } else {

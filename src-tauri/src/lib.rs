@@ -100,12 +100,14 @@ struct BootstrapStatus {
     app_state: String,
     should_show_onboarding: bool,
     onboarding_completed: bool,
+    reason: String,
 }
 
 #[derive(Clone)]
 struct BootstrapContext {
     decision: BootstrapDecision,
     settings: settings::Settings,
+    verified_model_path: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,6 +115,14 @@ struct BootstrapDecision {
     app_state: AppState,
     should_show_onboarding: bool,
     reason: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActiveModelValidity {
+    NotChecked,
+    Valid,
+    Missing,
+    Invalid,
 }
 
 impl BootstrapDecision {
@@ -141,27 +151,72 @@ impl BootstrapDecision {
             app_state: self.app_state.as_str().to_string(),
             should_show_onboarding: self.should_show_onboarding,
             onboarding_completed: settings.onboarding_completed,
+            reason: self.reason.to_string(),
         }
     }
 }
 
-fn resolve_bootstrap_decision(saved_settings: &settings::Settings) -> BootstrapDecision {
+fn resolve_bootstrap_decision(
+    saved_settings: &settings::Settings,
+    active_model_validity: ActiveModelValidity,
+) -> BootstrapDecision {
     if !saved_settings.onboarding_completed {
         return BootstrapDecision::needs_setup("incomplete_onboarding");
     }
 
-    BootstrapDecision::ready()
+    match active_model_validity {
+        ActiveModelValidity::Valid => BootstrapDecision::ready(),
+        ActiveModelValidity::Missing => BootstrapDecision::needs_setup("model_missing"),
+        ActiveModelValidity::Invalid | ActiveModelValidity::NotChecked => {
+            BootstrapDecision::needs_setup("model_invalid")
+        }
+    }
 }
 
 async fn load_bootstrap_context(phase: &'static str) -> BootstrapContext {
     let saved_settings = settings::load_settings_uncached().await;
-    let decision = resolve_bootstrap_decision(&saved_settings);
+    let (active_model_validity, verified_model_path) = if saved_settings.onboarding_completed {
+        let variant = saved_settings.active_model_variant;
+        let verification_started = std::time::Instant::now();
+        match tauri::async_runtime::spawn_blocking(move || {
+            let path = model::model_path_for_variant(variant);
+            let verification = model::verify_for_variant(&path, variant);
+            (path, verification)
+        })
+        .await
+        {
+            Ok((path, verification)) if verification.is_valid => {
+                tracing::info!(
+                    "Verified {:?} model in {} ms",
+                    variant,
+                    verification_started.elapsed().as_millis()
+                );
+                (ActiveModelValidity::Valid, Some(path))
+            }
+            Ok((_, verification)) if !verification.exists => {
+                tracing::warn!("Active {:?} model is missing", variant);
+                (ActiveModelValidity::Missing, None)
+            }
+            Ok(_) => {
+                tracing::warn!("Active {:?} model failed verification", variant);
+                (ActiveModelValidity::Invalid, None)
+            }
+            Err(_) => {
+                tracing::warn!("Active model verification task failed");
+                (ActiveModelValidity::NotChecked, None)
+            }
+        }
+    } else {
+        (ActiveModelValidity::NotChecked, None)
+    };
+    let decision = resolve_bootstrap_decision(&saved_settings, active_model_validity);
 
     tracing::info!(
-        "Bootstrap decision: phase={}, reason={}, onboarding_completed={}, should_show_onboarding={}, app_state={}",
+        "Bootstrap decision: phase={}, reason={}, onboarding_completed={}, model_validity={:?}, should_show_onboarding={}, app_state={}",
         phase,
         decision.reason,
         saved_settings.onboarding_completed,
+        active_model_validity,
         decision.should_show_onboarding,
         decision.app_state.as_str(),
     );
@@ -169,6 +224,7 @@ async fn load_bootstrap_context(phase: &'static str) -> BootstrapContext {
     BootstrapContext {
         decision,
         settings: saved_settings,
+        verified_model_path,
     }
 }
 
@@ -873,35 +929,30 @@ pub fn run() {
             // Check if onboarding was previously completed
             let app_handle = app.handle().clone();
             let bootstrap_context = tauri::async_runtime::block_on(load_bootstrap_context("setup"));
+            let bootstrap_decision = bootstrap_context.decision;
             let saved_settings = bootstrap_context.settings;
-            let show_setup_window = bootstrap_context.decision.should_show_onboarding;
+            let verified_model_path = bootstrap_context.verified_model_path;
+            let show_setup_window = bootstrap_decision.should_show_onboarding;
             let mut updates_enabled = false;
 
-            if bootstrap_context.decision.app_state == AppState::Ready {
-                let variant = saved_settings.active_model_variant;
-
+            if bootstrap_decision.app_state == AppState::Ready {
                 // Try to pre-load the transcriber, but don't block Ready state
                 // on failure. The hotkey handler will retry on first use.
                 if !saved_settings.lazy_model_loading {
-                    if let Err(e) = tauri::async_runtime::block_on(async move {
-                        tauri::async_runtime::spawn_blocking(move || {
-                            let verification_started = std::time::Instant::now();
-                            let model_path = model::ensure_variant_verified(variant)
-                                .map_err(|_| "active model verification failed")?;
-                            tracing::info!(
-                                "Verified {:?} model in {} ms",
-                                variant,
-                                verification_started.elapsed().as_millis()
-                            );
-
+                    if let Some(model_path) = verified_model_path {
+                        if let Err(e) = tauri::async_runtime::block_on(async move {
                             let model_path_str = model_path.to_string_lossy().to_string();
-                            transcribe::init_transcriber(&model_path_str)
-                                .map_err(|_| "transcriber initialization failed")
-                        })
-                        .await
-                        .map_err(|_| "transcriber preload task failed")?
-                    }) {
-                        tracing::warn!("Transcriber init deferred to first use: {}", e);
+                            tauri::async_runtime::spawn_blocking(move || {
+                                transcribe::init_transcriber(&model_path_str)
+                                    .map_err(|_| "transcriber initialization failed")
+                            })
+                            .await
+                            .map_err(|_| "transcriber preload task failed")?
+                        }) {
+                            tracing::warn!("Transcriber init deferred to first use: {}", e);
+                        }
+                    } else {
+                        tracing::warn!("Verified model path unavailable for eager preload");
                     }
                 }
 
@@ -1057,17 +1108,43 @@ mod bootstrap_tests {
 
     #[test]
     fn bootstrap_ready_when_onboarding_completed_and_model_valid() {
-        let decision = resolve_bootstrap_decision(&completed_settings());
+        let decision =
+            resolve_bootstrap_decision(&completed_settings(), ActiveModelValidity::Valid);
 
         assert_eq!(decision.app_state, AppState::Ready);
         assert!(!decision.should_show_onboarding);
+        assert_eq!(decision.reason, "ready");
     }
 
     #[test]
     fn bootstrap_needs_setup_when_onboarding_is_incomplete() {
-        let decision = resolve_bootstrap_decision(&settings::Settings::default());
+        let decision = resolve_bootstrap_decision(
+            &settings::Settings::default(),
+            ActiveModelValidity::NotChecked,
+        );
 
         assert_eq!(decision.app_state, AppState::NeedsSetup);
         assert!(decision.should_show_onboarding);
+        assert_eq!(decision.reason, "incomplete_onboarding");
+    }
+
+    #[test]
+    fn bootstrap_needs_model_repair_when_active_model_is_missing() {
+        let decision =
+            resolve_bootstrap_decision(&completed_settings(), ActiveModelValidity::Missing);
+
+        assert_eq!(decision.app_state, AppState::NeedsSetup);
+        assert!(decision.should_show_onboarding);
+        assert_eq!(decision.reason, "model_missing");
+    }
+
+    #[test]
+    fn bootstrap_needs_model_repair_when_active_model_is_invalid() {
+        let decision =
+            resolve_bootstrap_decision(&completed_settings(), ActiveModelValidity::Invalid);
+
+        assert_eq!(decision.app_state, AppState::NeedsSetup);
+        assert!(decision.should_show_onboarding);
+        assert_eq!(decision.reason, "model_invalid");
     }
 }
