@@ -4,7 +4,7 @@
 
 **Private dictation for every app.**
 
-![Fing](./assets/screenshot.png)
+![Fing](./assets/screenshot.webp)
 
 Hold your hotkey, speak, release — transcribed text is pasted instantly. Your voice never leaves your device.
 
