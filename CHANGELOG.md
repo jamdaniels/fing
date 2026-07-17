@@ -5,6 +5,7 @@ All notable changes to Fing will be documented in this file.
 ## Unreleased
 
 - Added speech model recovery
+- Added German interface language support
 - Improved recording reliability
 - Improved 30d transcript history deletion
 

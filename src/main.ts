@@ -34,6 +34,7 @@ import {
   parseHotkeyString,
 } from "./lib/hotkey";
 import { renderHotkeyChips } from "./lib/hotkey-display";
+import { formatDateTime, formatNumber, setUiLanguage, t, tp } from "./lib/i18n";
 import { createIcon, escapeHtml } from "./lib/icons";
 import {
   armPermissionRestart,
@@ -86,6 +87,7 @@ import type {
   Stats,
   Theme,
   Transcript,
+  UiLanguage,
   UpdateCheckResult,
   UpdateStatus,
   WindowPresentationRequest,
@@ -320,11 +322,11 @@ function renderSidebar(): void {
   }
 
   const items: { id: SidebarItem; label: string; icon: IconNode }[] = [
-    { id: "home", label: "Home", icon: Home },
-    { id: "history", label: "History", icon: History },
-    { id: "dictionary", label: "Dictionary", icon: BookOpen },
-    { id: "settings", label: "Settings", icon: Settings },
-    { id: "about", label: "About", icon: Info },
+    { id: "home", label: t("sidebar.home"), icon: Home },
+    { id: "history", label: t("sidebar.history"), icon: History },
+    { id: "dictionary", label: t("sidebar.dictionary"), icon: BookOpen },
+    { id: "settings", label: t("sidebar.settings"), icon: Settings },
+    { id: "about", label: t("sidebar.about"), icon: Info },
   ];
 
   sidebar.innerHTML = `
@@ -341,7 +343,7 @@ function renderSidebar(): void {
     <div class="sidebar-spacer"></div>
     <button class="sidebar-item" data-action="quit">
       ${createIcon(Power)}
-      <span>Quit</span>
+      <span>${t("sidebar.quit")}</span>
     </button>
   `;
 
@@ -407,38 +409,38 @@ function renderHome(el: HTMLElement): void {
       .join("");
 
     el.innerHTML = `
-      <h1>Dashboard</h1>
+      <h1>${t("dashboard.title")}</h1>
       <div class="dashboard-disabled-wrapper">
         <div class="dashboard-disabled-ghost" aria-hidden="true">
           <div class="stats-grid">
             <div class="stat-card">
-              <div class="stat-label">Transcriptions Today</div>
+              <div class="stat-label">${t("dashboard.transcriptionsToday")}</div>
               <div class="stat-value">12</div>
             </div>
             <div class="stat-card">
-              <div class="stat-label">Words Today</div>
+              <div class="stat-label">${t("dashboard.wordsToday")}</div>
               <div class="stat-value">847</div>
             </div>
           </div>
           <div class="stat-card" style="margin-bottom: 24px;">
-            <div class="stat-label">Most Used Words</div>
+            <div class="stat-label">${t("dashboard.mostUsedWords")}</div>
             <div class="word-list">${mockWordHtml}</div>
           </div>
           <div class="stats-grid">
             <div class="stat-card">
-              <div class="stat-label">Average words per transcription</div>
+              <div class="stat-label">${t("dashboard.averageWords")}</div>
               <div class="stat-value">71</div>
             </div>
             <div class="stat-card">
-              <div class="stat-label">Average speaking speed</div>
-              <div class="stat-value">142 <span class="stat-unit">wpm</span></div>
+              <div class="stat-label">${t("dashboard.averageSpeed")}</div>
+              <div class="stat-value">142 <span class="stat-unit">${t("dashboard.wpm")}</span></div>
             </div>
           </div>
         </div>
         <div class="dashboard-disabled-overlay">
           <div class="dashboard-disabled-card">
-            <div class="dashboard-disabled-title">History is disabled</div>
-            <p>Enable history in settings to see your stats</p>
+            <div class="dashboard-disabled-title">${t("dashboard.historyDisabled")}</div>
+            <p>${t("dashboard.enableForStats")}</p>
           </div>
         </div>
       </div>
@@ -465,29 +467,29 @@ function renderHome(el: HTMLElement): void {
       : '<div class="stat-value">0</div>';
 
   el.innerHTML = `
-    <h1>Dashboard</h1>
+    <h1>${t("dashboard.title")}</h1>
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-label">Transcriptions Today</div>
-        <div class="stat-value">${stats?.transcriptionsToday ?? 0}</div>
+        <div class="stat-label">${t("dashboard.transcriptionsToday")}</div>
+        <div class="stat-value">${formatNumber(stats?.transcriptionsToday ?? 0)}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Words Today</div>
-        <div class="stat-value">${stats?.wordsToday ?? 0}</div>
+        <div class="stat-label">${t("dashboard.wordsToday")}</div>
+        <div class="stat-value">${formatNumber(stats?.wordsToday ?? 0)}</div>
       </div>
     </div>
     <div class="stat-card" style="margin-bottom: 24px;">
-      <div class="stat-label">Most Used Words</div>
+      <div class="stat-label">${t("dashboard.mostUsedWords")}</div>
       <div class="word-list">${wordListHtml}</div>
     </div>
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-label">Average words per transcription</div>
-        <div class="stat-value">${stats?.averageWordsPerTranscription?.toFixed(0) ?? 0}</div>
+        <div class="stat-label">${t("dashboard.averageWords")}</div>
+        <div class="stat-value">${formatNumber(Math.round(stats?.averageWordsPerTranscription ?? 0))}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Average speaking speed</div>
-        <div class="stat-value">${stats?.averageWpm?.toFixed(0) ?? 0} <span class="stat-unit">wpm</span></div>
+        <div class="stat-label">${t("dashboard.averageSpeed")}</div>
+        <div class="stat-value">${formatNumber(Math.round(stats?.averageWpm ?? 0))} <span class="stat-unit">${t("dashboard.wpm")}</span></div>
       </div>
     </div>
   `;
@@ -500,10 +502,12 @@ function parseCreatedAt(createdAt: string): Date {
 
 function formatTime(createdAt: string): string {
   const date = parseCreatedAt(createdAt);
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return formatDateTime(date, { hour: "2-digit", minute: "2-digit" });
 }
 
-function getDateGroup(createdAt: string): string {
+type DateGroup = "today" | "yesterday" | "thisWeek" | "older";
+
+function getDateGroup(createdAt: string): DateGroup {
   const now = new Date();
   const date = parseCreatedAt(createdAt);
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -511,22 +515,22 @@ function getDateGroup(createdAt: string): string {
   const weekAgo = new Date(today.getTime() - 7 * 86_400_000);
 
   if (date >= today) {
-    return "Today";
+    return "today";
   }
   if (date >= yesterday) {
-    return "Yesterday";
+    return "yesterday";
   }
   if (date >= weekAgo) {
-    return "This Week";
+    return "thisWeek";
   }
-  return "Older";
+  return "older";
 }
 
 function groupTranscriptsByDate(
   items: Transcript[]
-): Map<string, Transcript[]> {
-  const groups = new Map<string, Transcript[]>();
-  const order = ["Today", "Yesterday", "This Week", "Older"];
+): Map<DateGroup, Transcript[]> {
+  const groups = new Map<DateGroup, Transcript[]>();
+  const order: DateGroup[] = ["today", "yesterday", "thisWeek", "older"];
 
   for (const grp of order) {
     groups.set(grp, []);
@@ -544,6 +548,19 @@ function groupTranscriptsByDate(
   }
 
   return groups;
+}
+
+function getDateGroupLabel(group: DateGroup): string {
+  switch (group) {
+    case "today":
+      return t("history.today");
+    case "yesterday":
+      return t("history.yesterday");
+    case "thisWeek":
+      return t("history.thisWeek");
+    case "older":
+      return t("history.older");
+  }
 }
 
 function truncateText(text: string, maxLength: number): string {
@@ -587,9 +604,9 @@ async function handleDeleteTranscript(id: number): Promise<void> {
 
 async function handleClearAll(): Promise<void> {
   const confirmed = await showConfirmDialog({
-    title: "Clear All Transcripts",
-    body: "Are you sure you want to delete all transcripts?",
-    confirmText: "Delete All",
+    title: t("history.clearTitle"),
+    body: t("history.clearBody"),
+    confirmText: t("history.deleteAll"),
     danger: true,
   });
   if (!confirmed) {
@@ -702,14 +719,14 @@ function renderHistory(
     ];
 
     const mockListHtml = `
-      <div class="date-group-header">Today</div>
+      <div class="date-group-header">${t("history.today")}</div>
       ${mockTranscripts
         .map(
           (m) => `
         <div class="list-item">
           <div class="list-item-header">
             <span class="list-item-time">${m.time}</span>
-            <span class="list-item-words">${m.words} words</span>
+            <span class="list-item-words">${tp("common.wordOne", "common.wordOther", m.words)}</span>
           </div>
           <div class="list-item-text">${m.text}</div>
           <div class="list-item-actions">
@@ -723,21 +740,21 @@ function renderHistory(
 
     el.innerHTML = `
       <div class="history-sticky-header">
-        <div class="history-header"><h1>History</h1></div>
+        <div class="history-header"><h1>${t("history.title")}</h1></div>
       </div>
       <div class="history-scrollable">
         <div class="dashboard-disabled-wrapper">
           <div class="dashboard-disabled-ghost" aria-hidden="true">
             <div class="search-wrapper" style="margin-bottom: 16px;">
               ${createIcon(Search)}
-              <input type="text" class="search-input" placeholder="Search transcripts..." disabled>
+              <input type="text" class="search-input" placeholder="${t("history.search")}" disabled>
             </div>
             <div class="transcript-list">${mockListHtml}</div>
           </div>
           <div class="dashboard-disabled-overlay">
             <div class="dashboard-disabled-card">
-              <div class="dashboard-disabled-title">History is disabled</div>
-              <p>Enable history in settings to save transcripts</p>
+              <div class="dashboard-disabled-title">${t("dashboard.historyDisabled")}</div>
+              <p>${t("history.enableToSave")}</p>
             </div>
           </div>
         </div>
@@ -755,18 +772,18 @@ function renderHistory(
     let listHtml = "";
     if (hasTranscripts) {
       for (const [group, items] of grouped) {
-        listHtml += `<div class="date-group-header">${group}</div>`;
+        listHtml += `<div class="date-group-header">${getDateGroupLabel(group)}</div>`;
         for (const item of items) {
           listHtml += `
             <div class="list-item" data-id="${item.id}">
               <div class="list-item-header">
                 <span class="list-item-time">${formatTime(item.createdAt)}</span>
-                <span class="list-item-words">${item.wordCount} words</span>
+                <span class="list-item-words">${tp("common.wordOne", "common.wordOther", item.wordCount)}</span>
               </div>
               <div class="list-item-text">${escapeHtml(truncateText(item.text, 150))}</div>
               <div class="list-item-actions">
-                <button class="copy-btn" title="Copy to clipboard">${createIcon(Copy)}</button>
-                <button class="delete-btn" title="Delete">${createIcon(Trash2)}</button>
+                <button class="copy-btn" title="${t("history.copy")}">${createIcon(Copy)}</button>
+                <button class="delete-btn" title="${t("common.delete")}">${createIcon(Trash2)}</button>
               </div>
             </div>
           `;
@@ -777,24 +794,24 @@ function renderHistory(
     el.innerHTML = `
       <div class="history-sticky-header">
         <div class="history-header">
-          <h1>History</h1>
-          ${hasTranscripts ? `<button class="btn btn-danger btn-sm clear-all-btn">Clear All</button>` : ""}
+          <h1>${t("history.title")}</h1>
+          ${hasTranscripts ? `<button class="btn btn-danger btn-sm clear-all-btn">${t("history.clearAll")}</button>` : ""}
         </div>
         <div class="search-wrapper">
           ${createIcon(Search)}
-          <input type="text" class="search-input" placeholder="Search transcripts..." value="${escapeHtml(searchQuery)}">
+          <input type="text" class="search-input" placeholder="${t("history.search")}" value="${escapeHtml(searchQuery)}">
         </div>
       </div>
       <div class="history-scrollable">
         ${
           hasTranscripts
             ? `<div class="transcript-list">${listHtml}</div>
-               ${hasMoreTranscripts ? `<button class="btn btn-outline load-more-btn">Load more</button>` : ""}`
+               ${hasMoreTranscripts ? `<button class="btn btn-outline load-more-btn">${t("history.loadMore")}</button>` : ""}`
             : `
           <div class="empty-state">
             ${searchQuery ? "" : `<div class="empty-state-icon">${createIcon(Mic)}</div>`}
-            <div class="empty-state-title">${searchQuery ? "No results found" : "No transcripts yet"}</div>
-            ${searchQuery ? "<p>Try a different search term</p>" : ""}
+            <div class="empty-state-title">${searchQuery ? t("history.noResults") : t("history.noTranscripts")}</div>
+            ${searchQuery ? `<p>${t("history.differentSearch")}</p>` : ""}
           </div>
         `
         }
@@ -834,18 +851,20 @@ function getDictionaryTerms(): string[] {
 
 function validateDictionaryTerm(term: string): string | null {
   if (!term) {
-    return "Enter a word or short phrase";
+    return t("dictionary.enterTerm");
   }
   if (dictionaryWordCount(term) > MAX_DICTIONARY_WORDS_PER_TERM) {
-    return `Terms can be up to ${MAX_DICTIONARY_WORDS_PER_TERM} words`;
+    return t("dictionary.tooManyWords", {
+      count: MAX_DICTIONARY_WORDS_PER_TERM,
+    });
   }
 
   const existing = getDictionaryTerms();
   if (existing.length >= MAX_DICTIONARY_TERMS) {
-    return `Dictionary is full (${MAX_DICTIONARY_TERMS} terms)`;
+    return t("dictionary.full", { count: MAX_DICTIONARY_TERMS });
   }
   if (existing.some((value) => value.toLowerCase() === term.toLowerCase())) {
-    return "That term is already in your dictionary";
+    return t("dictionary.duplicate");
   }
 
   return null;
@@ -889,7 +908,7 @@ async function addDictionaryTerm(input: HTMLInputElement): Promise<void> {
     focusDictionaryInput();
   } catch (error) {
     console.error("Failed to add dictionary term:", error);
-    dictionaryError = "Failed to save term";
+    dictionaryError = t("dictionary.saveFailed");
     renderContent();
     focusDictionaryInput();
   }
@@ -913,7 +932,7 @@ async function removeDictionaryTerm(index: number): Promise<void> {
     renderContent();
   } catch (error) {
     console.error("Failed to remove dictionary term:", error);
-    dictionaryError = "Failed to update dictionary";
+    dictionaryError = t("dictionary.updateFailed");
     renderContent();
   }
 }
@@ -996,7 +1015,9 @@ async function loadSettings(
       ...loadedSettings,
       lazyModelLoading: loadedSettings.lazyModelLoading ?? false,
       dictionaryTerms: loadedSettings.dictionaryTerms ?? [],
+      uiLanguage: loadedSettings.uiLanguage ?? "en",
     };
+    setUiLanguage(settings.uiLanguage);
     audioDevices = devices;
 
     const autoStart = await getAutoStart().catch(() => null);
@@ -1073,8 +1094,8 @@ function showHotkeyModal(): void {
       <div class="dialog hotkey-dialog">
         <button class="dialog-close">${createIcon(X)}</button>
         <div class="dialog-header">
-          <div class="dialog-title">Set recording hotkey</div>
-          <div class="hotkey-dialog-desc">Press a key or combination</div>
+          <div class="dialog-title">${t("dialogs.hotkeyTitle")}</div>
+          <div class="hotkey-dialog-desc">${t("dialogs.hotkeyPrompt")}</div>
         </div>
         <div class="dialog-body hotkey-dialog-body">
           <div class="hotkey-modal-preview">
@@ -1083,9 +1104,9 @@ function showHotkeyModal(): void {
         </div>
         <div class="dialog-footer hotkey-dialog-footer">
           <div class="hotkey-fn-pick">
-            <button class="hotkey-modal-key hotkey-fn-chip" type="button" aria-label="Use Fn key">fn</button>
+            <button class="hotkey-modal-key hotkey-fn-chip" type="button" aria-label="${t("dialogs.useFn")}">fn</button>
           </div>
-          <button class="btn btn-accent hotkey-confirm-btn" ${capturedHotkey ? "" : "disabled"}>Set hotkey</button>
+          <button class="btn btn-accent hotkey-confirm-btn" ${capturedHotkey ? "" : "disabled"}>${t("settings.setHotkey")}</button>
         </div>
       </div>
     `;
@@ -1113,7 +1134,7 @@ function showHotkeyModal(): void {
           ".hotkey-confirm-btn"
         ) as HTMLButtonElement;
         btn.disabled = true;
-        btn.textContent = "Setting...";
+        btn.textContent = t("dialogs.setting");
 
         if (await setHotkey(capturedHotkey)) {
           closeHotkeyModal();
@@ -1121,11 +1142,11 @@ function showHotkeyModal(): void {
         } else {
           const desc = modal.querySelector(".hotkey-dialog-desc");
           if (desc) {
-            desc.textContent = "Failed to set hotkey. Try another key.";
+            desc.textContent = t("dialogs.hotkeyFailed");
             desc.classList.add("error");
           }
           btn.disabled = false;
-          btn.textContent = "Set hotkey";
+          btn.textContent = t("settings.setHotkey");
         }
       });
   };
@@ -1239,30 +1260,30 @@ async function showMicTestModal(): Promise<void> {
       <div class="dialog mic-test-dialog">
         <button class="dialog-close">${createIcon(X)}</button>
         <div class="dialog-header">
-          <div class="dialog-title">Test Microphone</div>
+          <div class="dialog-title">${t("dialogs.micTitle")}</div>
         </div>
         <div class="dialog-body">
           <div class="mic-test-container">
             <div class="mic-select-row">
-              <label for="modal-mic-select">Device:</label>
+              <label for="modal-mic-select">${t("dialogs.device")}</label>
               <div class="mic-select-wrapper">
                 <select id="modal-mic-select" class="settings-select">
                   ${getMicOptions()}
                 </select>
-                <button class="btn btn-icon mic-refresh-btn" title="Refresh devices">${createIcon(RefreshCw)}</button>
+                <button class="btn btn-icon mic-refresh-btn" title="${t("settings.refreshDevices")}">${createIcon(RefreshCw)}</button>
               </div>
             </div>
 
             ${
               showMismatchWarning
                 ? `<div class="mic-mismatch-warning">
-                Selected device not found. Using fallback device.
+                ${t("dialogs.deviceFallback")}
               </div>`
                 : ""
             }
 
             <div class="audio-level-container">
-              <div class="audio-level-label">Audio Level</div>
+              <div class="audio-level-label">${t("dialogs.audioLevel")}</div>
               <div class="audio-level-bar">
                 <div class="audio-level-fill ${levelPercent > 10 ? "active" : ""}" style="width: ${levelPercent}%"></div>
               </div>
@@ -1271,14 +1292,14 @@ async function showMicTestModal(): Promise<void> {
             <div class="mic-test-prompt ${audioDetected ? "success" : ""}">
               ${
                 audioDetected
-                  ? `${createIcon(CheckCircle)} Audio detected`
-                  : `${createIcon(Mic)} Say something to test...`
+                  ? `${createIcon(CheckCircle)} ${t("dialogs.audioDetected")}`
+                  : `${createIcon(Mic)} ${t("dialogs.saySomething")}`
               }
             </div>
           </div>
         </div>
         <div class="dialog-footer mic-test-footer">
-          <button class="btn btn-accent mic-test-done-btn">Done</button>
+          <button class="btn btn-accent mic-test-done-btn">${t("common.done")}</button>
         </div>
       </div>
     `;
@@ -1348,7 +1369,7 @@ async function showMicTestModal(): Promise<void> {
     const prompt = modal.querySelector(".mic-test-prompt") as HTMLElement;
     if (prompt && audioDetected && !prompt.classList.contains("success")) {
       prompt.classList.add("success");
-      prompt.innerHTML = `${createIcon(CheckCircle)} Audio detected`;
+      prompt.innerHTML = `${createIcon(CheckCircle)} ${t("dialogs.audioDetected")}`;
     }
   };
 
@@ -1477,12 +1498,12 @@ function showRestartDialog(previousVariant?: ModelVariant): void {
   modal.innerHTML = `
     <div class="dialog">
       <div class="dialog-header">
-        <div class="dialog-title">Restart Required</div>
+        <div class="dialog-title">${t("dialogs.restartTitle")}</div>
       </div>
-      <div class="dialog-body">Fing needs to restart to load the new model.</div>
+      <div class="dialog-body">${t("dialogs.restartBody")}</div>
       <div class="dialog-footer">
-        <button class="btn btn-ghost" id="restart-later-btn">Later</button>
-        <button class="btn btn-accent" id="restart-now-btn">Restart Now</button>
+        <button class="btn btn-ghost" id="restart-later-btn">${t("common.later")}</button>
+        <button class="btn btn-accent" id="restart-now-btn">${t("dialogs.restartNow")}</button>
       </div>
     </div>
   `;
@@ -1518,8 +1539,8 @@ function showConfirmDialog(options: ConfirmDialogOptions): Promise<boolean> {
   const {
     title,
     body,
-    confirmText = "Confirm",
-    cancelText = "Cancel",
+    confirmText = t("common.confirm"),
+    cancelText = t("common.cancel"),
     danger = false,
   } = options;
   return new Promise((resolve) => {
@@ -1527,7 +1548,7 @@ function showConfirmDialog(options: ConfirmDialogOptions): Promise<boolean> {
     modal.className = "dialog-overlay";
     modal.innerHTML = `
       <div class="dialog">
-        <button class="dialog-close" id="dialog-close-btn" aria-label="Close">${createIcon(X)}</button>
+        <button class="dialog-close" id="dialog-close-btn" aria-label="${t("common.close")}">${createIcon(X)}</button>
         <div class="dialog-header">
           <div class="dialog-title">${title}</div>
         </div>
@@ -1572,7 +1593,7 @@ function formatErrorMessage(error: unknown): string {
     return error;
   }
 
-  return "Unknown error";
+  return t("errors.unknown");
 }
 
 function getUpdateNotesPreview(
@@ -1592,8 +1613,8 @@ function getUpdateNotesPreview(
 
 function getUpdateButtonLabel(): string {
   return updateStatus.updateAvailable
-    ? "Update Available"
-    : "Check for Updates";
+    ? t("updates.available")
+    : t("updates.check");
 }
 
 function setUpdateButtonBusy(isBusy: boolean): void {
@@ -1605,7 +1626,7 @@ function setUpdateButtonBusy(isBusy: boolean): void {
   }
 
   button.disabled = isBusy;
-  button.textContent = isBusy ? "Checking..." : getUpdateButtonLabel();
+  button.textContent = isBusy ? t("common.checking") : getUpdateButtonLabel();
 }
 
 async function promptForAvailableUpdate(
@@ -1613,15 +1634,19 @@ async function promptForAvailableUpdate(
 ): Promise<boolean> {
   const { ask } = await import("@tauri-apps/plugin-dialog");
   const notesPreview = getUpdateNotesPreview(status.availableBody);
+  const version = status.availableVersion ?? t("updates.newerVersion");
   const prompt = notesPreview
-    ? `Version ${status.availableVersion ?? "a newer version"} is available.\n\nRelease notes:\n${notesPreview}\n\nInstall now?`
-    : `Version ${status.availableVersion ?? "a newer version"} is available.\n\nInstall now?`;
+    ? t("updates.versionAvailableWithNotes", {
+        version,
+        notes: notesPreview,
+      })
+    : t("updates.versionAvailable", { version });
 
   return await ask(prompt, {
-    title: "Update Available",
+    title: t("updates.available"),
     kind: "info",
-    okLabel: "Install Update",
-    cancelLabel: "Later",
+    okLabel: t("updates.install"),
+    cancelLabel: t("common.later"),
   });
 }
 
@@ -1637,8 +1662,8 @@ async function installAvailableUpdate(): Promise<void> {
     if (currentView === "settings") {
       renderContent();
     }
-    await message("Fing is up to date.", {
-      title: "No Updates Available",
+    await message(t("updates.upToDate"), {
+      title: t("updates.noneTitle"),
       kind: "info",
     });
     return;
@@ -1646,8 +1671,8 @@ async function installAvailableUpdate(): Promise<void> {
 
   await update.downloadAndInstall();
   updateStatus = await clearUpdateStatus();
-  await message("The update was installed. Fing will now restart.", {
-    title: "Update Installed",
+  await message(t("updates.installed"), {
+    title: t("updates.installedTitle"),
     kind: "info",
   });
   await relaunchApp();
@@ -1672,8 +1697,8 @@ async function runManualUpdateCheck(): Promise<void> {
     };
 
     if (!latestUpdate.updateAvailable) {
-      await message("Fing is up to date.", {
-        title: "No Updates Available",
+      await message(t("updates.upToDate"), {
+        title: t("updates.noneTitle"),
         kind: "info",
       });
       return;
@@ -1688,13 +1713,10 @@ async function runManualUpdateCheck(): Promise<void> {
   } catch (error) {
     console.error("Failed to check for updates:", error);
     const { message } = await import("@tauri-apps/plugin-dialog");
-    await message(
-      `Could not complete update check.\n\n${formatErrorMessage(error)}`,
-      {
-        title: "Update Check Failed",
-        kind: "error",
-      }
-    );
+    await message(t("updates.failed", { error: formatErrorMessage(error) }), {
+      title: t("updates.failedTitle"),
+      kind: "error",
+    });
   } finally {
     updateCheckInProgress = false;
     setUpdateButtonBusy(false);
@@ -1773,9 +1795,9 @@ async function handleLazyModelLoadingToggle(
 
 async function handleHistoryModeOff(): Promise<void> {
   const confirmed = await showConfirmDialog({
-    title: "Turn Off History?",
-    body: "All saved transcripts will be permanently deleted.",
-    confirmText: "Confirm",
+    title: t("settings.turnOffHistoryTitle"),
+    body: t("settings.turnOffHistoryBody"),
+    confirmText: t("common.confirm"),
     danger: true,
   });
   if (!confirmed) {
@@ -1788,6 +1810,29 @@ async function handleHistoryModeOff(): Promise<void> {
   renderContent();
 }
 
+async function changeUiLanguage(language: UiLanguage): Promise<void> {
+  if (!(settings && settings.uiLanguage !== language)) {
+    return;
+  }
+
+  const previous = settings.uiLanguage;
+  setUiLanguage(language);
+  settings = { ...settings, uiLanguage: language };
+  renderSidebar();
+  renderContent();
+
+  try {
+    settings = await updateSettings(settings);
+    settingsLoadedAt = Date.now();
+  } catch (error) {
+    console.error("Failed to update UI language:", error);
+    setUiLanguage(previous);
+    settings = { ...settings, uiLanguage: previous };
+    renderSidebar();
+    renderContent();
+  }
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI event handler with necessary branches
 function handleSettingsClick(e: MouseEvent): void {
   const target = e.target as HTMLElement;
@@ -1797,6 +1842,12 @@ function handleSettingsClick(e: MouseEvent): void {
     ".appearance-option"
   ) as HTMLElement | null;
   if (themeOption) {
+    const uiLanguage = themeOption.dataset.uiLanguage as UiLanguage | undefined;
+    if (uiLanguage) {
+      void changeUiLanguage(uiLanguage);
+      return;
+    }
+
     // History mode segmented control
     const historyMode = themeOption.dataset.historyMode as
       | HistoryMode
@@ -1966,7 +2017,7 @@ function handleSettingsClick(e: MouseEvent): void {
     const variant = activateModelBtn.dataset.variant as ModelVariant;
     const previousVariant = settings?.activeModelVariant;
     activateModelBtn.disabled = true;
-    activateModelBtn.textContent = "Activating...";
+    activateModelBtn.textContent = t("models.activating");
 
     setActiveModel(variant)
       .then((needsRestart) => {
@@ -1981,7 +2032,7 @@ function handleSettingsClick(e: MouseEvent): void {
       .catch((err) => {
         console.error("Activate error:", err);
         activateModelBtn.disabled = false;
-        activateModelBtn.textContent = "Activate";
+        activateModelBtn.textContent = t("models.activate");
       });
     return;
   }
@@ -1996,9 +2047,9 @@ function handleSettingsClick(e: MouseEvent): void {
     const modelName = model?.displayName ?? variant;
 
     showConfirmDialog({
-      title: `Delete ${modelName}`,
-      body: "You can download it again later.",
-      confirmText: "Delete",
+      title: t("models.deleteTitle", { model: modelName }),
+      body: t("models.deleteBody"),
+      confirmText: t("common.delete"),
       danger: true,
     }).then((confirmed) => {
       if (!confirmed) {
@@ -2006,7 +2057,7 @@ function handleSettingsClick(e: MouseEvent): void {
       }
 
       deleteModelBtn.disabled = true;
-      deleteModelBtn.textContent = "Deleting...";
+      deleteModelBtn.textContent = t("models.deleting");
 
       deleteModel(variant)
         .then(() => loadSettings({ force: true, refreshDevices: false }))
@@ -2014,7 +2065,7 @@ function handleSettingsClick(e: MouseEvent): void {
         .catch((err) => {
           console.error("Delete error:", err);
           deleteModelBtn.disabled = false;
-          deleteModelBtn.textContent = "Delete";
+          deleteModelBtn.textContent = t("common.delete");
         });
     });
   }
@@ -2032,10 +2083,10 @@ function handleSettingsChange(e: Event): void {
 }
 
 const SUPPORTED_LANGUAGES = [
-  { code: "en", name: "English" },
-  { code: "de", name: "German" },
-  { code: "es", name: "Spanish" },
-  { code: "fr", name: "French" },
+  { code: "en", nameKey: "common.english" as const },
+  { code: "de", nameKey: "common.german" as const },
+  { code: "es", nameKey: "common.spanish" as const },
+  { code: "fr", nameKey: "common.french" as const },
 ];
 
 function formatModelSize(bytes: number): string {
@@ -2047,24 +2098,24 @@ function renderModelList(): string {
     <div class="model-lazy-row">
       <div>
         <div class="settings-row-label model-lazy-label">
-          <span>Lazy model loading</span>
-          <span class="settings-inline-badge experimental">Experimental</span>
+          <span>${t("models.lazyLoading")}</span>
+          <span class="settings-inline-badge experimental">${t("models.experimental")}</span>
         </div>
-        <div class="settings-row-desc">Save memory and load model on hotkey press; unloads after 10s idle</div>
+        <div class="settings-row-desc">${t("models.lazyLoadingDescription")}</div>
       </div>
       <div class="toggle ${settings?.lazyModelLoading ? "active" : ""} ${lazyModelToggleBusy ? "disabled" : ""}" data-setting="lazyModelLoading"></div>
     </div>
   `;
 
   if (models.length === 0) {
-    return `<div class="model-empty">Loading models...</div>${lazyModelRow}`;
+    return `<div class="model-empty">${t("models.loading")}</div>${lazyModelRow}`;
   }
 
   const header = `
     <div class="model-header">
-      <span class="model-col-name">Model</span>
-      <span class="model-col-desc">Accuracy</span>
-      <span class="model-col-size">Disk / RAM</span>
+      <span class="model-col-name">${t("models.model")}</span>
+      <span class="model-col-desc">${t("models.accuracy")}</span>
+      <span class="model-col-size">${t("models.diskRam")}</span>
       <span class="model-col-actions"></span>
     </div>
   `;
@@ -2078,27 +2129,27 @@ function renderModelList(): string {
       let actions = "";
 
       if (model.isActive) {
-        actions = `<span class="model-status-badge active">In Use</span>`;
+        actions = `<span class="model-status-badge active">${t("models.inUse")}</span>`;
       } else if (modelProgress) {
         if (modelProgress.status === "verifying") {
-          actions = `<span class="model-download-progress verifying"><span class="loading-spinner" aria-hidden="true">${createIcon(LoaderCircle)}</span><span class="model-download-progress-value">Verifying...</span></span>`;
+          actions = `<span class="model-download-progress verifying"><span class="loading-spinner" aria-hidden="true">${createIcon(LoaderCircle)}</span><span class="model-download-progress-value">${t("models.verifying")}</span></span>`;
         } else {
           const pct = Math.round(modelProgress.percentage);
           actions = `<span class="model-download-progress"><span class="loading-spinner" aria-hidden="true">${createIcon(LoaderCircle)}</span><span class="model-download-progress-value">${pct}%</span></span>`;
         }
       } else if (model.isDownloaded) {
         actions = `
-          <button class="btn btn-outline btn-sm activate-model-btn" data-variant="${model.variant}">Activate</button>
-          <button class="btn btn-outline btn-sm delete-model-btn" data-variant="${model.variant}">Delete</button>
+          <button class="btn btn-outline btn-sm activate-model-btn" data-variant="${model.variant}">${t("models.activate")}</button>
+          <button class="btn btn-outline btn-sm delete-model-btn" data-variant="${model.variant}">${t("common.delete")}</button>
         `;
       } else {
-        actions = `<button class="btn btn-outline btn-sm download-model-btn" data-variant="${model.variant}">Download</button>`;
+        actions = `<button class="btn btn-outline btn-sm download-model-btn" data-variant="${model.variant}">${t("common.download")}</button>`;
       }
 
       return `
         <div class="model-row" data-variant="${model.variant}">
           <span class="model-col-name">${model.displayName}</span>
-          <span class="model-col-desc">${model.description}</span>
+          <span class="model-col-desc">${getModelQualityLabel(model.variant)}</span>
           <span class="model-col-size">~${formatModelSize(model.sizeBytes)} / ~${model.memoryEstimateMb} MB</span>
           <span class="model-col-actions">${actions}</span>
         </div>
@@ -2109,6 +2160,17 @@ function renderModelList(): string {
   return header + rows + lazyModelRow;
 }
 
+function getModelQualityLabel(variant: ModelVariant): string {
+  switch (variant) {
+    case "small_q5":
+      return t("models.quality.small_q5");
+    case "small":
+      return t("models.quality.small");
+    case "large_turbo_q5":
+      return t("models.quality.large_turbo_q5");
+  }
+}
+
 function renderDictionary(el: HTMLElement): void {
   const terms = getDictionaryTerms();
   const atCapacity = terms.length >= MAX_DICTIONARY_TERMS;
@@ -2117,7 +2179,7 @@ function renderDictionary(el: HTMLElement): void {
       (term, index) => `
       <div class="dictionary-item">
         <span class="dictionary-term">${escapeHtml(term)}</span>
-        <button class="dictionary-remove-btn" data-index="${index}" title="Remove" aria-label="Remove">${createIcon(Trash2)}</button>
+        <button class="dictionary-remove-btn" data-index="${index}" title="${t("common.remove")}" aria-label="${t("common.remove")}">${createIcon(Trash2)}</button>
       </div>
     `
     )
@@ -2125,9 +2187,9 @@ function renderDictionary(el: HTMLElement): void {
 
   el.innerHTML = `
     <div class="dictionary-sticky-header">
-      <h1>Dictionary</h1>
+      <h1>${t("dictionary.title")}</h1>
       <div class="dictionary-subtitle">
-        Add words and short phrases you use often. Fing will prefer these when transcribing.
+        ${t("dictionary.subtitle")}
       </div>
 
       <div class="dictionary-card">
@@ -2135,14 +2197,18 @@ function renderDictionary(el: HTMLElement): void {
           <input
             type="text"
             class="dictionary-input"
-            placeholder="Add a term"
+            placeholder="${t("dictionary.placeholder")}"
             autocomplete="off"
             ${atCapacity ? "disabled" : ""}
           >
-          <button class="btn btn-accent dictionary-add-btn" ${atCapacity ? "disabled" : ""} title="Add" aria-label="Add">${createIcon(Plus)}</button>
+          <button class="btn btn-accent dictionary-add-btn" ${atCapacity ? "disabled" : ""} title="${t("common.add")}" aria-label="${t("common.add")}">${createIcon(Plus)}</button>
         </div>
         <div class="dictionary-hint">
-          ${terms.length}/${MAX_DICTIONARY_TERMS} terms used · Up to ${MAX_DICTIONARY_WORDS_PER_TERM} words each
+          ${t("dictionary.usage", {
+            used: terms.length,
+            maximum: MAX_DICTIONARY_TERMS,
+            words: MAX_DICTIONARY_WORDS_PER_TERM,
+          })}
         </div>
         ${
           dictionaryError
@@ -2159,7 +2225,7 @@ function renderDictionary(el: HTMLElement): void {
             ? termsHtml
             : `<div class="empty-state">
                  <div class="empty-state-icon">${createIcon(BookOpen)}</div>
-                 <div class="empty-state-title">No dictionary terms yet</div>
+                 <div class="empty-state-title">${t("dictionary.empty")}</div>
                </div>`
         }
       </div>
@@ -2183,148 +2249,163 @@ function renderSettingsUI(el: HTMLElement): void {
         class="lang-chip ${selectedLangs.includes(lang.code) ? "on" : ""}"
         data-lang="${lang.code}"
         type="button"
-      >${lang.name}</button>
+      >${t(lang.nameKey)}</button>
     `
   ).join("");
 
   const currentTheme = settings?.theme ?? "system";
+  const currentUiLanguage = settings?.uiLanguage ?? "en";
 
   el.innerHTML = `
-    <h1>Settings</h1>
+    <h1>${t("settings.title")}</h1>
     <div class="settings-section">
-      <div class="settings-section-title">General</div>
+      <div class="settings-section-title">${t("settings.general")}</div>
       <div class="settings-card">
         <div class="settings-row">
           <div>
-            <div class="settings-row-label">Appearance</div>
-            <div class="settings-row-desc">Choose your preferred theme</div>
+            <div class="settings-row-label">${t("settings.appearance")}</div>
+            <div class="settings-row-desc">${t("settings.appearanceDescription")}</div>
           </div>
           <div class="appearance-selector">
             <button class="appearance-option ${currentTheme === "system" ? "selected" : ""}" data-theme="system">
               ${createIcon(Monitor)}
-              <span>System</span>
+              <span>${t("settings.systemTheme")}</span>
             </button>
             <button class="appearance-option ${currentTheme === "light" ? "selected" : ""}" data-theme="light">
               ${createIcon(Sun)}
-              <span>Light</span>
+              <span>${t("settings.lightTheme")}</span>
             </button>
             <button class="appearance-option ${currentTheme === "dark" ? "selected" : ""}" data-theme="dark">
               ${createIcon(Moon)}
-              <span>Dark</span>
+              <span>${t("settings.darkTheme")}</span>
             </button>
           </div>
         </div>
         <div class="settings-row">
           <div>
-            <div class="settings-row-label">Hotkey</div>
-            <div class="settings-row-desc">Set recording hotkey</div>
+            <div class="settings-row-label">${t("settings.appLanguage")}</div>
+            <div class="settings-row-desc">${t("settings.appLanguageDescription")}</div>
           </div>
-          <button class="hotkey-btn">${settings?.hotkey && parseHotkeyString(settings.hotkey) ? renderHotkeyChips(settings.hotkey, { chipClass: "hotkey-key-inline", separator: "plus" }) : "Set hotkey"}</button>
+          <div class="appearance-selector">
+            <button class="appearance-option ${currentUiLanguage === "en" ? "selected" : ""}" data-ui-language="en">
+              <span>English</span>
+            </button>
+            <button class="appearance-option ${currentUiLanguage === "de" ? "selected" : ""}" data-ui-language="de">
+              <span>Deutsch</span>
+            </button>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">${t("settings.hotkey")}</div>
+            <div class="settings-row-desc">${t("settings.hotkeyDescription")}</div>
+          </div>
+          <button class="hotkey-btn">${settings?.hotkey && parseHotkeyString(settings.hotkey) ? renderHotkeyChips(settings.hotkey, { chipClass: "hotkey-key-inline", separator: "plus" }) : t("settings.setHotkey")}</button>
         </div>
         <div class="settings-row lang-row">
           <div>
-            <div class="settings-row-label">Language</div>
-            <div class="settings-row-desc">Select one for best accuracy, or multiple for auto-detection</div>
+            <div class="settings-row-label">${t("settings.transcriptionLanguages")}</div>
+            <div class="settings-row-desc">${t("settings.transcriptionLanguagesDescription")}</div>
           </div>
           <div class="lang-chiprow">${langChips}</div>
         </div>
       </div>
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">Audio</div>
+      <div class="settings-section-title">${t("settings.audio")}</div>
       <div class="settings-card">
         <div class="settings-row">
           <div>
-            <div class="settings-row-label">Microphone</div>
-            <div class="settings-row-desc">Select audio input device</div>
+            <div class="settings-row-label">${t("settings.microphone")}</div>
+            <div class="settings-row-desc">${t("settings.microphoneDescription")}</div>
           </div>
           <div class="mic-select-wrapper">
             <select class="settings-select mic-select">
               ${micOptions}
             </select>
-            <button class="btn btn-icon mic-refresh-btn" title="Refresh devices">${createIcon(RefreshCw)}</button>
+            <button class="btn btn-icon mic-refresh-btn" title="${t("settings.refreshDevices")}">${createIcon(RefreshCw)}</button>
           </div>
         </div>
         <div class="settings-row">
           <div>
-            <div class="settings-row-label">Sound feedback</div>
-            <div class="settings-row-desc">Play sounds for recording start</div>
+            <div class="settings-row-label">${t("settings.soundFeedback")}</div>
+            <div class="settings-row-desc">${t("settings.soundFeedbackDescription")}</div>
           </div>
           <div class="toggle ${settings?.soundEnabled ? "active" : ""}" data-setting="soundEnabled"></div>
         </div>
         <div class="settings-row">
           <div>
-            <div class="settings-row-label">Test microphone</div>
-            <div class="settings-row-desc">Check if your microphone is working</div>
+            <div class="settings-row-label">${t("settings.testMicrophone")}</div>
+            <div class="settings-row-desc">${t("settings.testMicrophoneDescription")}</div>
           </div>
-          <button class="btn btn-outline mic-test-btn">Test</button>
+          <button class="btn btn-outline mic-test-btn">${t("settings.test")}</button>
         </div>
       </div>
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">Models</div>
+      <div class="settings-section-title">${t("settings.models")}</div>
       <div class="model-list">
         ${renderModelList()}
       </div>
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">Permissions</div>
+      <div class="settings-section-title">${t("settings.permissions")}</div>
       <div class="settings-card">
         <div class="settings-row">
           <div>
-            <div class="settings-row-label">Microphone</div>
-            <div class="settings-row-desc">Required for voice recording</div>
+            <div class="settings-row-label">${t("settings.microphone")}</div>
+            <div class="settings-row-desc">${t("settings.voiceRecordingRequired")}</div>
           </div>
-          <span class="permission-badge" data-permission="microphone">Checking...</span>
+          <span class="permission-badge" data-permission="microphone">${t("common.checking")}</span>
         </div>
         ${
           isMac
             ? `<div class="settings-row">
           <div>
-            <div class="settings-row-label">Accessibility</div>
-            <div class="settings-row-desc">Required for global hotkey and paste</div>
+            <div class="settings-row-label">${t("settings.accessibility")}</div>
+            <div class="settings-row-desc">${t("settings.accessibilityDescription")}</div>
           </div>
-          <span class="permission-badge" data-permission="accessibility">Checking...</span>
+          <span class="permission-badge" data-permission="accessibility">${t("common.checking")}</span>
         </div>`
             : ""
         }
       </div>
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">Data</div>
+      <div class="settings-section-title">${t("settings.data")}</div>
       <div class="settings-card">
         <div class="settings-row">
           <div>
-            <div class="settings-row-label">Transcript history</div>
-            <div class="settings-row-desc">Store transcripts locally</div>
+            <div class="settings-row-label">${t("settings.transcriptHistory")}</div>
+            <div class="settings-row-desc">${t("settings.transcriptHistoryDescription")}</div>
           </div>
           <div class="appearance-selector" data-setting="historyMode">
             <button class="appearance-option ${settings?.historyMode === "off" ? "selected" : ""}" data-history-mode="off">
-              <span>Off</span>
+              <span>${t("common.off")}</span>
             </button>
             <button class="appearance-option ${settings?.historyMode === "off" ? "" : "selected"}" data-history-mode="30d">
-              <span>Last 30 days</span>
+              <span>${t("settings.last30Days")}</span>
             </button>
           </div>
         </div>
       </div>
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">System</div>
+      <div class="settings-section-title">${t("settings.system")}</div>
       <div class="settings-card">
         <div class="settings-row">
           <div>
-            <div class="settings-row-label">Application updates</div>
-            <div class="settings-row-desc">Check for and install the latest version</div>
+            <div class="settings-row-label">${t("settings.applicationUpdates")}</div>
+            <div class="settings-row-desc">${t("settings.applicationUpdatesDescription")}</div>
           </div>
           <button class="btn btn-outline check-updates-btn" ${updateCheckInProgress ? "disabled" : ""}>
-            ${updateCheckInProgress ? "Checking..." : getUpdateButtonLabel()}
+            ${updateCheckInProgress ? t("common.checking") : getUpdateButtonLabel()}
           </button>
         </div>
         <div class="settings-row">
           <div>
-            <div class="settings-row-label">Start on login</div>
-            <div class="settings-row-desc">Launch Fing when you log in</div>
+            <div class="settings-row-label">${t("settings.startOnLogin")}</div>
+            <div class="settings-row-desc">${t("settings.startOnLoginDescription")}</div>
           </div>
           <div class="toggle ${settings?.autoStart ? "active" : ""}" data-setting="autoStart"></div>
         </div>
@@ -2421,7 +2502,7 @@ function updateBadge(
   badge.onclick = null;
 
   if (status === "granted" && permissionRestartRequired.has(type)) {
-    badge.textContent = "Restart";
+    badge.textContent = t("permissions.restart");
     badge.classList.add("action", "restart");
     badge.onclick = () => {
       relaunchApp().catch((err) => {
@@ -2429,16 +2510,16 @@ function updateBadge(
       });
     };
   } else if (status === "granted") {
-    badge.textContent = "Granted";
+    badge.textContent = t("permissions.granted");
     badge.classList.add("granted");
   } else if (status === "not-applicable") {
-    badge.textContent = "N/A";
+    badge.textContent = t("common.na");
     badge.classList.add("na");
   } else {
-    badge.textContent = "Allow";
+    badge.textContent = t("permissions.allow");
     badge.classList.add("action");
     badge.onclick = async () => {
-      badge.textContent = "Opening...";
+      badge.textContent = t("permissions.opening");
       badge.classList.remove("action");
 
       if (type === "microphone") {
@@ -2517,16 +2598,16 @@ function renderAbout(el: HTMLElement): void {
     <div class="about-center">
 <img class="about-icon" src="/icon.png" alt="Fing" />
       <h1>Fing</h1>
-      <p class="about-tagline">Private dictation for every app.</p>
-      <div class="about-backend">v${info?.version ?? "0.1.0"} · ${info?.commit ?? "unknown"} · ${info?.inferenceBackend ?? "Unknown"}</div>
+      <p class="about-tagline">${t("about.tagline")}</p>
+      <div class="about-backend">v${info?.version ?? "0.1.0"} · ${info?.commit ?? t("common.unknown")} · ${info?.inferenceBackend ?? t("common.unknown")}</div>
       <div class="about-actions">
         <div class="about-actions-row">
-          <a href="https://getfing.com" target="_blank" rel="noreferrer" class="btn btn-outline">Homepage ${createIcon(ArrowUpRight)}</a>
-          <a href="https://getfing.com/privacy" target="_blank" rel="noreferrer" class="btn btn-outline">Privacy ${createIcon(ArrowUpRight)}</a>
+          <a href="https://getfing.com" target="_blank" rel="noreferrer" class="btn btn-outline">${t("about.homepage")} ${createIcon(ArrowUpRight)}</a>
+          <a href="https://getfing.com/privacy" target="_blank" rel="noreferrer" class="btn btn-outline">${t("about.privacy")} ${createIcon(ArrowUpRight)}</a>
         </div>
         <div class="about-actions-row">
           <a href="https://github.com/jamdaniels/fing" target="_blank" rel="noreferrer" class="btn btn-outline">GitHub ${createIcon(ArrowUpRight)}</a>
-          <a href="mailto:contact@getfing.com" class="btn btn-outline" data-contact-link>Contact ${createIcon(ArrowUpRight)}</a>
+          <a href="mailto:contact@getfing.com" class="btn btn-outline" data-contact-link>${t("about.contact")} ${createIcon(ArrowUpRight)}</a>
         </div>
       </div>
     </div>
@@ -2739,10 +2820,10 @@ async function showMissingMacPermissionsDialog(
     const missingPermissions: string[] = [];
 
     if (permissions.microphone !== "granted") {
-      missingPermissions.push("Microphone");
+      missingPermissions.push(t("startup.microphone"));
     }
     if (permissions.accessibility !== "granted") {
-      missingPermissions.push("Accessibility");
+      missingPermissions.push(t("startup.accessibility"));
     }
 
     if (missingPermissions.length === 0) {
@@ -2753,9 +2834,11 @@ async function showMissingMacPermissionsDialog(
     await presentMainWindow(true);
     try {
       await message(
-        `Fing needs ${missingPermissions.join(" and ")} permission${missingPermissions.length === 1 ? "" : "s"} to record and paste text.\n\nOpen Fing from the tray, go to Settings > Permissions, and click Allow.`,
+        t("startup.permissionsBody", {
+          permissions: missingPermissions.join(t("startup.and")),
+        }),
         {
-          title: "Permissions Required",
+          title: t("startup.permissionsTitle"),
           kind: "warning",
         }
       );
@@ -2783,13 +2866,10 @@ async function showInvalidHotkeyDialog(
     const { message } = await import("@tauri-apps/plugin-dialog");
     await presentMainWindow(true);
     try {
-      await message(
-        "Your saved recording hotkey uses an older format and needs to be set again.\n\nOpen Fing from the tray, go to Settings, and choose a new hotkey.",
-        {
-          title: "Set a New Hotkey",
-          kind: "warning",
-        }
-      );
+      await message(t("startup.newHotkeyBody"), {
+        title: t("startup.newHotkeyTitle"),
+        kind: "warning",
+      });
     } finally {
       await presentMainWindow(false);
     }
@@ -2848,6 +2928,18 @@ async function init(): Promise<void> {
       }
     }
     currentAppState = newState;
+  });
+
+  await listen<{ language: UiLanguage }>("ui-language-changed", (event) => {
+    const language = event.payload.language === "de" ? "de" : "en";
+    setUiLanguage(language);
+    if (settings) {
+      settings = { ...settings, uiLanguage: language };
+    }
+    if (currentAppState !== "needs-setup") {
+      renderSidebar();
+      renderContent();
+    }
   });
 
   if (shouldShowOnboarding) {

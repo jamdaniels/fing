@@ -400,10 +400,11 @@ pub fn on_key_down(app: &AppHandle) {
         let current_session = RECORDING_SESSION_ID.load(Ordering::SeqCst);
         if current_session == session_id && KEY_HELD.load(Ordering::SeqCst) {
             tracing::info!("Auto-stopping recording after 2 minutes");
+            let translations = crate::i18n::current();
             crate::notifications::show_info(
                 &app_for_timer,
-                "Recording Stopped",
-                "Maximum recording duration (2 min) reached",
+                &translations.notifications.recording_stopped_title,
+                &translations.notifications.maximum_recording_duration,
             );
             on_key_up(&app_for_timer);
         }
@@ -495,7 +496,16 @@ pub fn on_key_up(app: &AppHandle) {
         let test_mode = is_test_mode;
         let duration_ms = duration_ms as i64;
         tauri::async_runtime::spawn(async move {
-            crate::notifications::show_error(&app_handle, "Microphone Error", &message);
+            let translations = crate::i18n::current();
+            let localized_message = crate::i18n::interpolate(
+                &translations.notifications.microphone_start_failed,
+                &[("error", &message)],
+            );
+            crate::notifications::show_error(
+                &app_handle,
+                &translations.notifications.microphone_error_title,
+                &localized_message,
+            );
             finish_transcription(&app_handle, None, duration_ms, test_mode).await;
         });
         return;
@@ -578,10 +588,15 @@ pub fn on_key_up(app: &AppHandle) {
             if let Err(e) = init_transcriber_for_variant_async(settings.active_model_variant).await
             {
                 tracing::error!("Failed to initialize transcriber: {}", e);
+                let translations = crate::i18n::current();
+                let message = crate::i18n::interpolate(
+                    &translations.notifications.model_load_failed,
+                    &[("error", &e.to_string())],
+                );
                 crate::notifications::show_error(
                     &app_handle,
-                    "Model Error",
-                    &format!("Failed to load model: {e}"),
+                    &translations.notifications.model_error_title,
+                    &message,
                 );
                 finish_transcription(&app_handle, None, duration_ms, test_mode).await;
                 return;
@@ -606,10 +621,15 @@ pub fn on_key_up(app: &AppHandle) {
                 Ok(t) => t,
                 Err(e) => {
                     tracing::error!("Transcription failed: {}", e);
+                    let translations = crate::i18n::current();
+                    let message = crate::i18n::interpolate(
+                        &translations.notifications.transcription_failed,
+                        &[("error", &e.to_string())],
+                    );
                     crate::notifications::show_error(
                         &app_handle,
-                        "Transcription Error",
-                        &format!("{e}"),
+                        &translations.notifications.transcription_error_title,
+                        &message,
                     );
                     finish_transcription(&app_handle, None, duration_ms, test_mode).await;
                     return;

@@ -14,6 +14,24 @@ pub enum Theme {
     Dark,
 }
 
+/// User-selected interface language.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum UiLanguage {
+    #[default]
+    En,
+    De,
+}
+
+impl UiLanguage {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::En => "en",
+            Self::De => "de",
+        }
+    }
+}
+
 /// History retention mode.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
 pub enum HistoryMode {
@@ -51,6 +69,8 @@ pub struct Settings {
     pub lazy_model_loading: bool,
     #[serde(default)]
     pub dictionary_terms: Vec<String>,
+    #[serde(default)]
+    pub ui_language: UiLanguage,
 }
 
 fn default_languages() -> Vec<String> {
@@ -80,7 +100,44 @@ impl Default for Settings {
             theme: Theme::default(),
             lazy_model_loading: false,
             dictionary_terms: Vec::new(),
+            ui_language: UiLanguage::default(),
         }
+    }
+}
+
+fn resolve_ui_language<I, S>(locales: I) -> UiLanguage
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    for locale in locales {
+        let normalized = locale.as_ref().trim().to_ascii_lowercase();
+        let base = normalized
+            .split(['-', '_'])
+            .next()
+            .unwrap_or(normalized.as_str());
+        match base {
+            "de" => return UiLanguage::De,
+            "en" => return UiLanguage::En,
+            _ => {}
+        }
+    }
+
+    UiLanguage::En
+}
+
+fn first_run_settings() -> Settings {
+    first_run_settings_for_locales(sys_locale::get_locales())
+}
+
+fn first_run_settings_for_locales<I, S>(locales: I) -> Settings
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    Settings {
+        ui_language: resolve_ui_language(locales),
+        ..Settings::default()
     }
 }
 
@@ -114,6 +171,14 @@ async fn load_settings_from_disk() -> Settings {
 
     match fs::read_to_string(&path).await {
         Ok(contents) => parse_settings_json(&contents),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            tracing::info!("Settings file not found, using first-run defaults");
+            let settings = first_run_settings();
+            if let Err(save_error) = save_settings_unlocked(&settings).await {
+                tracing::warn!("Failed to persist first-run settings: {}", save_error);
+            }
+            settings
+        }
         Err(error) => {
             tracing::info!("Settings file not loaded, using defaults: {}", error);
             Settings::default()
@@ -137,6 +202,10 @@ pub fn load_settings_sync() -> Settings {
     };
     let settings = match std::fs::read_to_string(&path) {
         Ok(contents) => parse_settings_json(&contents),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            tracing::info!("Settings file not found, using first-run defaults");
+            first_run_settings()
+        }
         Err(error) => {
             tracing::info!("Settings file not loaded, using defaults: {}", error);
             Settings::default()
@@ -222,7 +291,7 @@ fn sanitize_settings(mut settings: Settings) -> Settings {
 }
 
 fn parse_settings_json(contents: &str) -> Settings {
-    let value: serde_json::Value = match serde_json::from_str(contents) {
+    let mut value: serde_json::Value = match serde_json::from_str(contents) {
         Ok(value) => value,
         Err(error) => {
             tracing::warn!("Failed to parse settings JSON, using defaults: {}", error);
@@ -242,6 +311,18 @@ fn parse_settings_json(contents: &str) -> Settings {
                 .filter_map(|term| term.as_str().map(str::to_string))
                 .collect::<Vec<_>>()
         });
+
+    // Existing installations predate uiLanguage. Keep them in English, and
+    // sanitize unknown values without discarding the rest of their settings.
+    if let Some(object) = value.as_object_mut() {
+        let ui_language = object.get("uiLanguage").and_then(serde_json::Value::as_str);
+        if !matches!(ui_language, Some("en" | "de")) {
+            object.insert(
+                "uiLanguage".to_string(),
+                serde_json::Value::String("en".to_string()),
+            );
+        }
+    }
 
     let mut settings = match serde_json::from_value::<Settings>(value) {
         Ok(settings) => sanitize_settings(settings),
@@ -317,6 +398,79 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos().to_string())
             .unwrap_or_else(|_| "0".to_string())
+    }
+
+    #[test]
+    fn resolves_supported_system_locales_in_preference_order() {
+        assert_eq!(resolve_ui_language(["de-DE"]), UiLanguage::De);
+        assert_eq!(resolve_ui_language(["de_CH"]), UiLanguage::De);
+        assert_eq!(resolve_ui_language(["en-GB"]), UiLanguage::En);
+        assert_eq!(
+            resolve_ui_language(["fr-CH", "de-CH", "en-US"]),
+            UiLanguage::De
+        );
+        assert_eq!(resolve_ui_language(["fr-FR"]), UiLanguage::En);
+        assert_eq!(resolve_ui_language(Vec::<String>::new()), UiLanguage::En);
+    }
+
+    #[test]
+    fn first_run_settings_use_detected_language() {
+        assert_eq!(
+            first_run_settings_for_locales(["de-DE"]).ui_language,
+            UiLanguage::De
+        );
+        assert_eq!(
+            first_run_settings_for_locales(["fr-FR"]).ui_language,
+            UiLanguage::En
+        );
+    }
+
+    #[test]
+    fn existing_settings_without_ui_language_stay_english() {
+        let raw = serde_json::to_string(&Settings {
+            ui_language: UiLanguage::De,
+            ..Settings::default()
+        })
+        .expect("settings should serialize");
+        let value: serde_json::Value =
+            serde_json::from_str(&raw).expect("settings JSON should parse");
+        let mut object = value
+            .as_object()
+            .expect("settings should be an object")
+            .clone();
+        object.remove("uiLanguage");
+
+        let parsed = parse_settings_json(
+            &serde_json::to_string(&object).expect("legacy settings should serialize"),
+        );
+
+        assert_eq!(parsed.ui_language, UiLanguage::En);
+    }
+
+    #[test]
+    fn invalid_ui_language_does_not_discard_other_settings() {
+        let mut value = serde_json::to_value(Settings {
+            theme: Theme::Dark,
+            ..Settings::default()
+        })
+        .expect("settings should serialize");
+        value["uiLanguage"] = serde_json::Value::String("xx".to_string());
+
+        let parsed =
+            parse_settings_json(&serde_json::to_string(&value).expect("settings should serialize"));
+
+        assert_eq!(parsed.ui_language, UiLanguage::En);
+        assert_eq!(parsed.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn explicit_ui_language_round_trips() {
+        let settings = Settings {
+            ui_language: UiLanguage::De,
+            ..Settings::default()
+        };
+        let raw = serde_json::to_string(&settings).expect("settings should serialize");
+        assert_eq!(parse_settings_json(&raw).ui_language, UiLanguage::De);
     }
 
     #[test]

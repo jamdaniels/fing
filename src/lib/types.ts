@@ -6,6 +6,7 @@ export type AppState =
   | "processing";
 
 export type Theme = "system" | "light" | "dark";
+export type UiLanguage = "en" | "de";
 
 export type ModelVariant = "small_q5" | "small" | "large_turbo_q5";
 
@@ -51,6 +52,7 @@ export interface Settings {
   selectedMicrophoneId: string | null;
   soundEnabled: boolean;
   theme: Theme;
+  uiLanguage: UiLanguage;
 }
 
 export interface BootstrapStatus {

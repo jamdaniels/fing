@@ -227,7 +227,7 @@ fn should_check_for_current_app_version() -> bool {
     )
 }
 
-fn update_menu_label() -> &'static str {
+fn update_menu_label() -> String {
     let state = match UPDATE_STATE.read() {
         Ok(state) => state,
         Err(poisoned) => {
@@ -236,14 +236,15 @@ fn update_menu_label() -> &'static str {
         }
     };
 
+    let translations = crate::i18n::current();
     if state.update_available {
-        "Update Available"
+        translations.tray.update_available.clone()
     } else {
-        "Check for Updates"
+        translations.tray.check_for_updates.clone()
     }
 }
 
-pub fn tray_menu_label() -> &'static str {
+pub fn tray_menu_label() -> String {
     update_menu_label()
 }
 

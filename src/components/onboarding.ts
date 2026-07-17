@@ -20,6 +20,7 @@ import {
   parseHotkeyString,
 } from "../lib/hotkey";
 import { renderHotkeyChips } from "../lib/hotkey-display";
+import { t } from "../lib/i18n";
 import { createIcon, escapeHtml } from "../lib/icons";
 import {
   completeSetup,
@@ -78,10 +79,10 @@ interface RenderOnboardingOptions {
 }
 
 const SUPPORTED_LANGUAGES = [
-  { code: "en", name: "English" },
-  { code: "de", name: "German" },
-  { code: "es", name: "Spanish" },
-  { code: "fr", name: "French" },
+  { code: "en", nameKey: "common.english" as const },
+  { code: "de", nameKey: "common.german" as const },
+  { code: "es", nameKey: "common.spanish" as const },
+  { code: "fr", nameKey: "common.french" as const },
 ];
 
 let state: OnboardingState = {
@@ -153,7 +154,7 @@ function renderStepIndicator(currentStep: OnboardingStep): string {
         class="step-dot ${isActive ? "active" : ""} ${isPast ? "completed" : ""}"
         data-step="${i}"
         ${clickable ? "" : "disabled"}
-        aria-label="Step ${i}"
+        aria-label="${t("onboarding.step", { number: i })}"
       ></button>
     `);
   }
@@ -191,16 +192,16 @@ function formatMb(bytes: number): string {
 function getDownloadLeftText(progress: DownloadProgress | null): string {
   const status = progress?.status;
   if (status === "verifying") {
-    return "Verifying model…";
+    return t("onboarding.verifyingModel");
   }
   if (status === "downloading") {
     return `${Math.round(progress?.percentage ?? 0)}%`;
   }
   if (status === "complete") {
-    return "Download complete";
+    return t("onboarding.downloadComplete");
   }
   if (status === "failed") {
-    return progress?.errorMessage || "Download failed";
+    return progress?.errorMessage || t("onboarding.downloadFailed");
   }
   return "";
 }
@@ -264,24 +265,24 @@ function renderDownloadBody(progress: DownloadProgress | null): string {
 
 function renderMicPermissionStatus(status: string | undefined): string {
   if (status === "granted") {
-    return `<div class="permission-status granted">Granted</div>`;
+    return `<div class="permission-status granted">${t("common.granted")}</div>`;
   }
   if (status === "prompt") {
-    return `<button class="btn btn-info btn-sm" id="grant-microphone-btn">Allow</button>`;
+    return `<button class="btn btn-info btn-sm" id="grant-microphone-btn">${t("common.allow")}</button>`;
   }
-  return `<button class="btn btn-info btn-sm" id="grant-microphone-btn">Allow</button>`;
+  return `<button class="btn btn-info btn-sm" id="grant-microphone-btn">${t("common.allow")}</button>`;
 }
 
 function renderAccessibilityPermissionStatus(
   status: string | undefined
 ): string {
   if (status === "granted") {
-    return `<div class="permission-status granted">Granted</div>`;
+    return `<div class="permission-status granted">${t("common.granted")}</div>`;
   }
   if (status === "not-applicable") {
-    return `<div class="permission-status">N/A</div>`;
+    return `<div class="permission-status">${t("common.na")}</div>`;
   }
-  return `<button class="btn btn-info btn-sm" id="grant-accessibility-btn">Allow</button>`;
+  return `<button class="btn btn-info btn-sm" id="grant-accessibility-btn">${t("common.allow")}</button>`;
 }
 
 function render(): void {
@@ -347,19 +348,19 @@ function renderWelcome(): void {
     <div class="onboarding">
       <div class="onboarding-header">
         <img class="onboarding-logo" src="/icon.png" alt="Fing" />
-        <h1 class="onboarding-title">Welcome to Fing</h1>
-        <p class="onboarding-desc">Private dictation for every app.</p>
+        <h1 class="onboarding-title">${t("onboarding.welcomeTitle")}</h1>
+        <p class="onboarding-desc">${t("onboarding.welcomeSubtitle")}</p>
       </div>
       <div class="onboarding-body">
         <ul class="onboarding-features">
-          <li><span class="onb-ibox">${createIcon(Monitor)}</span>Runs entirely on your device</li>
-          <li><span class="onb-ibox">${createIcon(Mic)}</span>Mic only active while you hold the hotkey</li>
-          <li><span class="onb-ibox">${createIcon(Shield)}</span>Audio never leaves your computer</li>
+          <li><span class="onb-ibox">${createIcon(Monitor)}</span>${t("onboarding.featureDevice")}</li>
+          <li><span class="onb-ibox">${createIcon(Mic)}</span>${t("onboarding.featureMic")}</li>
+          <li><span class="onb-ibox">${createIcon(Shield)}</span>${t("onboarding.featurePrivacy")}</li>
         </ul>
       </div>
       <div class="onboarding-footer">
         <button class="btn btn-accent btn-lg btn-block" id="get-started-btn">
-          Get started
+          ${t("onboarding.getStarted")}
         </button>
         ${renderStepIndicator(1)}
       </div>
@@ -379,7 +380,7 @@ function formatModelSize(bytes: number): string {
 function renderModelVariantCards(): string {
   const variants: { variant: ModelVariant; badge?: string }[] = [
     { variant: "small_q5" },
-    { variant: "small", badge: "Recommended" },
+    { variant: "small", badge: t("onboarding.recommended") },
     { variant: "large_turbo_q5" },
   ];
 
@@ -394,15 +395,26 @@ function renderModelVariantCards(): string {
         <button class="model-variant-card ${isSelected ? "selected" : ""}" data-variant="${variant}">
           ${badge ? `<div class="variant-badge">${badge}</div>` : ""}
           <div class="variant-name">${model.displayName}</div>
-          <div class="variant-desc">${model.description}</div>
+          <div class="variant-desc">${getModelQualityLabel(model.variant)}</div>
           <div class="variant-stats">
-            <span>~${formatModelSize(model.sizeBytes)} disk</span>
-            <span>~${model.memoryEstimateMb} MB memory</span>
+            <span>${t("onboarding.disk", { size: formatModelSize(model.sizeBytes) })}</span>
+            <span>${t("onboarding.memory", { size: model.memoryEstimateMb })}</span>
           </div>
         </button>
       `;
     })
     .join("");
+}
+
+function getModelQualityLabel(variant: ModelVariant): string {
+  switch (variant) {
+    case "small_q5":
+      return t("models.quality.small_q5");
+    case "small":
+      return t("models.quality.small");
+    case "large_turbo_q5":
+      return t("models.quality.large_turbo_q5");
+  }
 }
 
 function renderDownloadFooterButton(
@@ -412,19 +424,21 @@ function renderDownloadFooterButton(
   isFailed: boolean
 ): string {
   if (isComplete) {
-    const label = state.modelRepairReason ? "Finish repair" : "Continue";
+    const label = state.modelRepairReason
+      ? t("onboarding.finishRepair")
+      : t("common.continue");
     return `<button class="btn btn-accent btn-lg btn-block" id="continue-btn">${label}</button>`;
   }
   if (isVerifying) {
-    return `<button class="btn btn-accent btn-lg btn-block" disabled>Verifying…</button>`;
+    return `<button class="btn btn-accent btn-lg btn-block" disabled>${t("onboarding.verifying")}</button>`;
   }
   if (isDownloading) {
-    return `<button class="btn btn-accent btn-lg btn-block" disabled>Downloading…</button>`;
+    return `<button class="btn btn-accent btn-lg btn-block" disabled>${t("onboarding.downloading")}</button>`;
   }
   if (isFailed) {
-    return `<button class="btn btn-accent btn-lg btn-block" id="retry-btn">Retry download</button>`;
+    return `<button class="btn btn-accent btn-lg btn-block" id="retry-btn">${t("onboarding.retryDownload")}</button>`;
   }
-  return `<button class="btn btn-accent btn-lg btn-block" id="download-btn">Download model</button>`;
+  return `<button class="btn btn-accent btn-lg btn-block" id="download-btn">${t("onboarding.downloadModel")}</button>`;
 }
 
 function getDownloadHeading(
@@ -436,39 +450,39 @@ function getDownloadHeading(
 ): { title: string; subtitle: string } {
   if (isDownloading || isVerifying) {
     return {
-      title: "Downloading model",
-      subtitle: "This usually takes under a minute on a fast connection.",
+      title: t("onboarding.downloadingTitle"),
+      subtitle: t("onboarding.downloadingSubtitle"),
     };
   }
   if (isComplete) {
     return {
-      title: "Model ready",
-      subtitle: `${selectedModel?.displayName ?? "Model"} downloaded and verified.`,
+      title: t("onboarding.modelReady"),
+      subtitle: t("onboarding.modelReadySubtitle", {
+        model: selectedModel?.displayName ?? t("onboarding.modelFallback"),
+      }),
     };
   }
   if (isFailed) {
     return {
-      title: "Download failed",
-      subtitle: "Check your connection and try again.",
+      title: t("onboarding.downloadFailed"),
+      subtitle: t("onboarding.downloadFailedSubtitle"),
     };
   }
   if (state.modelRepairReason === "model_missing") {
     return {
-      title: "Restore your speech model",
-      subtitle:
-        "The selected model is missing and needs to be downloaded again.",
+      title: t("onboarding.restoreTitle"),
+      subtitle: t("onboarding.restoreSubtitle"),
     };
   }
   if (state.modelRepairReason === "model_invalid") {
     return {
-      title: "Repair your speech model",
-      subtitle:
-        "The selected model could not be verified and needs to be replaced.",
+      title: t("onboarding.repairTitle"),
+      subtitle: t("onboarding.repairSubtitle"),
     };
   }
   return {
-    title: "Choose a speech model",
-    subtitle: "Pick what fits your needs.",
+    title: t("onboarding.chooseModel"),
+    subtitle: t("onboarding.chooseModelSubtitle"),
   };
 }
 
@@ -576,8 +590,7 @@ async function handleDownloadContinue(): Promise<void> {
     });
   } catch (err) {
     console.error("Failed to save model variant selection:", err);
-    state.downloadError =
-      "Could not save the selected model. Please try again.";
+    state.downloadError = t("onboarding.saveModelFailed");
     render();
     return;
   }
@@ -607,8 +620,7 @@ async function finishModelRepair(): Promise<void> {
     state.isCompleting = false;
     state.invalidModelVariant = state.selectedModelVariant;
     state.downloadProgress = null;
-    state.downloadError =
-      "Model repair did not finish. Download the model again and retry.";
+    state.downloadError = t("onboarding.repairFailed");
     try {
       state.models = await getModels();
     } catch {
@@ -629,7 +641,7 @@ function renderPreferences(): void {
         class="lang-chip ${state.selectedLanguages.includes(lang.code) ? "on" : ""}"
         data-lang="${lang.code}"
         type="button"
-      >${lang.name}</button>
+      >${t(lang.nameKey)}</button>
     `
   ).join("");
 
@@ -639,25 +651,25 @@ function renderPreferences(): void {
         <div class="onboarding-icon">
           ${createIcon(Sliders)}
         </div>
-        <h1 class="onboarding-title">Your preferences</h1>
-        <p class="onboarding-desc">Two quick choices, editable later.</p>
+        <h1 class="onboarding-title">${t("onboarding.preferencesTitle")}</h1>
+        <p class="onboarding-desc">${t("onboarding.preferencesSubtitle")}</p>
       </div>
       <div class="onboarding-body prefs-body">
         <div class="onb-section">
-          <h3>Languages <span class="meta">Pick 1 for best accuracy</span></h3>
+          <h3>${t("onboarding.languages")} <span class="meta">${t("onboarding.pickOne")}</span></h3>
           <div class="lang-chiprow">${langChips}</div>
         </div>
         <div class="onb-section">
-          <h3>Transcript history <span class="meta">Stored locally</span></h3>
+          <h3>${t("onboarding.history")} <span class="meta">${t("onboarding.storedLocally")}</span></h3>
           <div class="appearance-selector">
-            <button class="appearance-option ${state.selectedHistoryMode === "off" ? "selected" : ""}" data-history-mode="off">Off</button>
-            <button class="appearance-option ${state.selectedHistoryMode === "30d" ? "selected" : ""}" data-history-mode="30d">Last 30 days</button>
+            <button class="appearance-option ${state.selectedHistoryMode === "off" ? "selected" : ""}" data-history-mode="off">${t("common.off")}</button>
+            <button class="appearance-option ${state.selectedHistoryMode === "30d" ? "selected" : ""}" data-history-mode="30d">${t("settings.last30Days")}</button>
           </div>
         </div>
       </div>
       <div class="onboarding-footer">
         <button class="btn btn-accent btn-lg btn-block" id="continue-btn">
-          Continue
+          ${t("common.continue")}
         </button>
         ${renderStepIndicator(3)}
       </div>
@@ -735,8 +747,8 @@ function renderPermissions(): void {
         <div class="onboarding-icon">
           ${createIcon(PersonStanding)}
         </div>
-        <h1 class="onboarding-title">Grant permissions</h1>
-        <p class="onboarding-desc">Two macOS permissions are required.</p>
+        <h1 class="onboarding-title">${t("onboarding.permissionsTitle")}</h1>
+        <p class="onboarding-desc">${t("onboarding.permissionsSubtitle")}</p>
       </div>
       <div class="onboarding-body">
         <div class="permissions-list">
@@ -744,8 +756,8 @@ function renderPermissions(): void {
             <div class="permission-info">
               <span class="onb-ibox onb-ibox-lg">${createIcon(Mic)}</span>
               <div>
-                <div class="permission-label">Microphone access</div>
-                <div class="permission-desc">Required to capture your voice</div>
+                <div class="permission-label">${t("onboarding.microphoneAccess")}</div>
+                <div class="permission-desc">${t("onboarding.microphoneRequired")}</div>
               </div>
             </div>
             ${renderMicPermissionStatus(perms?.microphone)}
@@ -755,8 +767,8 @@ function renderPermissions(): void {
             <div class="permission-info">
               <span class="onb-ibox onb-ibox-lg">${createIcon(PersonStanding)}</span>
               <div>
-                <div class="permission-label">Accessibility access</div>
-                <div class="permission-desc">Required for the global hotkey and pasting</div>
+                <div class="permission-label">${t("onboarding.accessibilityAccess")}</div>
+                <div class="permission-desc">${t("onboarding.accessibilityRequired")}</div>
               </div>
             </div>
             ${renderAccessibilityPermissionStatus(perms?.accessibility)}
@@ -767,12 +779,12 @@ function renderPermissions(): void {
         ${
           allGranted
             ? ""
-            : `<p class="onboarding-foot-hint">Grant the remaining permission in System Settings, then return here.</p>`
+            : `<p class="onboarding-foot-hint">${t("onboarding.grantRemaining")}</p>`
         }
         ${
           allGranted
-            ? `<button class="btn btn-accent btn-lg btn-block" id="continue-btn">Continue</button>`
-            : `<button class="btn btn-accent btn-lg btn-block" id="restart-btn">Restart to apply</button>`
+            ? `<button class="btn btn-accent btn-lg btn-block" id="continue-btn">${t("common.continue")}</button>`
+            : `<button class="btn btn-accent btn-lg btn-block" id="restart-btn">${t("onboarding.restartApply")}</button>`
         }
         ${renderStepIndicator(4)}
       </div>
@@ -826,8 +838,8 @@ function renderHotkeyStep(): void {
         <div class="onboarding-icon">
           ${createIcon(Keyboard)}
         </div>
-        <h1 class="onboarding-title">Set your hotkey</h1>
-        <p class="onboarding-desc">Press any key or combination.</p>
+        <h1 class="onboarding-title">${t("onboarding.hotkeyTitle")}</h1>
+        <p class="onboarding-desc">${t("onboarding.hotkeySubtitle")}</p>
       </div>
       <div class="onboarding-body">
         <div class="hotkey-capture-area">
@@ -835,15 +847,15 @@ function renderHotkeyStep(): void {
             ${renderHotkeyChips(displayKey, { chipClass: "hotkey-key", extraChipClass: hasNewKey ? "captured" : "" })}
           </div>
           <div class="hotkey-fn-inline">
-            or use
-            <button class="hotkey-modal-key hotkey-fn-chip" type="button" id="use-fn-btn" aria-label="Use Fn key">fn</button>
-            on Mac laptops
+            ${t("onboarding.orUse")}
+            <button class="hotkey-modal-key hotkey-fn-chip" type="button" id="use-fn-btn" aria-label="${t("dialogs.useFn")}">fn</button>
+            ${t("onboarding.onMacLaptops")}
           </div>
         </div>
       </div>
       <div class="onboarding-footer">
         <button class="btn btn-accent btn-lg btn-block" id="continue-btn">
-          Continue
+          ${t("common.continue")}
         </button>
         ${renderStepIndicator(5)}
       </div>
@@ -954,8 +966,8 @@ function renderMicSelection(): void {
         <div class="onboarding-icon">
           ${createIcon(Mic)}
         </div>
-        <h1 class="onboarding-title">Pick a microphone</h1>
-        <p class="onboarding-desc">Choose your input device.</p>
+        <h1 class="onboarding-title">${t("onboarding.microphoneTitle")}</h1>
+        <p class="onboarding-desc">${t("onboarding.microphoneSubtitle")}</p>
       </div>
       <div class="onboarding-body">
         ${
@@ -976,9 +988,9 @@ function renderMicSelection(): void {
         </select>
       </div>
       <div class="onboarding-footer">
-        <p class="onboarding-foot-hint">You can switch microphones any time from the settings.</p>
+        <p class="onboarding-foot-hint">${t("onboarding.microphoneHint")}</p>
         <button class="btn btn-accent btn-lg btn-block" id="continue-btn">
-          Continue
+          ${t("common.continue")}
         </button>
         ${renderStepIndicator(6)}
       </div>
@@ -1004,23 +1016,27 @@ function renderTestStep(): void {
 
   container.innerHTML = `
     <div class="onboarding">
-      <div class="onboarding-header">
+      <div class="onboarding-header onboarding-header-try">
         <div class="onboarding-icon">
           ${createIcon(Mic)}
         </div>
-        <h1 class="onboarding-title">Try it out</h1>
-        <p class="onboarding-desc">Hold ${renderHotkeyChips(hotkey, { chipClass: "hotkey-key-inline" })} and say something. Release to transcribe.</p>
+        <h1 class="onboarding-title">${t("onboarding.tryTitle")}</h1>
+        <p class="onboarding-desc">${t("onboarding.trySubtitle", {
+          hotkey: renderHotkeyChips(hotkey, {
+            chipClass: "hotkey-key-inline",
+          }),
+        })}</p>
       </div>
       <div class="onboarding-body">
         <div
           id="test-input"
           class="test-input test-input-readonly ${hasText ? "has-text" : ""}"
-        >${state.testText ? escapeHtml(state.testText) : '<span class="test-input-placeholder">Your transcription will appear here…</span>'}</div>
+        >${state.testText ? `<span class="test-input-content">${escapeHtml(state.testText)}</span>` : `<span class="test-input-placeholder">${t("onboarding.transcriptionPlaceholder")}</span>`}</div>
       </div>
       <div class="onboarding-footer">
-        <p class="onboarding-foot-hint ${hasText ? "invisible" : ""}">First transcription may take a few seconds.</p>
+        <p class="onboarding-foot-hint ${hasText ? "invisible" : ""}">${t("onboarding.firstTranscription")}</p>
         <button class="btn btn-accent btn-lg btn-block" id="finish-btn" ${hasText ? "" : "disabled"}>
-          Finish setup
+          ${t("onboarding.finishSetup")}
         </button>
         ${renderStepIndicator(7)}
       </div>
@@ -1048,8 +1064,8 @@ function renderCompletion(): void {
         <div class="onboarding-icon">
           ${createIcon(CheckCircle)}
         </div>
-        <h1 class="onboarding-title">You're all set</h1>
-        <p class="onboarding-desc">Press your hotkey anywhere to dictate.</p>
+        <h1 class="onboarding-title">${t("onboarding.completeTitle")}</h1>
+        <p class="onboarding-desc">${t("onboarding.completeSubtitle")}</p>
       </div>
       <div class="onboarding-body">
         ${
@@ -1060,15 +1076,19 @@ function renderCompletion(): void {
         <div class="completion-instructions">
           <div class="done-row">
             <span class="onb-ibox">${createIcon(Keyboard)}</span>
-            <span>Hold ${renderHotkeyChips(hotkey, { chipClass: "hotkey-key-inline" })} in any app to start recording</span>
+            <span>${t("onboarding.holdToRecord", {
+              hotkey: renderHotkeyChips(hotkey, {
+                chipClass: "hotkey-key-inline",
+              }),
+            })}</span>
           </div>
           <div class="done-row">
             <span class="onb-ibox">${createIcon(Check)}</span>
-            <span>Release the key to transcribe and paste</span>
+            <span>${t("onboarding.releaseToPaste")}</span>
           </div>
           <div class="done-row">
             <span class="onb-ibox">${createIcon(Sliders)}</span>
-            <span>Tweak anything later from the settings menu</span>
+            <span>${t("onboarding.tweakLater")}</span>
           </div>
         </div>
       </div>
@@ -1076,7 +1096,7 @@ function renderCompletion(): void {
         <button class="btn btn-accent btn-lg btn-block" id="start-btn" type="button" ${
           isCompleting ? "disabled" : ""
         }>
-          ${isCompleting ? "Finishing setup…" : "Start using Fing"}
+          ${isCompleting ? t("onboarding.finishing") : t("onboarding.start")}
         </button>
         <div class="step-indicator-placeholder"></div>
       </div>
@@ -1266,7 +1286,7 @@ async function handleMicContinue(): Promise<void> {
     await persistSelectedDevice(state.selectedDeviceId);
   } catch (err) {
     console.error("Failed to save microphone selection:", err);
-    state.micError = "Could not save your microphone selection. Try again.";
+    state.micError = t("onboarding.saveMicrophoneFailed");
     render();
     return;
   }
@@ -1434,8 +1454,7 @@ async function handleComplete(): Promise<void> {
   } catch {
     window.dispatchEvent(new CustomEvent("setup-completion-failed"));
     state.isCompleting = false;
-    state.completeError =
-      "Setup did not finish. Please confirm the model download and try again.";
+    state.completeError = t("onboarding.setupFailed");
     await showOnboardingCompletionError();
   }
 }

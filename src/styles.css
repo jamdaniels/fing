@@ -2285,6 +2285,11 @@ body[data-platform="windows"] .titlebar {
   text-align: center;
 }
 
+/* The inline hotkey chip has a taller line box than ordinary subtitles. */
+.onboarding-header-try {
+  height: 130px;
+}
+
 .onboarding-body {
   display: flex;
   flex: 1;
@@ -2414,7 +2419,11 @@ body[data-platform="windows"] .titlebar {
   display: flex;
   align-items: center;
   justify-content: center;
+  height: 110px;
   min-height: 110px;
+  max-height: 110px;
+  overflow-x: hidden;
+  overflow-y: auto;
   color: var(--text-tertiary);
   text-align: center;
   cursor: default;
@@ -2426,11 +2435,21 @@ body[data-platform="windows"] .titlebar {
 }
 
 .test-input-readonly.has-text {
+  align-items: flex-start;
+  justify-content: flex-start;
   color: var(--text-primary);
+  text-align: left;
   background-color: color-mix(in srgb, var(--bg-primary) 85%, transparent);
   border-style: solid;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-15);
+}
+
+.test-input-content {
+  width: 100%;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .test-input-placeholder {

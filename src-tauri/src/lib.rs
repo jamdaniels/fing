@@ -8,6 +8,7 @@ mod engine;
 mod hotkey;
 mod hotkey_config;
 mod hotkey_listener;
+mod i18n;
 mod indicator;
 mod model;
 mod notifications;
@@ -558,9 +559,13 @@ fn request_permissions() -> PermissionStatus {
 }
 
 #[tauri::command]
-async fn update_settings(settings: settings::Settings) -> Result<settings::Settings, String> {
+async fn update_settings(
+    app: tauri::AppHandle,
+    settings: settings::Settings,
+) -> Result<settings::Settings, String> {
     let previous_settings = settings::load_settings_sync();
     let previous_lazy_mode = previous_settings.lazy_model_loading;
+    let previous_ui_language = previous_settings.ui_language;
     let updated = settings::update_settings(settings).await?;
 
     if previous_lazy_mode != updated.lazy_model_loading {
@@ -601,6 +606,18 @@ async fn update_settings(settings: settings::Settings) -> Result<settings::Setti
                 }
                 return Err(format!("Failed to load model: {load_err}"));
             }
+        }
+    }
+
+    if previous_ui_language != updated.ui_language {
+        if let Err(error) = rebuild_tray_menu(&app) {
+            tracing::warn!("Failed to rebuild tray menu after language change: {error}");
+        }
+        if let Err(error) = app.emit(
+            "ui-language-changed",
+            serde_json::json!({ "language": updated.ui_language.code() }),
+        ) {
+            tracing::warn!("Failed to emit UI language change: {error}");
         }
     }
 
@@ -723,18 +740,37 @@ fn build_tray_menu_for_state(
     app: &impl tauri::Manager<tauri::Wry>,
     current_state: AppState,
 ) -> Result<Menu<tauri::Wry>, Box<dyn std::error::Error>> {
+    let translations = i18n::current();
     if current_state == AppState::NeedsSetup {
         // Simplified menu for setup state
-        let setup = MenuItem::with_id(app, "setup", "Complete Setup...", true, None::<&str>)?;
+        let setup = MenuItem::with_id(
+            app,
+            "setup",
+            &translations.tray.complete_setup,
+            true,
+            None::<&str>,
+        )?;
         let separator = PredefinedMenuItem::separator(app)?;
-        let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+        let quit = MenuItem::with_id(app, "quit", &translations.tray.quit, true, None::<&str>)?;
 
         Ok(Menu::with_items(app, &[&setup, &separator, &quit])?)
     } else {
         // Full menu for normal operation
-        let open = MenuItem::with_id(app, "open", "Open App", true, None::<&str>)?;
-        let history = MenuItem::with_id(app, "history", "History", true, None::<&str>)?;
-        let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+        let open = MenuItem::with_id(app, "open", &translations.tray.open_app, true, None::<&str>)?;
+        let history = MenuItem::with_id(
+            app,
+            "history",
+            &translations.tray.history,
+            true,
+            None::<&str>,
+        )?;
+        let settings = MenuItem::with_id(
+            app,
+            "settings",
+            &translations.tray.settings,
+            true,
+            None::<&str>,
+        )?;
         let separator1 = PredefinedMenuItem::separator(app)?;
         let separator2 = PredefinedMenuItem::separator(app)?;
         let updates = MenuItem::with_id(
@@ -744,7 +780,7 @@ fn build_tray_menu_for_state(
             true,
             None::<&str>,
         )?;
-        let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+        let quit = MenuItem::with_id(app, "quit", &translations.tray.quit, true, None::<&str>)?;
         Ok(Menu::with_items(
             app,
             &[

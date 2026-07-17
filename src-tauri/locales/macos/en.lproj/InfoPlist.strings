@@ -1,0 +1,2 @@
+"NSMicrophoneUsageDescription" = "Fing needs microphone access to transcribe your speech to text.";
+"NSAccessibilityUsageDescription" = "Fing needs accessibility permission to detect the hotkey globally and paste text.";

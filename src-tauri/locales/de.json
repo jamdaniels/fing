@@ -1,0 +1,21 @@
+{
+  "tray": {
+    "completeSetup": "Einrichtung abschließen...",
+    "quit": "Beenden",
+    "openApp": "Fing öffnen",
+    "history": "Verlauf",
+    "settings": "Einstellungen",
+    "checkForUpdates": "Nach Updates suchen",
+    "updateAvailable": "Update verfügbar"
+  },
+  "notifications": {
+    "recordingStoppedTitle": "Aufnahme beendet",
+    "maximumRecordingDuration": "Maximale Aufnahmedauer (2 Min.) erreicht",
+    "microphoneErrorTitle": "Mikrofonfehler",
+    "microphoneStartFailed": "Aufnahme konnte nicht gestartet werden: {error}",
+    "modelErrorTitle": "Modellfehler",
+    "modelLoadFailed": "Modell konnte nicht geladen werden: {error}",
+    "transcriptionErrorTitle": "Transkriptionsfehler",
+    "transcriptionFailed": "Transkription fehlgeschlagen: {error}"
+  }
+}

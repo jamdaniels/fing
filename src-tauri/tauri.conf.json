@@ -64,7 +64,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["sounds/*"],
+    "resources": {
+      "sounds/": "sounds/",
+      "locales/macos/en.lproj/InfoPlist.strings": "en.lproj/InfoPlist.strings",
+      "locales/macos/de.lproj/InfoPlist.strings": "de.lproj/InfoPlist.strings"
+    },
     "macOS": {
       "entitlements": "entitlements.plist",
       "hardenedRuntime": true,

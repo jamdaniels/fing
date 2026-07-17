@@ -1,0 +1,21 @@
+{
+  "tray": {
+    "completeSetup": "Complete Setup...",
+    "quit": "Quit",
+    "openApp": "Open App",
+    "history": "History",
+    "settings": "Settings",
+    "checkForUpdates": "Check for Updates",
+    "updateAvailable": "Update Available"
+  },
+  "notifications": {
+    "recordingStoppedTitle": "Recording Stopped",
+    "maximumRecordingDuration": "Maximum recording duration (2 min) reached",
+    "microphoneErrorTitle": "Microphone Error",
+    "microphoneStartFailed": "Could not start recording: {error}",
+    "modelErrorTitle": "Model Error",
+    "modelLoadFailed": "Failed to load model: {error}",
+    "transcriptionErrorTitle": "Transcription Error",
+    "transcriptionFailed": "Transcription failed: {error}"
+  }
+}
