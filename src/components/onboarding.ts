@@ -50,6 +50,7 @@ import type {
   PermissionStatus,
   Settings,
 } from "../lib/types";
+import { mountLanguageSelect } from "./language-select";
 
 type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
@@ -77,13 +78,6 @@ interface OnboardingState {
 interface RenderOnboardingOptions {
   modelRepairReason?: BootstrapReason;
 }
-
-const SUPPORTED_LANGUAGES = [
-  { code: "en", nameKey: "common.english" as const },
-  { code: "de", nameKey: "common.german" as const },
-  { code: "es", nameKey: "common.spanish" as const },
-  { code: "fr", nameKey: "common.french" as const },
-];
 
 let state: OnboardingState = {
   step: 1,
@@ -327,16 +321,32 @@ function render(): void {
   if (pendingEnterClass && container) {
     const header = container.querySelector(".onboarding-header");
     const body = container.querySelector(".onboarding-body");
-    header?.classList.add(pendingEnterClass);
-    body?.classList.add(pendingEnterClass);
+    addEnterClass(header, pendingEnterClass);
+    addEnterClass(body, pendingEnterClass);
     // First load animates the footer too (action button + step dots).
     // Step-to-step transitions keep the footer static.
     if (pendingEnterClass === "onb-enter-up") {
       const footer = container.querySelector(".onboarding-footer");
-      footer?.classList.add(pendingEnterClass);
+      addEnterClass(footer, pendingEnterClass);
     }
     pendingEnterClass = null;
   }
+}
+
+/** Adds an enter-animation class and removes it once the animation ends.
+ *  The animations fill `both`, so leaving the class on would keep a transform
+ *  on the element, turning it into the containing block for the fixed-position
+ *  language popover and breaking its viewport coordinates. */
+function addEnterClass(el: Element | null, cls: string): void {
+  if (!el) {
+    return;
+  }
+  el.classList.add(cls);
+  el.addEventListener("animationend", (e) => {
+    if (e.target === el) {
+      el.classList.remove(cls);
+    }
+  });
 }
 
 function renderWelcome(): void {
@@ -635,16 +645,6 @@ function renderPreferences(): void {
     return;
   }
 
-  const langChips = SUPPORTED_LANGUAGES.map(
-    (lang) => `
-      <button
-        class="lang-chip ${state.selectedLanguages.includes(lang.code) ? "on" : ""}"
-        data-lang="${lang.code}"
-        type="button"
-      >${t(lang.nameKey)}</button>
-    `
-  ).join("");
-
   container.innerHTML = `
     <div class="onboarding">
       <div class="onboarding-header">
@@ -657,7 +657,7 @@ function renderPreferences(): void {
       <div class="onboarding-body prefs-body">
         <div class="onb-section">
           <h3>${t("onboarding.languages")} <span class="meta">${t("onboarding.pickOne")}</span></h3>
-          <div class="lang-chiprow">${langChips}</div>
+          <div id="onb-langs"></div>
         </div>
         <div class="onb-section">
           <h3>${t("onboarding.history")} <span class="meta">${t("onboarding.storedLocally")}</span></h3>
@@ -676,8 +676,14 @@ function renderPreferences(): void {
     </div>
   `;
 
-  for (const chip of document.querySelectorAll(".lang-chip[data-lang]")) {
-    chip.addEventListener("click", handleLanguageToggle);
+  const langMount = document.getElementById("onb-langs");
+  if (langMount) {
+    mountLanguageSelect(langMount, {
+      selected: state.selectedLanguages,
+      onChange: (next) => {
+        state.selectedLanguages = next;
+      },
+    });
   }
 
   for (const btn of document.querySelectorAll("[data-history-mode]")) {
@@ -692,22 +698,6 @@ function renderPreferences(): void {
     .getElementById("continue-btn")
     ?.addEventListener("click", handlePreferencesContinue);
   attachStepIndicatorListeners();
-}
-
-function handleLanguageToggle(e: Event): void {
-  const target = e.currentTarget as HTMLElement;
-  const lang = target.dataset.lang as string;
-  const isOn = state.selectedLanguages.includes(lang);
-
-  if (isOn) {
-    if (state.selectedLanguages.length <= 1) {
-      return;
-    }
-    state.selectedLanguages = state.selectedLanguages.filter((l) => l !== lang);
-  } else {
-    state.selectedLanguages = [...state.selectedLanguages, lang];
-  }
-  target.classList.toggle("on", !isOn);
 }
 
 async function handlePreferencesContinue(): Promise<void> {

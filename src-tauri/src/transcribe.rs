@@ -4,9 +4,56 @@ use crate::engine::{TranscribeError, TranscriptionEngine};
 use once_cell::sync::Lazy;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use whisper_rs::{
+    get_lang_id, FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters,
+};
 
+const DEFAULT_LANGUAGE: &str = "en";
 const MAX_PROMPT_TOKENS: usize = 256;
+const UNSUPPORTED_LANGUAGE: &str = "yue";
+
+#[derive(Debug, PartialEq)]
+enum LanguagePlan<'a> {
+    Explicit(&'a str),
+    Detect(Vec<&'a str>),
+}
+
+fn language_plan(languages: &[String]) -> LanguagePlan<'_> {
+    let candidates = languages
+        .iter()
+        .map(String::as_str)
+        .filter(|language| !language.eq_ignore_ascii_case(UNSUPPORTED_LANGUAGE))
+        .filter(|language| get_lang_id(language).is_some())
+        .collect::<Vec<_>>();
+
+    match candidates.as_slice() {
+        [] => LanguagePlan::Explicit(DEFAULT_LANGUAGE),
+        [language] => LanguagePlan::Explicit(language),
+        _ => LanguagePlan::Detect(candidates),
+    }
+}
+
+fn select_detected_language<'a>(candidates: &[&'a str], probabilities: &[f32]) -> &'a str {
+    candidates
+        .iter()
+        .copied()
+        .filter(|language| !language.eq_ignore_ascii_case(UNSUPPORTED_LANGUAGE))
+        .filter_map(|language| {
+            let language_id = usize::try_from(get_lang_id(language)?).ok()?;
+            let probability = *probabilities.get(language_id)?;
+            probability.is_finite().then_some((language, probability))
+        })
+        .max_by(|left, right| left.1.total_cmp(&right.1))
+        .map(|(language, _)| language)
+        .unwrap_or(DEFAULT_LANGUAGE)
+}
+
+fn detection_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .unwrap_or(1)
+        .min(4)
+}
 
 /// Whisper-based transcription engine using whisper-rs.
 pub struct Transcriber {
@@ -73,7 +120,7 @@ impl TranscriptionEngine for Transcriber {
     fn transcribe(
         &self,
         audio: &[f32],
-        language: Option<&str>,
+        languages: &[String],
         dictionary_prompt: Option<&str>,
     ) -> Result<String, TranscribeError> {
         if audio.is_empty() {
@@ -87,8 +134,22 @@ impl TranscriptionEngine for Transcriber {
             .create_state()
             .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
 
+        let language = match language_plan(languages) {
+            LanguagePlan::Explicit(language) => language,
+            LanguagePlan::Detect(candidates) => {
+                let threads = detection_threads();
+                state
+                    .pcm_to_mel(audio, threads)
+                    .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
+                let (_, probabilities) = state
+                    .lang_detect(0, threads)
+                    .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
+                select_detected_language(&candidates, &probabilities)
+            }
+        };
+
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_language(language);
+        params.set_language(Some(language));
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
@@ -175,11 +236,11 @@ pub fn unload_transcriber() {
 /// Transcribe audio using the global transcriber.
 pub fn transcribe_audio(
     audio: &[f32],
-    language: Option<&str>,
+    languages: &[String],
     dictionary_prompt: Option<&str>,
 ) -> Result<String, TranscribeError> {
     match get_transcriber() {
-        Some(t) => t.transcribe(audio, language, dictionary_prompt),
+        Some(t) => t.transcribe(audio, languages, dictionary_prompt),
         None => Err(TranscribeError::ModelNotFound),
     }
 }
@@ -212,6 +273,62 @@ mod tests {
             .into_owned()
     }
 
+    fn probabilities_with(values: &[(&str, f32)]) -> Vec<f32> {
+        let max_language_id = values
+            .iter()
+            .filter_map(|(language, _)| get_lang_id(language))
+            .max()
+            .unwrap_or_default();
+        let mut probabilities = vec![0.0; usize::try_from(max_language_id + 1).unwrap_or(0)];
+
+        for (language, probability) in values {
+            if let Some(language_id) = get_lang_id(language) {
+                probabilities[usize::try_from(language_id).expect("language id should be valid")] =
+                    *probability;
+            }
+        }
+
+        probabilities
+    }
+
+    #[test]
+    fn detection_selects_only_from_safe_candidates() {
+        let probabilities =
+            probabilities_with(&[("en", 0.95), ("yue", 0.99), ("de", 0.40), ("fr", 0.70)]);
+
+        assert_eq!(
+            select_detected_language(&["de", "fr"], &probabilities),
+            "fr"
+        );
+    }
+
+    #[test]
+    fn detection_ignores_cantonese_and_invalid_codes() {
+        let probabilities = probabilities_with(&[("yue", 0.99), ("de", 0.40)]);
+
+        assert_eq!(
+            select_detected_language(&["yue", "invalid", "de"], &probabilities),
+            "de"
+        );
+    }
+
+    #[test]
+    fn detection_without_safe_candidates_falls_back_to_english() {
+        let probabilities = probabilities_with(&[("yue", 0.99)]);
+
+        assert_eq!(
+            select_detected_language(&["yue", "invalid"], &probabilities),
+            "en"
+        );
+    }
+
+    #[test]
+    fn a_single_safe_candidate_bypasses_detection() {
+        let languages = vec!["yue".to_string(), "invalid".to_string(), "de".to_string()];
+
+        assert_eq!(language_plan(&languages), LanguagePlan::Explicit("de"));
+    }
+
     #[test]
     fn transcribe_audio_requires_loaded_transcriber() {
         let _guard = TRANSCRIBE_TEST_MUTEX
@@ -222,7 +339,7 @@ mod tests {
         unload_transcriber();
 
         assert!(matches!(
-            transcribe_audio(&[0.25], None, None),
+            transcribe_audio(&[0.25], &[], None),
             Err(TranscribeError::ModelNotFound)
         ));
         assert!(!is_transcriber_loaded());

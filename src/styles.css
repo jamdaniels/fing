@@ -2238,14 +2238,6 @@ body[data-platform="windows"] .titlebar {
   align-items: flex-start !important;
 }
 
-/* Onboarding preferences — language chips */
-.lang-chiprow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  width: 100%;
-}
-
 .lang-chip {
   display: inline-flex;
   align-items: center;
@@ -2265,9 +2257,224 @@ body[data-platform="windows"] .titlebar {
 }
 
 .lang-chip.on {
-  color: var(--bg-primary);
-  background: var(--text-primary);
-  border-color: color-mix(in srgb, var(--bg-primary) 18%, var(--text-primary));
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border-color: transparent;
+}
+
+/* Language multi-select (selected chips + searchable "add" popover) */
+.langsel {
+  position: relative;
+  width: 100%;
+}
+
+.langsel-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.lang-chip.removable {
+  gap: 6px;
+  padding-right: 8px;
+}
+
+.langsel-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  color: var(--text-tertiary);
+  background: none;
+  border: none;
+  border-radius: 5px;
+}
+
+.langsel-chip-x svg {
+  width: 11px;
+  height: 11px;
+}
+
+.lang-chip.removable .langsel-chip-x {
+  color: var(--text-tertiary);
+}
+
+.lang-chip.removable .langsel-chip-x:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+
+.lang-chip.removable.last .langsel-chip-x {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.lang-chip.add-chip {
+  gap: 5px;
+  color: var(--text-secondary);
+  background: none;
+  border-color: transparent;
+}
+
+.lang-chip.add-chip svg {
+  width: 13px;
+  height: 13px;
+}
+
+.lang-chip.add-chip:hover,
+.langsel.open .lang-chip.add-chip {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+
+/* Onboarding cards are a bg-primary surface, so the borderless chips from the
+   settings (bg-secondary) cards would merge with it; give them outlines here. */
+.onb-section .lang-chip.on {
+  border-color: color-mix(in srgb, var(--text-primary) 22%, transparent);
+}
+
+.onb-section .lang-chip.add-chip {
+  border-color: color-mix(in srgb, var(--text-primary) 12%, transparent);
+}
+
+.langsel-pop {
+  /* Fixed so the popover escapes overflow:hidden ancestors (settings cards);
+     coordinates are set from the chip row when it opens. */
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  overflow: hidden;
+  background: var(--bg-primary);
+  border: 1px solid var(--card-border-color);
+  border-radius: 12px;
+  box-shadow: var(--dialog-shadow);
+}
+
+.langsel-pop[hidden] {
+  display: none;
+}
+
+.langsel-search {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 9px 11px;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+.langsel-search svg {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.langsel-search input {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  outline: none;
+}
+
+.langsel-search input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.langsel-list {
+  max-height: 152px;
+  padding: 5px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.langsel-opt {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 7px 9px;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 8px;
+}
+
+.langsel-opt .code {
+  min-width: 26px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+
+.langsel-opt .name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.langsel-opt .name-en {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.langsel-opt .check {
+  display: inline-flex;
+  color: var(--accent);
+  opacity: 0;
+}
+
+.langsel-opt .check svg {
+  width: 16px;
+  height: 16px;
+}
+
+.langsel-opt.selected .check {
+  opacity: 1;
+}
+
+.langsel-opt.selected .name {
+  font-weight: 600;
+}
+
+.langsel-opt:hover,
+.langsel-opt.hl {
+  background: var(--sidebar-item-hover);
+}
+
+.langsel-opt.hl {
+  background: var(--sidebar-item-active);
+}
+
+.langsel-empty {
+  padding: 14px 12px;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.langsel-foot {
+  padding: 6px 11px;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
 }
 
 .onboarding-body.prefs-body {

@@ -24,6 +24,7 @@ import {
   Trash2,
   X,
 } from "lucide";
+import { mountLanguageSelect } from "./components/language-select";
 import { cleanupOnboarding, renderOnboarding } from "./components/onboarding";
 import type { ParsedHotkeyConfig } from "./lib/hotkey";
 import {
@@ -1887,29 +1888,6 @@ function handleSettingsClick(e: MouseEvent): void {
     return;
   }
 
-  // Handle language chip toggle
-  const langChip = target.closest(".lang-chip") as HTMLElement | null;
-  if (langChip) {
-    const lang = langChip.dataset.lang;
-    if (!(lang && settings)) {
-      return;
-    }
-    const current = settings.languages ?? ["en"];
-    const isOn = current.includes(lang);
-    let next: string[];
-    if (isOn) {
-      if (current.length <= 1) {
-        return;
-      }
-      next = current.filter((l) => l !== lang);
-    } else {
-      next = [...current, lang];
-    }
-    langChip.classList.toggle("on", !isOn);
-    handleSettingChange("languages", next);
-    return;
-  }
-
   // Handle toggle clicks
   const toggle = target.closest(".toggle") as HTMLElement | null;
   if (toggle) {
@@ -2082,13 +2060,6 @@ function handleSettingsChange(e: Event): void {
   }
 }
 
-const SUPPORTED_LANGUAGES = [
-  { code: "en", nameKey: "common.english" as const },
-  { code: "de", nameKey: "common.german" as const },
-  { code: "es", nameKey: "common.spanish" as const },
-  { code: "fr", nameKey: "common.french" as const },
-];
-
 function formatModelSize(bytes: number): string {
   return `${Math.round(bytes / 1_000_000)} MB`;
 }
@@ -2242,17 +2213,6 @@ function renderSettingsUI(el: HTMLElement): void {
     )
     .join("");
 
-  const selectedLangs = settings?.languages ?? ["en"];
-  const langChips = SUPPORTED_LANGUAGES.map(
-    (lang) => `
-      <button
-        class="lang-chip ${selectedLangs.includes(lang.code) ? "on" : ""}"
-        data-lang="${lang.code}"
-        type="button"
-      >${t(lang.nameKey)}</button>
-    `
-  ).join("");
-
   const currentTheme = settings?.theme ?? "system";
   const currentUiLanguage = settings?.uiLanguage ?? "en";
 
@@ -2307,7 +2267,7 @@ function renderSettingsUI(el: HTMLElement): void {
             <div class="settings-row-label">${t("settings.transcriptionLanguages")}</div>
             <div class="settings-row-desc">${t("settings.transcriptionLanguagesDescription")}</div>
           </div>
-          <div class="lang-chiprow">${langChips}</div>
+          <div id="transcription-langs"></div>
         </div>
       </div>
     </div>
@@ -2412,6 +2372,16 @@ function renderSettingsUI(el: HTMLElement): void {
       </div>
     </div>
   `;
+
+  const langMount = el.querySelector("#transcription-langs") as HTMLElement;
+  if (langMount) {
+    mountLanguageSelect(langMount, {
+      selected: settings?.languages ?? ["en"],
+      onChange: (next) => {
+        void handleSettingChange("languages", next);
+      },
+    });
+  }
 
   updatePermissionStatus();
   setupScrollFade(el);

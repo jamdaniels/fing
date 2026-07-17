@@ -286,6 +286,12 @@ pub async fn update_settings(settings: Settings) -> Result<Settings, String> {
 }
 
 fn sanitize_settings(mut settings: Settings) -> Settings {
+    settings
+        .languages
+        .retain(|language| !language.trim().eq_ignore_ascii_case("yue"));
+    if settings.languages.is_empty() {
+        settings.languages = default_languages();
+    }
     settings.dictionary_terms = crate::dictionary::sanitize_terms(&settings.dictionary_terms);
     settings
 }
@@ -471,6 +477,37 @@ mod tests {
         };
         let raw = serde_json::to_string(&settings).expect("settings should serialize");
         assert_eq!(parse_settings_json(&raw).ui_language, UiLanguage::De);
+    }
+
+    #[test]
+    fn sanitizing_languages_removes_cantonese_and_preserves_order() {
+        let settings = sanitize_settings(Settings {
+            languages: vec!["de".to_string(), "yue".to_string()],
+            ..Settings::default()
+        });
+
+        assert_eq!(settings.languages, vec!["de"]);
+    }
+
+    #[test]
+    fn sanitizing_only_cantonese_falls_back_to_english() {
+        let settings = sanitize_settings(Settings {
+            languages: vec!["yue".to_string()],
+            ..Settings::default()
+        });
+
+        assert_eq!(settings.languages, vec!["en"]);
+    }
+
+    #[test]
+    fn legacy_settings_with_cantonese_are_sanitized_when_loaded() {
+        let raw = serde_json::to_string(&Settings {
+            languages: vec!["de".to_string(), "yue".to_string()],
+            ..Settings::default()
+        })
+        .expect("legacy settings should serialize");
+
+        assert_eq!(parse_settings_json(&raw).languages, vec!["de"]);
     }
 
     #[test]

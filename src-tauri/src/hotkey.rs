@@ -604,37 +604,32 @@ pub fn on_key_up(app: &AppHandle) {
             tracing::info!("Transcriber initialized from {:?}", model_path);
         }
 
-        // Determine language from settings
-        // 1 language = use it, 2+ = auto-detect (None)
-        let lang: Option<String> = if settings.languages.len() == 1 {
-            Some(settings.languages[0].clone())
-        } else {
-            None
-        };
-
         let dictionary_terms = crate::dictionary::sanitize_terms(&settings.dictionary_terms);
         let dictionary_prompt = crate::dictionary::build_prompt(&dictionary_terms);
 
         // Transcribe
-        let text =
-            match transcribe_audio(&audio_buffer, lang.as_deref(), dictionary_prompt.as_deref()) {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::error!("Transcription failed: {}", e);
-                    let translations = crate::i18n::current();
-                    let message = crate::i18n::interpolate(
-                        &translations.notifications.transcription_failed,
-                        &[("error", &e.to_string())],
-                    );
-                    crate::notifications::show_error(
-                        &app_handle,
-                        &translations.notifications.transcription_error_title,
-                        &message,
-                    );
-                    finish_transcription(&app_handle, None, duration_ms, test_mode).await;
-                    return;
-                }
-            };
+        let text = match transcribe_audio(
+            &audio_buffer,
+            &settings.languages,
+            dictionary_prompt.as_deref(),
+        ) {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!("Transcription failed: {}", e);
+                let translations = crate::i18n::current();
+                let message = crate::i18n::interpolate(
+                    &translations.notifications.transcription_failed,
+                    &[("error", &e.to_string())],
+                );
+                crate::notifications::show_error(
+                    &app_handle,
+                    &translations.notifications.transcription_error_title,
+                    &message,
+                );
+                finish_transcription(&app_handle, None, duration_ms, test_mode).await;
+                return;
+            }
+        };
 
         // Apply user dictionary corrections and normalize whitespace edges.
         let text = crate::dictionary::apply_dictionary_corrections(text.trim(), &dictionary_terms)

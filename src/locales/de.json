@@ -10,10 +10,6 @@
     "delete": "Löschen",
     "done": "Fertig",
     "download": "Herunterladen",
-    "english": "Englisch",
-    "german": "Deutsch",
-    "spanish": "Spanisch",
-    "french": "Französisch",
     "granted": "Erlaubt",
     "later": "Später",
     "na": "N. v.",
@@ -75,6 +71,13 @@
     "duplicate": "Dieser Begriff ist bereits im Wörterbuch",
     "saveFailed": "Begriff konnte nicht gespeichert werden",
     "updateFailed": "Wörterbuch konnte nicht aktualisiert werden"
+  },
+  "languageSelect": {
+    "add": "Hinzufügen",
+    "search": "Sprachen suchen…",
+    "empty": "Keine Sprache gefunden",
+    "atLeastOne": "Mindestens eine Sprache ist erforderlich",
+    "counter": "{selected} ausgewählt · {shown} von {total} Sprachen"
   },
   "settings": {
     "title": "Einstellungen",
@@ -175,7 +178,7 @@
     "failedTitle": "Update-Prüfung fehlgeschlagen"
   },
   "about": {
-    "tagline": "Private Diktierfunktion für jede App.",
+    "tagline": "Privates Diktieren für jede App.",
     "homepage": "Homepage",
     "privacy": "Datenschutz",
     "contact": "Kontakt"

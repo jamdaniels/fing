@@ -34,7 +34,7 @@ pub trait TranscriptionEngine: Send + Sync {
     fn transcribe(
         &self,
         audio: &[f32],
-        language: Option<&str>,
+        languages: &[String],
         dictionary_prompt: Option<&str>,
     ) -> Result<String, TranscribeError>;
 }

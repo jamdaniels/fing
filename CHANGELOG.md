@@ -4,6 +4,7 @@ All notable changes to Fing will be documented in this file.
 
 ## Unreleased
 
+- Added support for all 99 Whisper languages
 - Added speech model recovery
 - Added German interface language support
 - Improved recording reliability

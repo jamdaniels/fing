@@ -10,10 +10,6 @@
     "delete": "Delete",
     "done": "Done",
     "download": "Download",
-    "english": "English",
-    "german": "German",
-    "spanish": "Spanish",
-    "french": "French",
     "granted": "Granted",
     "later": "Later",
     "na": "N/A",
@@ -75,6 +71,13 @@
     "duplicate": "That term is already in your dictionary",
     "saveFailed": "Failed to save term",
     "updateFailed": "Failed to update dictionary"
+  },
+  "languageSelect": {
+    "add": "Add",
+    "search": "Search languages…",
+    "empty": "No language found",
+    "atLeastOne": "At least one language is required",
+    "counter": "{selected} selected · {shown} of {total} languages"
   },
   "settings": {
     "title": "Settings",
