@@ -1,8 +1,10 @@
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 use tauri::Manager;
+use tokio::sync::Notify;
 
 static APP_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+static INIT_NOTIFY: LazyLock<Notify> = LazyLock::new(Notify::new);
 #[cfg(test)]
 static TEST_APP_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 #[cfg(test)]
@@ -18,7 +20,29 @@ pub fn init(app: &tauri::App) -> Result<(), String> {
 
     APP_DATA_DIR
         .set(path)
-        .map_err(|_| "App data dir already initialized".to_string())
+        .map_err(|_| "App data dir already initialized".to_string())?;
+    INIT_NOTIFY.notify_waiters();
+    Ok(())
+}
+
+/// REGRESSION GUARD: Tauri creates the webview BEFORE `setup()` runs, and on
+/// Windows the bundled frontend loads fast enough that its first IPC calls
+/// (get_settings, get_bootstrap_status) arrive before `init` has stored the
+/// app data dir. Answering those calls from an uninitialized state returned
+/// default settings (onboardingCompleted=false, English UI) and re-showed
+/// onboarding on every launch of an installed build. Settings/bootstrap reads
+/// must await this before touching paths. Do not remove the wait or answer
+/// path-dependent IPC before initialization.
+pub async fn wait_until_initialized() {
+    loop {
+        // Create the listener before checking, so a notify between the check
+        // and the await cannot be lost.
+        let notified = INIT_NOTIFY.notified();
+        if app_data_dir().is_some() {
+            return;
+        }
+        notified.await;
+    }
 }
 
 /// Get the app data directory. Returns None if not initialized.
@@ -56,9 +80,18 @@ pub fn models_dir() -> Option<PathBuf> {
     app_data_dir().map(|p| p.join("models"))
 }
 
+/// Log directory inside the app data dir (used by Windows file logging,
+/// where stdout is invisible in release builds). Returns None if paths not
+/// initialized.
+#[cfg(target_os = "windows")]
+pub fn log_dir() -> Option<PathBuf> {
+    app_data_dir().map(|p| p.join("logs"))
+}
+
 #[cfg(test)]
 pub fn init_test_app_data_dir(path: PathBuf) {
     let _ = TEST_APP_DATA_DIR.set(path);
+    INIT_NOTIFY.notify_waiters();
 }
 
 #[cfg(test)]

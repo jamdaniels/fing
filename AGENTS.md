@@ -14,6 +14,7 @@
 - The app may already be running; do not start it unless needed.
 - No destructive git commands. Never revert unrelated user changes.
 - Do not log raw audio, transcripts, secrets, or full user-specific filesystem paths.
+- Settings loading/saving and startup IPC ordering are regression-critical (Windows repeatedly re-showed onboarding after restart when weakened). Before touching them, read the `REGRESSION GUARD` comments in `src-tauri/src/paths.rs` (`wait_until_initialized`), `src-tauri/src/settings.rs` (load/parse/cache/save), and `src-tauri/src/lib.rs` (`load_bootstrap_context`). Never simplify those invariants away; the tests in `settings.rs` pin them.
 
 ## Engineering Guidance
 - Keep changes minimal and local. Read the owning code before changing behavior.

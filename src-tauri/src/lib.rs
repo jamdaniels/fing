@@ -175,7 +175,32 @@ fn resolve_bootstrap_decision(
 }
 
 async fn load_bootstrap_context(phase: &'static str) -> BootstrapContext {
-    let saved_settings = settings::load_settings_uncached().await;
+    // REGRESSION GUARD: never decide "show onboarding" from defaults produced
+    // by a failed settings read — treating a failed read as
+    // onboarding_completed=false re-showed onboarding for fully set-up
+    // Windows users. The settings load waits for path initialization and
+    // recovers from retries/backup internally, so Failed here means the file
+    // is genuinely unreadable. In that case assume a returning user and let
+    // the model-validity check below arbitrate: a real fresh install has no
+    // model on disk and still gets onboarding via "model_missing". The
+    // synthesized settings are never cached or saved, so later reads recover
+    // the real file.
+    let (saved_settings, settings_read_ok) = match settings::load_settings_outcome_uncached().await
+    {
+        settings::SettingsLoadOutcome::Loaded(loaded)
+        | settings::SettingsLoadOutcome::FirstRun(loaded) => (loaded, true),
+        settings::SettingsLoadOutcome::Failed(error) => {
+            tracing::error!(
+                "Settings unreadable at bootstrap; assuming returning user: {}",
+                error
+            );
+            let fallback = settings::Settings {
+                onboarding_completed: true,
+                ..Default::default()
+            };
+            (fallback, false)
+        }
+    };
     let (active_model_validity, available_model_path) = if saved_settings.onboarding_completed {
         let variant = saved_settings.active_model_variant;
         let inspection_started = std::time::Instant::now();
@@ -213,9 +238,10 @@ async fn load_bootstrap_context(phase: &'static str) -> BootstrapContext {
     let decision = resolve_bootstrap_decision(&saved_settings, active_model_validity);
 
     tracing::info!(
-        "Bootstrap decision: phase={}, reason={}, onboarding_completed={}, model_validity={:?}, should_show_onboarding={}, app_state={}",
+        "Bootstrap decision: phase={}, reason={}, settings_read_ok={}, onboarding_completed={}, model_validity={:?}, should_show_onboarding={}, app_state={}",
         phase,
         decision.reason,
+        settings_read_ok,
         saved_settings.onboarding_completed,
         active_model_validity,
         decision.should_show_onboarding,
@@ -904,10 +930,80 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
     }
 }
 
+/// Windows release builds have no console, so stdout logging is invisible —
+/// this made settings-load failures undiagnosable. Logs are written to
+/// `<app_data>/logs/fing.log` instead. The file can only be opened once
+/// Tauri resolves the app data dir (which depends on the configured
+/// identifier, e.g. dev builds use a separate dir), so the subscriber uses a
+/// deferred writer: stdout until `bind_windows_log_file` runs during setup,
+/// the log file afterwards.
+#[cfg(target_os = "windows")]
+static WINDOWS_LOG_FILE: std::sync::OnceLock<std::fs::File> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "windows")]
+struct DeferredLogWriter;
+
+#[cfg(target_os = "windows")]
+impl std::io::Write for DeferredLogWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match WINDOWS_LOG_FILE.get() {
+            Some(mut file) => file.write(buf),
+            None => std::io::stdout().write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match WINDOWS_LOG_FILE.get() {
+            Some(mut file) => file.flush(),
+            None => std::io::stdout().flush(),
+        }
+    }
+}
+
+/// Open the log file (truncating it past 5 MB) and route tracing output to
+/// it. Called during setup, right after `paths::init`.
+#[cfg(target_os = "windows")]
+fn bind_windows_log_file() {
+    let Some(dir) = paths::log_dir() else {
+        return;
+    };
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join("fing.log");
+    if let Ok(metadata) = std::fs::metadata(&path) {
+        if metadata.len() > 5 * 1024 * 1024 {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    if let Ok(file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = WINDOWS_LOG_FILE.set(file);
+    }
+}
+
+fn init_tracing() {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(|| DeferredLogWriter)
+            .try_init();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Use try_init to avoid panic if stderr isn't available.
+        let _ = tracing_subscriber::fmt::try_init();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Use try_init to avoid panic if stderr isn't available (Windows without console).
-    let _ = tracing_subscriber::fmt::try_init();
+    init_tracing();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -931,6 +1027,9 @@ pub fn run() {
 
             // Initialize paths first (required by db, settings, model)
             paths::init(app)?;
+
+            #[cfg(target_os = "windows")]
+            bind_windows_log_file();
 
             // Initialize database
             if let Err(e) = db::init_db() {
