@@ -108,7 +108,7 @@ struct BootstrapStatus {
 struct BootstrapContext {
     decision: BootstrapDecision,
     settings: settings::Settings,
-    verified_model_path: Option<std::path::PathBuf>,
+    available_model_path: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -176,34 +176,34 @@ fn resolve_bootstrap_decision(
 
 async fn load_bootstrap_context(phase: &'static str) -> BootstrapContext {
     let saved_settings = settings::load_settings_uncached().await;
-    let (active_model_validity, verified_model_path) = if saved_settings.onboarding_completed {
+    let (active_model_validity, available_model_path) = if saved_settings.onboarding_completed {
         let variant = saved_settings.active_model_variant;
-        let verification_started = std::time::Instant::now();
+        let inspection_started = std::time::Instant::now();
         match tauri::async_runtime::spawn_blocking(move || {
             let path = model::model_path_for_variant(variant);
-            let verification = model::verify_for_variant(&path, variant);
-            (path, verification)
+            let inspection = model::inspect_for_variant(&path, variant);
+            (path, inspection)
         })
         .await
         {
-            Ok((path, verification)) if verification.is_valid => {
+            Ok((path, inspection)) if inspection.is_valid => {
                 tracing::info!(
-                    "Verified {:?} model in {} ms",
+                    "Inspected {:?} model in {} ms",
                     variant,
-                    verification_started.elapsed().as_millis()
+                    inspection_started.elapsed().as_millis()
                 );
                 (ActiveModelValidity::Valid, Some(path))
             }
-            Ok((_, verification)) if !verification.exists => {
+            Ok((_, inspection)) if !inspection.exists => {
                 tracing::warn!("Active {:?} model is missing", variant);
                 (ActiveModelValidity::Missing, None)
             }
             Ok(_) => {
-                tracing::warn!("Active {:?} model failed verification", variant);
+                tracing::warn!("Active {:?} model failed structural inspection", variant);
                 (ActiveModelValidity::Invalid, None)
             }
             Err(_) => {
-                tracing::warn!("Active model verification task failed");
+                tracing::warn!("Active model inspection task failed");
                 (ActiveModelValidity::NotChecked, None)
             }
         }
@@ -225,7 +225,7 @@ async fn load_bootstrap_context(phase: &'static str) -> BootstrapContext {
     BootstrapContext {
         decision,
         settings: saved_settings,
-        verified_model_path,
+        available_model_path,
     }
 }
 
@@ -573,7 +573,7 @@ async fn update_settings(
             transcribe::unload_transcriber();
             tracing::info!("Lazy model loading enabled, transcriber unloaded");
         } else {
-            let model_path = match model::ensure_variant_verified(updated.active_model_variant) {
+            let model_path = match model::ensure_variant_available(updated.active_model_variant) {
                 Ok(path) => path,
                 Err(load_err) => {
                     let mut rollback = updated.clone();
@@ -967,7 +967,7 @@ pub fn run() {
             let bootstrap_context = tauri::async_runtime::block_on(load_bootstrap_context("setup"));
             let bootstrap_decision = bootstrap_context.decision;
             let saved_settings = bootstrap_context.settings;
-            let verified_model_path = bootstrap_context.verified_model_path;
+            let available_model_path = bootstrap_context.available_model_path;
             let show_setup_window = bootstrap_decision.should_show_onboarding;
             let mut updates_enabled = false;
 
@@ -975,7 +975,7 @@ pub fn run() {
                 // Try to pre-load the transcriber, but don't block Ready state
                 // on failure. The hotkey handler will retry on first use.
                 if !saved_settings.lazy_model_loading {
-                    if let Some(model_path) = verified_model_path {
+                    if let Some(model_path) = available_model_path {
                         if let Err(e) = tauri::async_runtime::block_on(async move {
                             let model_path_str = model_path.to_string_lossy().to_string();
                             tauri::async_runtime::spawn_blocking(move || {
@@ -988,7 +988,7 @@ pub fn run() {
                             tracing::warn!("Transcriber init deferred to first use: {}", e);
                         }
                     } else {
-                        tracing::warn!("Verified model path unavailable for eager preload");
+                        tracing::warn!("Available model path unavailable for eager preload");
                     }
                 }
 
@@ -1143,7 +1143,7 @@ mod bootstrap_tests {
     }
 
     #[test]
-    fn bootstrap_ready_when_onboarding_completed_and_model_valid() {
+    fn bootstrap_ready_when_onboarding_completed_and_model_structurally_valid() {
         let decision =
             resolve_bootstrap_decision(&completed_settings(), ActiveModelValidity::Valid);
 

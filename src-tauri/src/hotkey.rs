@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::audio::AudioCapture;
 use crate::db::{save_transcript, NewTranscript};
-use crate::model::{ensure_variant_verified, model_path_for_variant, ModelVariant};
+use crate::model::{ensure_variant_available, model_path_for_variant, ModelVariant};
 use crate::paste::paste_text;
 use crate::settings::{load_settings, load_settings_sync};
 use crate::sounds;
@@ -270,10 +270,10 @@ async fn init_transcriber_async(model_path: String) -> Result<(), String> {
 
 async fn init_transcriber_for_variant_async(variant: ModelVariant) -> Result<(), String> {
     let model_path_str = tauri::async_runtime::spawn_blocking(move || {
-        ensure_variant_verified(variant).map(|path| path.to_string_lossy().to_string())
+        ensure_variant_available(variant).map(|path| path.to_string_lossy().to_string())
     })
     .await
-    .map_err(|e| format!("Model verification task failed: {e}"))??;
+    .map_err(|e| format!("Model inspection task failed: {e}"))??;
 
     init_transcriber_async(model_path_str).await
 }

@@ -251,7 +251,22 @@ pub fn verify_for_variant(path: &std::path::Path, variant: ModelVariant) -> Mode
     verify_with_expected_size(path, Some(def.size_bytes), Some(def.sha256))
 }
 
-/// Ensure a model variant is fully verified before the app uses it.
+/// Ensure a model variant is structurally valid without hashing it.
+pub fn ensure_variant_available(variant: ModelVariant) -> Result<PathBuf, String> {
+    let path = model_path_for_variant(variant);
+    let inspection = inspect_for_variant(&path, variant);
+
+    if inspection.is_valid {
+        return Ok(path);
+    }
+
+    Err(format!(
+        "Model not available: exists={}, size_valid={}, format_valid={}",
+        inspection.exists, inspection.size_valid, inspection.format_valid
+    ))
+}
+
+/// Ensure a model variant passes full cryptographic verification.
 pub fn ensure_variant_verified(variant: ModelVariant) -> Result<PathBuf, String> {
     let path = model_path_for_variant(variant);
     let verification = verify_for_variant(&path, variant);
@@ -691,6 +706,19 @@ mod tests {
     }
 
     #[test]
+    fn inspect_with_expected_size_rejects_missing_file() {
+        let path = unique_test_path("model-missing");
+
+        let inspection = inspect_with_expected_size(&path, Some(100));
+
+        assert!(!inspection.exists);
+        assert!(!inspection.size_valid);
+        assert!(!inspection.format_valid);
+        assert!(inspection.hash_valid);
+        assert!(!inspection.is_valid);
+    }
+
+    #[test]
     fn inspect_with_expected_size_rejects_invalid_magic() {
         let path = unique_test_path("model-invalid-magic");
         write_test_model_file(&path, 100, 0x1234_5678);
@@ -723,9 +751,13 @@ mod tests {
     }
 
     #[test]
-    fn verify_with_expected_size_requires_matching_sha256() {
+    fn structural_inspection_can_pass_when_full_verification_rejects_hash() {
         let path = unique_test_path("model-sha");
         write_test_model_file(&path, 100, GGML_MAGIC_GGML);
+
+        let inspection = inspect_with_expected_size(&path, Some(100));
+
+        assert!(inspection.is_valid);
 
         let expected_sha256 = compute_file_sha256(&path).expect("test file should hash");
         let valid = verify_with_expected_size(&path, Some(100), Some(&expected_sha256));
