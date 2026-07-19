@@ -50,6 +50,7 @@ import {
   getAutoStart,
   getBootstrapStatus,
   getDownloadProgress,
+  getInferenceRuntimeInfo,
   getMicTestLevel,
   getModels,
   getRecentTranscripts,
@@ -78,6 +79,8 @@ import type {
   AudioDevice,
   BootstrapReason,
   HistoryMode,
+  InferenceDevicePreference,
+  InferenceRuntimeInfo,
   MicrophoneTest,
   MicTestStartResult,
   ModelInfo,
@@ -153,6 +156,10 @@ let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 let sidebarListenerAttached = false;
 let contentListenerAttached = false;
 let models: ModelInfo[] = [];
+let inferenceRuntimeInfo: InferenceRuntimeInfo | null = null;
+let inferenceRuntimeLoading = false;
+let inferenceRuntimeVariant: ModelVariant | null = null;
+let inferenceRuntimeRequest = 0;
 let modelDownloadPollInterval: number | null = null;
 const MAX_DICTIONARY_TERMS = 100;
 const MAX_DICTIONARY_WORDS_PER_TERM = 3;
@@ -1493,7 +1500,10 @@ function startModelDownloadPolling(variant: ModelVariant): void {
   }, 500);
 }
 
-function showRestartDialog(previousVariant?: ModelVariant): void {
+function showRestartDialog(
+  previousVariant?: ModelVariant,
+  body = t("dialogs.restartBody")
+): void {
   const modal = document.createElement("div");
   modal.className = "dialog-overlay";
   modal.innerHTML = `
@@ -1501,7 +1511,7 @@ function showRestartDialog(previousVariant?: ModelVariant): void {
       <div class="dialog-header">
         <div class="dialog-title">${t("dialogs.restartTitle")}</div>
       </div>
-      <div class="dialog-body">${t("dialogs.restartBody")}</div>
+      <div class="dialog-body">${body}</div>
       <div class="dialog-footer">
         <button class="btn btn-ghost" id="restart-later-btn">${t("common.later")}</button>
         <button class="btn btn-accent" id="restart-now-btn">${t("dialogs.restartNow")}</button>
@@ -2052,11 +2062,192 @@ function handleSettingsClick(e: MouseEvent): void {
 function handleSettingsChange(e: Event): void {
   const target = e.target as HTMLElement;
 
+  if (target.classList.contains("inference-select") && settings) {
+    const select = target as HTMLSelectElement;
+    const preference: InferenceDevicePreference =
+      select.value === "auto"
+        ? { mode: "auto" }
+        : select.value === "cpu"
+          ? { mode: "cpu" }
+          : { mode: "vulkan", deviceId: select.value };
+    const updated = { ...settings, inferenceDevice: preference };
+    updateSettings(updated)
+      .then(async (saved) => {
+        settings = saved;
+        await refreshInferenceRuntimeInfo(true);
+        renderContent();
+        if (inferenceRuntimeInfo?.restartRequired) {
+          showRestartDialog(undefined, t("dialogs.inferenceRestartBody"));
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to update inference device:", error);
+        renderContent();
+      });
+    return;
+  }
+
   // Handle mic select change
   if (target.classList.contains("mic-select")) {
     const select = target as HTMLSelectElement;
     const value = select.value || null;
     handleSettingChange("selectedMicrophoneId", value);
+  }
+}
+
+function inferencePreferenceValue(
+  preference: InferenceDevicePreference | undefined
+): string {
+  if (preference?.mode === "vulkan") {
+    return preference.deviceId;
+  }
+  return preference?.mode ?? "auto";
+}
+
+function inferenceBackendLabel(backend: string): string {
+  if (backend === "vulkan") {
+    return "Vulkan";
+  }
+  if (backend === "metal") {
+    return "Metal";
+  }
+  return "CPU";
+}
+
+function inferenceFallbackLabel(reason: string): string {
+  switch (reason) {
+    case "no_vulkan_device":
+      return t("settings.inferenceFallbackNoVulkan");
+    case "insufficient_gpu_memory":
+      return t("settings.inferenceFallbackMemory");
+    case "preferred_device_not_found":
+      return t("settings.inferenceFallbackMissing");
+    case "device_initialization_failed":
+      return t("settings.inferenceFallbackInitialization");
+    case "execution_fell_back_to_cpu":
+      return t("settings.inferenceFallbackExecution");
+    default:
+      return t("settings.inferenceFallbackGeneric");
+  }
+}
+
+function renderInferenceSettings(): string {
+  if (document.body.dataset.platform !== "windows") {
+    return "";
+  }
+  if (!(settings && inferenceRuntimeInfo)) {
+    return `
+      <div class="settings-section">
+        <div class="settings-section-title">${t("settings.performance")}</div>
+        <div class="settings-card">
+          <div class="settings-row">
+            <div>
+              <div class="settings-row-label">${t("settings.inferenceDevice")}</div>
+              <div class="settings-row-desc">${t("settings.analyzingHardware")}</div>
+            </div>
+            <span class="loading-spinner" aria-hidden="true">${createIcon(LoaderCircle)}</span>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  const info = inferenceRuntimeInfo;
+  const currentValue = inferencePreferenceValue(settings.inferenceDevice);
+  const recommended = info.devices.find(
+    (device) => device.id === info.recommendedDeviceId
+  );
+  const options = info.devices
+    .map((device) => {
+      const selected = currentValue === device.id ? "selected" : "";
+      const memory = device.memoryTotalMb
+        ? ` · ${Math.round(device.memoryTotalMb)} MB`
+        : "";
+      return `<option value="${escapeHtml(device.id)}" ${selected}>${escapeHtml(device.name)} · ${inferenceBackendLabel(device.backend)}${memory}</option>`;
+    })
+    .join("");
+  const autoSelected = currentValue === "auto" ? "selected" : "";
+  const autoLabel = recommended
+    ? t("settings.inferenceAutoWithDevice", { device: recommended.name })
+    : t("settings.inferenceAuto");
+  const status = escapeHtml(
+    info.restartRequired
+      ? t("settings.inferenceRestartRequired")
+      : info.selectionVerified
+        ? t("settings.inferenceSelectedVerified", {
+            backend: inferenceBackendLabel(info.resolvedBackend),
+            device: info.resolvedDeviceName,
+          })
+        : t("settings.inferenceSelectedPredicted", {
+            backend: inferenceBackendLabel(info.resolvedBackend),
+            device: info.resolvedDeviceName,
+          })
+  );
+  const lastExecution = info.lastExecutionBackend
+    ? `<div class="inference-runtime-detail">${escapeHtml(
+        t(
+          info.lastExecutionVerified
+            ? "settings.inferenceLastUsed"
+            : "settings.inferenceLastSelected",
+          {
+            backend: inferenceBackendLabel(info.lastExecutionBackend),
+            device: info.lastExecutionDeviceName ?? "CPU",
+          }
+        )
+      )}</div>`
+    : "";
+  const fallback = info.fallbackReason
+    ? `<div class="inference-runtime-detail inference-runtime-warning">${inferenceFallbackLabel(info.fallbackReason)}</div>`
+    : "";
+
+  return `
+    <div class="settings-section">
+      <div class="settings-section-title">${t("settings.performance")}</div>
+      <div class="settings-card">
+        <div class="settings-row inference-settings-row">
+          <div>
+            <div class="settings-row-label">${t("settings.inferenceDevice")}</div>
+            <div class="settings-row-desc">${t("settings.inferenceDeviceDescription")}</div>
+            <div class="inference-runtime-detail">${status}</div>
+            ${lastExecution}
+            ${fallback}
+          </div>
+          <select class="settings-select inference-select">
+            <option value="auto" ${autoSelected}>${escapeHtml(autoLabel)}</option>
+            ${options}
+          </select>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function refreshInferenceRuntimeInfo(force = false): Promise<void> {
+  if (!(settings && document.body.dataset.platform === "windows")) {
+    return;
+  }
+  if (
+    !force &&
+    (inferenceRuntimeLoading ||
+      (inferenceRuntimeInfo &&
+        inferenceRuntimeVariant === settings.activeModelVariant))
+  ) {
+    return;
+  }
+
+  const request = ++inferenceRuntimeRequest;
+  const variant = settings.activeModelVariant;
+  inferenceRuntimeLoading = true;
+  try {
+    const info = await getInferenceRuntimeInfo(variant, force);
+    if (request === inferenceRuntimeRequest) {
+      inferenceRuntimeInfo = info;
+      inferenceRuntimeVariant = variant;
+    }
+  } catch (error) {
+    console.error("Failed to analyze inference hardware:", error);
+  } finally {
+    if (request === inferenceRuntimeRequest) {
+      inferenceRuntimeLoading = false;
+    }
   }
 }
 
@@ -2308,6 +2499,7 @@ function renderSettingsUI(el: HTMLElement): void {
         ${renderModelList()}
       </div>
     </div>
+    ${renderInferenceSettings()}
     <div class="settings-section">
       <div class="settings-section-title">${t("settings.permissions")}</div>
       <div class="settings-card">
@@ -2393,6 +2585,11 @@ function renderSettings(el: HTMLElement): void {
 
   // Render immediately to keep navigation snappy.
   renderSettingsUI(el);
+  refreshInferenceRuntimeInfo().then(() => {
+    if (currentView === "settings") {
+      renderSettingsUI(el);
+    }
+  });
 
   if (cacheFresh) {
     canRefreshAudioDevices()

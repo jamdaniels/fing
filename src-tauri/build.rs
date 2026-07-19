@@ -8,12 +8,27 @@ const SHORT_SHA_LEN: usize = 7;
 fn main() {
     emit_rerun_hints();
     compile_macos_permission_shim();
+    compile_windows_inference_probe();
     link_macos_clang_runtime();
 
     let commit = resolve_commit_sha().unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=GIT_COMMIT={commit}");
 
     tauri_build::build();
+}
+
+fn compile_windows_inference_probe() {
+    #[cfg(target_os = "windows")]
+    {
+        println!("cargo:rerun-if-changed=src/inference_probe.cpp");
+
+        cc::Build::new()
+            .cpp(true)
+            .file("src/inference_probe.cpp")
+            .flag_if_supported("/EHsc")
+            .flag_if_supported("-fexceptions")
+            .compile("fing_inference_probe");
+    }
 }
 
 fn compile_macos_permission_shim() {

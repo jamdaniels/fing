@@ -10,6 +10,7 @@ mod hotkey_config;
 mod hotkey_listener;
 mod i18n;
 mod indicator;
+mod inference;
 mod model;
 mod notifications;
 mod paste;
@@ -651,6 +652,23 @@ async fn update_settings(
 }
 
 #[tauri::command]
+async fn get_inference_runtime_info(
+    variant: model::ModelVariant,
+    refresh_devices: bool,
+) -> Result<inference::InferenceRuntimeInfo, String> {
+    let preference = settings::load_settings().await.inference_device;
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(inference::runtime_info(
+            variant,
+            preference,
+            refresh_devices,
+        ))
+    })
+    .await
+    .map_err(|error| format!("Inference device analysis failed: {error}"))?
+}
+
+#[tauri::command]
 fn request_microphone_permission() {
     #[cfg(target_os = "macos")]
     platform::request_microphone_permission();
@@ -1165,6 +1183,7 @@ pub fn run() {
             // Settings
             settings::get_settings,
             update_settings,
+            get_inference_runtime_info,
             update::check_for_updates_now,
             update::clear_update_status,
             // Stats

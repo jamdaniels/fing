@@ -29,6 +29,7 @@ import {
   enableOnboardingTestMode,
   getAudioDevices,
   getDownloadProgress,
+  getInferenceRuntimeInfo,
   getModels,
   getSettings,
   hotkeyPress,
@@ -45,6 +46,7 @@ import type {
   BootstrapReason,
   DownloadProgress,
   HistoryMode,
+  InferenceRuntimeInfo,
   ModelInfo,
   ModelVariant,
   PermissionStatus,
@@ -73,6 +75,10 @@ interface OnboardingState {
   testText: string;
   modelRepairReason: BootstrapReason | null;
   invalidModelVariant: ModelVariant | null;
+  inferenceAnalysisAttempted: boolean;
+  inferenceAnalysisFailed: boolean;
+  inferenceAnalysisLoading: boolean;
+  inferenceRuntimeInfo: InferenceRuntimeInfo | null;
 }
 
 interface RenderOnboardingOptions {
@@ -98,6 +104,10 @@ let state: OnboardingState = {
   models: [],
   modelRepairReason: null,
   invalidModelVariant: null,
+  inferenceAnalysisAttempted: false,
+  inferenceAnalysisFailed: false,
+  inferenceAnalysisLoading: false,
+  inferenceRuntimeInfo: null,
 };
 
 let container: HTMLElement | null = null;
@@ -451,6 +461,92 @@ function renderDownloadFooterButton(
   return `<button class="btn btn-accent btn-lg btn-block" id="download-btn">${t("onboarding.downloadModel")}</button>`;
 }
 
+function inferenceBackendLabel(backend: string): string {
+  if (backend === "vulkan") {
+    return "Vulkan";
+  }
+  if (backend === "metal") {
+    return "Metal";
+  }
+  return "CPU";
+}
+
+function renderInferenceAnalysis(): string {
+  const info = state.inferenceRuntimeInfo;
+  if (state.inferenceAnalysisFailed) {
+    return `
+      <div class="inference-analysis-card">
+        <span class="inference-analysis-leading" aria-hidden="true">${createIcon(Monitor)}</span>
+        <div>
+          <div class="inference-analysis-title">${t("onboarding.analysisUnavailable")}</div>
+          <div class="inference-analysis-desc">${t("onboarding.analysisUnavailableDescription")}</div>
+        </div>
+      </div>`;
+  }
+  if (!info && state.inferenceAnalysisLoading) {
+    return `
+      <div class="inference-analysis-card">
+        <span class="loading-spinner inference-analysis-leading" aria-hidden="true">${createIcon(LoaderCircle)}</span>
+        <div>
+          <div class="inference-analysis-title">${t("onboarding.analyzingSystem")}</div>
+          <div class="inference-analysis-desc">${t("onboarding.analyzingSystemDescription")}</div>
+        </div>
+      </div>`;
+  }
+  if (!info) {
+    return "";
+  }
+
+  const recognized = info.devices
+    .map(
+      (device) => `${device.name} (${inferenceBackendLabel(device.backend)})`
+    )
+    .join(", ");
+  return `
+    <div class="inference-analysis-card ready">
+      <span class="checkpill inference-analysis-leading" aria-hidden="true">${createIcon(Check)}</span>
+      <div>
+        <div class="inference-analysis-title">${escapeHtml(
+          t("onboarding.processorSelected", {
+            device: info.resolvedDeviceName,
+            backend: inferenceBackendLabel(info.resolvedBackend),
+          })
+        )}</div>
+        <div class="inference-analysis-desc">${escapeHtml(
+          t(
+            document.body.dataset.platform === "windows"
+              ? "onboarding.processorsRecognized"
+              : "onboarding.processorsRecognizedOnly",
+            {
+              devices: recognized,
+            }
+          )
+        )}</div>
+      </div>
+    </div>`;
+}
+
+async function analyzeInferenceHardware(): Promise<void> {
+  if (state.inferenceAnalysisAttempted) {
+    return;
+  }
+  state.inferenceAnalysisAttempted = true;
+  state.inferenceAnalysisLoading = true;
+  render();
+  try {
+    state.inferenceRuntimeInfo = await getInferenceRuntimeInfo(
+      state.selectedModelVariant,
+      true
+    );
+  } catch (error) {
+    console.error("Failed to analyze inference hardware:", error);
+    state.inferenceAnalysisFailed = true;
+  } finally {
+    state.inferenceAnalysisLoading = false;
+    render();
+  }
+}
+
 function getDownloadHeading(
   selectedModel: ModelInfo | undefined,
   isDownloading: boolean,
@@ -547,6 +643,9 @@ function renderDownloadModel(): void {
       </div>
     `;
   }
+  if (isComplete) {
+    bodyContent += renderInferenceAnalysis();
+  }
 
   container.innerHTML = `
     <div class="onboarding">
@@ -588,6 +687,10 @@ function renderDownloadModel(): void {
     .getElementById("continue-btn")
     ?.addEventListener("click", handleDownloadContinue);
   attachStepIndicatorListeners();
+
+  if (isComplete && !state.inferenceAnalysisAttempted) {
+    void analyzeInferenceHardware();
+  }
 }
 
 async function handleDownloadContinue(): Promise<void> {
@@ -1485,6 +1588,10 @@ export async function renderOnboarding(
     invalidModelVariant: options.modelRepairReason
       ? (savedSettings?.activeModelVariant ?? "small")
       : null,
+    inferenceAnalysisAttempted: false,
+    inferenceAnalysisFailed: false,
+    inferenceAnalysisLoading: false,
+    inferenceRuntimeInfo: null,
   };
 
   pendingEnterClass = "onb-enter-up";

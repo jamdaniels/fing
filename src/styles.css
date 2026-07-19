@@ -2509,6 +2509,48 @@ body[data-platform="windows"] .titlebar {
   padding: 6px 0;
 }
 
+.inference-analysis-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-secondary);
+}
+
+.inference-analysis-leading {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.inference-analysis-title {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.inference-analysis-desc,
+.inference-runtime-detail {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.inference-settings-row > div:first-child {
+  min-width: 0;
+}
+
+.inference-runtime-warning {
+  color: var(--warning-text);
+}
+
+.inference-select {
+  max-width: 310px;
+}
+
 .onboarding-footer {
   display: flex;
   flex-shrink: 0;

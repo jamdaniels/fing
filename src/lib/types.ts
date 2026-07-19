@@ -38,11 +38,45 @@ export interface AudioDevice {
 
 export type HistoryMode = "off" | "30d";
 
+export type InferenceDevicePreference =
+  | { mode: "auto" }
+  | { mode: "cpu" }
+  | { mode: "vulkan"; deviceId: string };
+
+export type InferenceBackend = "cpu" | "metal" | "vulkan";
+export type InferenceDeviceKind = "cpu" | "integratedGpu" | "discreteGpu";
+
+export interface InferenceDevice {
+  backend: InferenceBackend;
+  deviceKind: InferenceDeviceKind;
+  gpuDeviceIndex: number | null;
+  id: string;
+  memoryFreeMb: number | null;
+  memoryTotalMb: number | null;
+  name: string;
+}
+
+export interface InferenceRuntimeInfo {
+  devices: InferenceDevice[];
+  fallbackReason: string | null;
+  lastExecutionBackend: InferenceBackend | null;
+  lastExecutionDeviceName: string | null;
+  lastExecutionVerified: boolean;
+  preference: InferenceDevicePreference;
+  recommendedDeviceId: string;
+  resolvedBackend: InferenceBackend;
+  resolvedDeviceId: string;
+  resolvedDeviceName: string;
+  restartRequired: boolean;
+  selectionVerified: boolean;
+}
+
 export interface Settings {
   activeModelVariant: ModelVariant;
   autoStart: boolean;
   dictionaryTerms: string[];
   historyMode: HistoryMode;
+  inferenceDevice: InferenceDevicePreference;
   hotkey: string;
   languages: string[];
   lazyModelLoading: boolean;

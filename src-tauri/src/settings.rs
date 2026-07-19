@@ -1,3 +1,4 @@
+use crate::inference::InferenceDevicePreference;
 use crate::model::ModelVariant;
 use serde::{Deserialize, Serialize};
 use std::sync::{LazyLock, RwLock};
@@ -91,7 +92,9 @@ fn interpret_settings_contents(
         Ok(settings) => SettingsLoadOutcome::Loaded(settings),
         Err(parse_error) => match recover_from_backup(backup_path, &parse_error) {
             Some(settings) => SettingsLoadOutcome::Loaded(settings),
-            None => SettingsLoadOutcome::Failed(format!("settings JSON unparseable: {parse_error}")),
+            None => {
+                SettingsLoadOutcome::Failed(format!("settings JSON unparseable: {parse_error}"))
+            }
         },
     }
 }
@@ -136,6 +139,8 @@ pub struct Settings {
     pub dictionary_terms: Vec<String>,
     #[serde(default)]
     pub ui_language: UiLanguage,
+    #[serde(default)]
+    pub inference_device: InferenceDevicePreference,
 }
 
 fn default_languages() -> Vec<String> {
@@ -166,6 +171,7 @@ impl Default for Settings {
             lazy_model_loading: false,
             dictionary_terms: Vec::new(),
             ui_language: UiLanguage::default(),
+            inference_device: InferenceDevicePreference::default(),
         }
     }
 }
@@ -461,6 +467,21 @@ fn parse_settings_json(contents: &str) -> Result<Settings, String> {
                 serde_json::Value::String("en".to_string()),
             );
         }
+
+        let inference_device_valid =
+            object
+                .get("inferenceDevice")
+                .cloned()
+                .is_some_and(|preference| {
+                    serde_json::from_value::<InferenceDevicePreference>(preference).is_ok()
+                });
+        if !inference_device_valid {
+            object.insert(
+                "inferenceDevice".to_string(),
+                serde_json::to_value(InferenceDevicePreference::default())
+                    .expect("default inference preference should serialize"),
+            );
+        }
     }
 
     let mut settings = match serde_json::from_value::<Settings>(value) {
@@ -614,6 +635,47 @@ mod tests {
 
         assert_eq!(parsed.ui_language, UiLanguage::En);
         assert_eq!(parsed.theme, Theme::Dark);
+    }
+
+    #[test]
+    fn invalid_inference_device_does_not_discard_other_settings() {
+        let mut value = serde_json::to_value(Settings {
+            theme: Theme::Dark,
+            onboarding_completed: true,
+            ..Settings::default()
+        })
+        .expect("settings should serialize");
+        value["inferenceDevice"] = serde_json::json!({
+            "mode": "vulkan",
+            "deviceId": 42
+        });
+
+        let parsed =
+            parse_settings_json(&serde_json::to_string(&value).expect("settings should serialize"))
+                .expect("settings should parse");
+
+        assert_eq!(parsed.inference_device, InferenceDevicePreference::Auto);
+        assert_eq!(parsed.theme, Theme::Dark);
+        assert!(parsed.onboarding_completed);
+    }
+
+    #[test]
+    fn explicit_inference_device_round_trips() {
+        let preference = InferenceDevicePreference::Vulkan {
+            device_id: "vulkan:pci-1".to_string(),
+        };
+        let raw = serde_json::to_string(&Settings {
+            inference_device: preference.clone(),
+            ..Settings::default()
+        })
+        .expect("settings should serialize");
+
+        assert_eq!(
+            parse_settings_json(&raw)
+                .expect("settings should parse")
+                .inference_device,
+            preference
+        );
     }
 
     #[test]
@@ -943,7 +1005,9 @@ mod tests {
             );
 
             assert!(
-                fs::metadata(settings_tmp_path(&settings_path)).await.is_err(),
+                fs::metadata(settings_tmp_path(&settings_path))
+                    .await
+                    .is_err(),
                 "no tmp file should remain after save"
             );
         });

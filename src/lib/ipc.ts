@@ -5,6 +5,7 @@ import type {
   AudioDevice,
   BootstrapStatus,
   DownloadProgress,
+  InferenceRuntimeInfo,
   MicrophoneTest,
   MicTestStartResult,
   ModelInfo,
@@ -47,6 +48,16 @@ export async function getSettings(): Promise<Settings> {
 
 export async function updateSettings(settings: Settings): Promise<Settings> {
   return await invoke<Settings>("update_settings", { settings });
+}
+
+export async function getInferenceRuntimeInfo(
+  variant: ModelVariant,
+  refreshDevices = false
+): Promise<InferenceRuntimeInfo> {
+  return await invoke<InferenceRuntimeInfo>("get_inference_runtime_info", {
+    refreshDevices,
+    variant,
+  });
 }
 
 export async function getStats(): Promise<Stats> {
