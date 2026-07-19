@@ -461,16 +461,6 @@ function renderDownloadFooterButton(
   return `<button class="btn btn-accent btn-lg btn-block" id="download-btn">${t("onboarding.downloadModel")}</button>`;
 }
 
-function inferenceBackendLabel(backend: string): string {
-  if (backend === "vulkan") {
-    return "Vulkan";
-  }
-  if (backend === "metal") {
-    return "Metal";
-  }
-  return "CPU";
-}
-
 function renderInferenceAnalysis(): string {
   const info = state.inferenceRuntimeInfo;
   if (state.inferenceAnalysisFailed) {
@@ -497,32 +487,14 @@ function renderInferenceAnalysis(): string {
     return "";
   }
 
-  const recognized = info.devices
-    .map(
-      (device) => `${device.name} (${inferenceBackendLabel(device.backend)})`
-    )
-    .join(", ");
   return `
     <div class="inference-analysis-card ready">
       <span class="checkpill inference-analysis-leading" aria-hidden="true">${createIcon(Check)}</span>
-      <div>
-        <div class="inference-analysis-title">${escapeHtml(
-          t("onboarding.processorSelected", {
-            device: info.resolvedDeviceName,
-            backend: inferenceBackendLabel(info.resolvedBackend),
-          })
-        )}</div>
-        <div class="inference-analysis-desc">${escapeHtml(
-          t(
-            document.body.dataset.platform === "windows"
-              ? "onboarding.processorsRecognized"
-              : "onboarding.processorsRecognizedOnly",
-            {
-              devices: recognized,
-            }
-          )
-        )}</div>
-      </div>
+      <div class="inference-analysis-title">${escapeHtml(
+        t("onboarding.processorSelected", {
+          device: info.resolvedDeviceName,
+        })
+      )}</div>
     </div>`;
 }
 

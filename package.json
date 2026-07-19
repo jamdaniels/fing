@@ -4,7 +4,7 @@
   "version": "1.1.1",
   "type": "module",
   "scripts": {
-    "dev": "bunx tauri dev --config src-tauri/tauri.dev.conf.json",
+    "dev": "bun run scripts/tauri-dev.ts",
     "build": "bun run scripts/tauri-build.ts",
     "build:dev": "bun run scripts/tauri-build.ts --config src-tauri/tauri.dev.conf.json",
     "build:mac:universal": "bun run build -- --target universal-apple-darwin",
@@ -12,7 +12,7 @@
     "frontend:build": "bunx --bun vite build",
     "test": "bun run test:ts && bun run test:rust",
     "test:ts": "bun test",
-    "test:rust": "bun run frontend:build && cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:rust": "bun run frontend:build && bun run scripts/cargo-test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "bunx --bun biome check --no-errors-on-unmatched .",
     "lint:fix": "bunx --bun biome check --write --no-errors-on-unmatched .",

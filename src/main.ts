@@ -2104,33 +2104,6 @@ function inferencePreferenceValue(
   return preference?.mode ?? "auto";
 }
 
-function inferenceBackendLabel(backend: string): string {
-  if (backend === "vulkan") {
-    return "Vulkan";
-  }
-  if (backend === "metal") {
-    return "Metal";
-  }
-  return "CPU";
-}
-
-function inferenceFallbackLabel(reason: string): string {
-  switch (reason) {
-    case "no_vulkan_device":
-      return t("settings.inferenceFallbackNoVulkan");
-    case "insufficient_gpu_memory":
-      return t("settings.inferenceFallbackMemory");
-    case "preferred_device_not_found":
-      return t("settings.inferenceFallbackMissing");
-    case "device_initialization_failed":
-      return t("settings.inferenceFallbackInitialization");
-    case "execution_fell_back_to_cpu":
-      return t("settings.inferenceFallbackExecution");
-    default:
-      return t("settings.inferenceFallbackGeneric");
-  }
-}
-
 function renderInferenceSettings(): string {
   if (document.body.dataset.platform !== "windows") {
     return "";
@@ -2153,51 +2126,15 @@ function renderInferenceSettings(): string {
 
   const info = inferenceRuntimeInfo;
   const currentValue = inferencePreferenceValue(settings.inferenceDevice);
-  const recommended = info.devices.find(
-    (device) => device.id === info.recommendedDeviceId
-  );
+  const selectedDeviceId =
+    currentValue === "auto" ? info.recommendedDeviceId : currentValue;
   const options = info.devices
     .map((device) => {
-      const selected = currentValue === device.id ? "selected" : "";
-      const memory = device.memoryTotalMb
-        ? ` · ${Math.round(device.memoryTotalMb)} MB`
-        : "";
-      return `<option value="${escapeHtml(device.id)}" ${selected}>${escapeHtml(device.name)} · ${inferenceBackendLabel(device.backend)}${memory}</option>`;
+      const value = device.id === info.recommendedDeviceId ? "auto" : device.id;
+      const selected = selectedDeviceId === device.id ? "selected" : "";
+      return `<option value="${escapeHtml(value)}" ${selected}>${escapeHtml(device.name)}</option>`;
     })
     .join("");
-  const autoSelected = currentValue === "auto" ? "selected" : "";
-  const autoLabel = recommended
-    ? t("settings.inferenceAutoWithDevice", { device: recommended.name })
-    : t("settings.inferenceAuto");
-  const status = escapeHtml(
-    info.restartRequired
-      ? t("settings.inferenceRestartRequired")
-      : info.selectionVerified
-        ? t("settings.inferenceSelectedVerified", {
-            backend: inferenceBackendLabel(info.resolvedBackend),
-            device: info.resolvedDeviceName,
-          })
-        : t("settings.inferenceSelectedPredicted", {
-            backend: inferenceBackendLabel(info.resolvedBackend),
-            device: info.resolvedDeviceName,
-          })
-  );
-  const lastExecution = info.lastExecutionBackend
-    ? `<div class="inference-runtime-detail">${escapeHtml(
-        t(
-          info.lastExecutionVerified
-            ? "settings.inferenceLastUsed"
-            : "settings.inferenceLastSelected",
-          {
-            backend: inferenceBackendLabel(info.lastExecutionBackend),
-            device: info.lastExecutionDeviceName ?? "CPU",
-          }
-        )
-      )}</div>`
-    : "";
-  const fallback = info.fallbackReason
-    ? `<div class="inference-runtime-detail inference-runtime-warning">${inferenceFallbackLabel(info.fallbackReason)}</div>`
-    : "";
 
   return `
     <div class="settings-section">
@@ -2207,12 +2144,8 @@ function renderInferenceSettings(): string {
           <div>
             <div class="settings-row-label">${t("settings.inferenceDevice")}</div>
             <div class="settings-row-desc">${t("settings.inferenceDeviceDescription")}</div>
-            <div class="inference-runtime-detail">${status}</div>
-            ${lastExecution}
-            ${fallback}
           </div>
           <select class="settings-select inference-select">
-            <option value="auto" ${autoSelected}>${escapeHtml(autoLabel)}</option>
             ${options}
           </select>
         </div>

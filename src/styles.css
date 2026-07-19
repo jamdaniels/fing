@@ -2520,9 +2520,17 @@ body[data-platform="windows"] .titlebar {
   background: var(--bg-secondary);
 }
 
+.inference-analysis-card.ready {
+  align-items: center;
+}
+
 .inference-analysis-leading {
   flex: 0 0 auto;
   margin-top: 1px;
+}
+
+.inference-analysis-card.ready .inference-analysis-leading {
+  margin-top: 0;
 }
 
 .inference-analysis-title {
@@ -2531,8 +2539,7 @@ body[data-platform="windows"] .titlebar {
   font-weight: 600;
 }
 
-.inference-analysis-desc,
-.inference-runtime-detail {
+.inference-analysis-desc {
   margin-top: 4px;
   color: var(--text-secondary);
   font-size: 12px;
@@ -2541,10 +2548,6 @@ body[data-platform="windows"] .titlebar {
 
 .inference-settings-row > div:first-child {
   min-width: 0;
-}
-
-.inference-runtime-warning {
-  color: var(--warning-text);
 }
 
 .inference-select {
