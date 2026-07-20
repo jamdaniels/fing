@@ -2,7 +2,7 @@
 
 All notable changes to Fing will be documented in this file.
 
-## Unreleased
+## 1.2.0-rc1 - 2026-07-20
 
 - Added support for all 99 Whisper languages
 - Added speech model recovery
