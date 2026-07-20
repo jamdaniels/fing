@@ -84,10 +84,8 @@ jobs:
         run: |
           if [ "${{ runner.os }}" = "macOS" ]; then
             echo "args=--target universal-apple-darwin" >> "$GITHUB_OUTPUT"
-          elif [ "${{ steps.release_type.outputs.prerelease }}" = "true" ]; then
-            echo "args=--bundles nsis" >> "$GITHUB_OUTPUT"
           else
-            echo "args=--bundles nsis,msi" >> "$GITHUB_OUTPUT"
+            echo "args=--bundles nsis" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup Bun
@@ -97,6 +95,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Verify tag matches version files
+        shell: bash
         env:
           TAG: ${{ steps.release_tag.outputs.tag }}
         run: bun run release:verify-tag "$TAG"
