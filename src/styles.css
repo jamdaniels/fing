@@ -2509,6 +2509,51 @@ body[data-platform="windows"] .titlebar {
   padding: 6px 0;
 }
 
+.inference-analysis-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-secondary);
+}
+
+.inference-analysis-card.ready {
+  align-items: center;
+}
+
+.inference-analysis-leading {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.inference-analysis-card.ready .inference-analysis-leading {
+  margin-top: 0;
+}
+
+.inference-analysis-title {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.inference-analysis-desc {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.inference-settings-row > div:first-child {
+  min-width: 0;
+}
+
+.inference-select {
+  max-width: 310px;
+}
+
 .onboarding-footer {
   display: flex;
   flex-shrink: 0;

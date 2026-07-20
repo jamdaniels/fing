@@ -1,12 +1,11 @@
 // Whisper transcription wrapper
 
 use crate::engine::{TranscribeError, TranscriptionEngine};
+use crate::inference::{self, InferenceDevice};
 use once_cell::sync::Lazy;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use whisper_rs::{
-    get_lang_id, FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters,
-};
+use whisper_rs::{get_lang_id, FullParams, SamplingStrategy, WhisperContext};
 
 const DEFAULT_LANGUAGE: &str = "en";
 const MAX_PROMPT_TOKENS: usize = 256;
@@ -58,6 +57,7 @@ fn detection_threads() -> usize {
 /// Whisper-based transcription engine using whisper-rs.
 pub struct Transcriber {
     ctx: Mutex<WhisperContext>,
+    device: InferenceDevice,
 }
 
 impl Transcriber {
@@ -67,52 +67,17 @@ impl Transcriber {
             return Err(TranscribeError::ModelNotFound);
         }
 
-        #[cfg(target_os = "windows")]
-        let mut ctx_params = WhisperContextParameters::default();
-        #[cfg(not(target_os = "windows"))]
-        let ctx_params = WhisperContextParameters::default();
-        #[cfg(target_os = "windows")]
-        let prefer_gpu = configure_windows_backend(&mut ctx_params);
-        #[cfg(not(target_os = "windows"))]
-        let prefer_gpu = false;
-
-        let ctx = match WhisperContext::new_with_params(model_path, ctx_params) {
-            Ok(ctx) => ctx,
-            Err(err) if prefer_gpu => {
-                tracing::warn!(
-                    "Failed to initialize Vulkan transcriber: {}. Falling back to CPU.",
-                    err
-                );
-                let mut cpu_params = WhisperContextParameters::default();
-                cpu_params.use_gpu(false);
-                WhisperContext::new_with_params(model_path, cpu_params)
-                    .map_err(|e| TranscribeError::ModelLoadFailed(e.to_string()))?
-            }
-            Err(err) => return Err(TranscribeError::ModelLoadFailed(err.to_string())),
-        };
+        let settings = crate::settings::load_settings_sync();
+        let prepared = inference::prepare_context(
+            model_path,
+            settings.active_model_variant,
+            settings.inference_device,
+        )?;
 
         Ok(Self {
-            ctx: Mutex::new(ctx),
+            ctx: Mutex::new(prepared.context),
+            device: prepared.device,
         })
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn configure_windows_backend(ctx_params: &mut WhisperContextParameters<'_>) -> bool {
-    let devices = whisper_rs::vulkan::list_devices();
-    if let Some(device) = devices.first() {
-        tracing::info!(
-            "Using Vulkan device {}: {} ({} MiB free / {} MiB total)",
-            device.id,
-            device.name,
-            device.vram.free / 1024 / 1024,
-            device.vram.total / 1024 / 1024
-        );
-        true
-    } else {
-        tracing::warn!("No Vulkan devices detected. Falling back to CPU.");
-        ctx_params.use_gpu(false);
-        false
     }
 }
 
@@ -130,9 +95,7 @@ impl TranscriptionEngine for Transcriber {
         let ctx = self.ctx.lock().map_err(|_| {
             TranscribeError::InferenceFailed("Transcriber lock poisoned".to_string())
         })?;
-        let mut state = ctx
-            .create_state()
-            .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
+        let mut state = inference::create_state(&ctx, &self.device)?;
 
         let language = match language_plan(languages) {
             LanguagePlan::Explicit(language) => language,
@@ -231,6 +194,7 @@ pub fn unload_transcriber() {
     if let Ok(mut guard) = TRANSCRIBER.lock() {
         *guard = None;
     }
+    inference::mark_unloaded();
 }
 
 /// Transcribe audio using the global transcriber.
