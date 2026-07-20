@@ -2,9 +2,9 @@
 
 All notable changes to Fing will be documented in this file.
 
-## 1.2.0-rc2 - 2026-07-20
+## 1.2.0 - 2026-07-20
 
-- Added support for all 99 Whisper languages
+- Added support for 99 Whisper languages
 - Windows: Added processing-device selection
 - Added speech model recovery
 - Added German interface language support
