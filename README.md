@@ -35,8 +35,8 @@ Hold your hotkey, speak, release — transcribed text is pasted instantly. Your 
 
 ## Download
 
-- **[macOS (Universal)](https://github.com/jamdaniels/fing/releases/download/v1.1.1/Fing_1.1.1_universal.dmg)** — signed and notarized, open the DMG and move Fing to Applications
-- **[Windows](https://github.com/jamdaniels/fing/releases/download/v1.1.1/Fing_1.1.1_x64-setup.exe)** — if SmartScreen warns you, click "More info" then "Run anyway"
+- **[macOS (Universal)](https://github.com/jamdaniels/fing/releases/download/v1.2.0/Fing_1.2.0_universal.dmg)** — signed and notarized, open the DMG and move Fing to Applications
+- **[Windows](https://github.com/jamdaniels/fing/releases/download/v1.2.0/Fing_1.2.0_x64-setup.exe)** — if SmartScreen warns you, click "More info" then "Run anyway"
 
 ## License
 
