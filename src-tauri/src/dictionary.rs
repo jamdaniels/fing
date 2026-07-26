@@ -120,29 +120,35 @@ fn replace_exact_occurrences(text: &str, canonical: &str) -> String {
     }
 
     let bytes = haystack.as_bytes();
-    let mut cursor = 0usize;
+    // `copied` tracks how much of `text` is already in `out`; `search` tracks
+    // where to look for the next occurrence. They must stay separate: skipping
+    // a mid-word occurrence may not drop the text we skipped over.
+    let mut copied = 0usize;
+    let mut search = 0usize;
     let mut out = String::with_capacity(text.len());
 
-    while cursor < haystack.len() {
-        let Some(found) = haystack[cursor..].find(&needle) else {
+    while search < haystack.len() {
+        let Some(found) = haystack[search..].find(&needle) else {
             break;
         };
 
-        let start = cursor + found;
+        let start = search + found;
         let end = start + needle.len();
 
         if !has_word_boundaries(bytes, start, end) {
-            cursor = start + 1;
+            // Advance a full character so the index stays on a char boundary.
+            search = start + text[start..].chars().next().map_or(1, char::len_utf8);
             continue;
         }
 
-        out.push_str(&text[cursor..start]);
+        out.push_str(&text[copied..start]);
         let matched = &text[start..end];
         out.push_str(&apply_case_style(canonical, matched));
-        cursor = end;
+        copied = end;
+        search = end;
     }
 
-    out.push_str(&text[cursor..]);
+    out.push_str(&text[copied..]);
     out
 }
 
@@ -479,6 +485,59 @@ mod tests {
         let corrected =
             apply_dictionary_corrections("Kubernets rollout done", &["Kubernetes".to_string()]);
         assert_eq!(corrected, "Kubernetes rollout done");
+    }
+
+    #[test]
+    fn substring_occurrence_keeps_surrounding_text() {
+        // A short term appearing inside a longer word must leave the text alone.
+        // Regression: this used to drop everything up to and including the
+        // first character of the skipped occurrence ("pixel" -> "ixel").
+        assert_eq!(
+            apply_dictionary_corrections("pixel density is high", &["Pi".to_string()]),
+            "pixel density is high"
+        );
+        assert_eq!(
+            apply_dictionary_corrections(
+                "what I noticed when I said the word pixel",
+                &["Pi".to_string()]
+            ),
+            "what I noticed when I said the word pixel"
+        );
+        assert_eq!(
+            apply_dictionary_corrections("I am typing something", &["Pi".to_string()]),
+            "I am typing something"
+        );
+        assert_eq!(
+            apply_dictionary_corrections("my finger hurts", &["Fing".to_string()]),
+            "my finger hurts"
+        );
+    }
+
+    #[test]
+    fn standalone_occurrence_still_replaced_around_substring_matches() {
+        assert_eq!(
+            apply_dictionary_corrections("pixel and pi and typing", &["Pi".to_string()]),
+            "pixel and Pi and typing"
+        );
+        assert_eq!(
+            apply_dictionary_corrections("the value of pi is 3.14", &["Pi".to_string()]),
+            "the value of Pi is 3.14"
+        );
+    }
+
+    #[test]
+    fn substring_occurrence_with_multibyte_text_is_preserved() {
+        // `start + 1` on a multi-byte character used to slice mid-codepoint.
+        assert_eq!(
+            apply_dictionary_corrections("Ölpixel wächst", &["Pi".to_string()]),
+            "Ölpixel wächst"
+        );
+        // Rejected match whose first character is multi-byte: advancing by a
+        // single byte would slice mid-codepoint and panic.
+        assert_eq!(
+            apply_dictionary_corrections("日本21", &["日本2".to_string()]),
+            "日本21"
+        );
     }
 
     #[test]
