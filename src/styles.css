@@ -282,6 +282,13 @@ body[data-platform="windows"] .titlebar {
   height: 18px;
 }
 
+/* Conditional notice row above Quit. Reuses .sidebar-item so it shares the
+   nav's rhythm and hover; the accent color is all that marks it as a notice. */
+.sidebar-item-update {
+  font-size: 13px;
+  color: var(--info-text);
+}
+
 .sidebar-spacer {
   flex: 1;
 }
@@ -757,6 +764,19 @@ body[data-platform="windows"] .titlebar {
 .settings-row-label {
   font-size: 13px;
   font-weight: 500;
+}
+
+.update-chip {
+  display: inline-block;
+  padding: 2px 7px;
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--info-text);
+  vertical-align: 1px;
+  background-color: var(--info-15);
+  border: 1px solid var(--info-30);
+  border-radius: 4px;
 }
 
 .model-lazy-label {

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  ArrowUpCircle,
   ArrowUpRight,
   BookOpen,
   Check,
@@ -317,6 +318,13 @@ function setupSidebarListener(): void {
     const action = target.getAttribute("data-action");
     if (view) {
       navigateToTab(view);
+    } else if (action === "update") {
+      // Same path as the tray's "Update available" item: land on Settings so
+      // the row is visible, then run the check/install flow.
+      navigateToTab("settings");
+      runManualUpdateCheck().catch((err) => {
+        console.error("Update check flow failed:", err);
+      });
     } else if (action === "quit") {
       invoke("quit_app");
     }
@@ -349,6 +357,14 @@ function renderSidebar(): void {
       )
       .join("")}
     <div class="sidebar-spacer"></div>
+    ${
+      updateStatus.updateAvailable
+        ? `<button class="sidebar-item sidebar-item-update" data-action="update">
+      ${createIcon(ArrowUpCircle)}
+      <span>${t("updates.available")}</span>
+    </button>`
+        : ""
+    }
     <button class="sidebar-item" data-action="quit">
       ${createIcon(Power)}
       <span>${t("sidebar.quit")}</span>
@@ -1624,7 +1640,7 @@ function getUpdateNotesPreview(
 
 function getUpdateButtonLabel(): string {
   return updateStatus.updateAvailable
-    ? t("updates.available")
+    ? t("updates.install")
     : t("updates.check");
 }
 
@@ -2480,10 +2496,13 @@ function renderSettingsUI(el: HTMLElement): void {
       <div class="settings-card">
         <div class="settings-row">
           <div>
-            <div class="settings-row-label">${t("settings.applicationUpdates")}</div>
+            <div class="settings-row-label">
+              ${t("settings.applicationUpdates")}
+              ${updateStatus.updateAvailable ? `<span class="update-chip">${t("updates.available")}</span>` : ""}
+            </div>
             <div class="settings-row-desc">${t("settings.applicationUpdatesDescription")}</div>
           </div>
-          <button class="btn btn-outline check-updates-btn" ${updateCheckInProgress ? "disabled" : ""}>
+          <button class="btn ${updateStatus.updateAvailable ? "btn-primary" : "btn-outline"} check-updates-btn" ${updateCheckInProgress ? "disabled" : ""}>
             ${updateCheckInProgress ? t("common.checking") : getUpdateButtonLabel()}
           </button>
         </div>
@@ -3103,6 +3122,11 @@ async function init(): Promise<void> {
 
   listen<UpdateStatus>("update-status-changed", (event) => {
     updateStatus = event.payload;
+    if (currentAppState !== "needs-setup") {
+      // The sidebar notice is visible from every tab, so it has to re-render
+      // regardless of which view is currently mounted.
+      renderSidebar();
+    }
     if (currentView === "settings") {
       renderContent();
     }
