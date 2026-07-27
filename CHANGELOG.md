@@ -2,6 +2,11 @@
 
 All notable changes to Fing will be documented in this file.
 
+## 1.2.1-rc1 - 2026-07-27
+
+- Fixed transcription text getting cut off
+- Added subtle update notice
+
 ## 1.2.0 - 2026-07-20
 
 - Added support for 99 Whisper languages
