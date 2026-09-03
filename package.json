@@ -17,6 +17,7 @@
     "lint": "bunx --bun biome check --no-errors-on-unmatched .",
     "lint:fix": "bunx --bun biome check --write --no-errors-on-unmatched .",
     "verify": "bun run lint && bun run typecheck && bun run test:ts && bun run test:rust",
+    "release": "bun run scripts/release.ts release",
     "release:version": "bun run scripts/release.ts bump",
     "release:verify-tag": "bun run scripts/release.ts verify-tag",
     "release:notes": "bun run scripts/release.ts notes"

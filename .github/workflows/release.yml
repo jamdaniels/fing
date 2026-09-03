@@ -200,7 +200,7 @@ jobs:
           tagName: ${{ steps.release_tag.outputs.tag }}
           releaseName: Fing ${{ steps.release_tag.outputs.tag }}
           releaseBody: ${{ steps.release_notes.outputs.body }}
-          releaseDraft: false
+          releaseDraft: true
           prerelease: ${{ steps.release_type.outputs.prerelease }}
           updaterJsonKeepUniversal: ${{ matrix.updater_json_keep_universal }}
           args: ${{ steps.tauri_args.outputs.args }}
@@ -283,3 +283,125 @@ jobs:
 
           echo "Replacing release DMG with stapled artifact"
           gh release upload "$RELEASE_TAG" "$dmg_path" --clobber
+
+  # Both matrix legs upload into the same draft. Nothing is visible to users,
+  # and nothing answers /releases/latest, until this job publishes it.
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve release tag
+        id: release_tag
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag="$GITHUB_REF_NAME"
+          fi
+
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "${tag#v}" >> "$GITHUB_OUTPUT"
+
+          if [[ "$tag" == *-rc* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify release artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.release_tag.outputs.tag }}
+          VERSION: ${{ steps.release_tag.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          gh release download "$TAG" --dir artifacts \
+            --pattern "*.dmg" \
+            --pattern "*-setup.exe" \
+            --pattern "latest.json"
+
+          dmg="artifacts/Fing_${VERSION}_universal.dmg"
+          exe="artifacts/Fing_${VERSION}_x64-setup.exe"
+
+          for artifact in "$dmg" "$exe"; do
+            if [ ! -f "$artifact" ]; then
+              echo "Missing release artifact: $artifact"
+              ls -la artifacts
+              exit 1
+            fi
+          done
+
+          echo "Found both installers:"
+          ls -la "$dmg" "$exe"
+
+      # tauri-action merges each platform into latest.json from two jobs running
+      # in parallel, so confirm neither leg clobbered the other before shipping.
+      - name: Verify updater manifest
+        shell: bash
+        env:
+          VERSION: ${{ steps.release_tag.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          manifest="artifacts/latest.json"
+          manifest_version="$(jq -r '.version' "$manifest")"
+
+          if [ "$manifest_version" != "$VERSION" ]; then
+            echo "latest.json is version $manifest_version, expected $VERSION"
+            exit 1
+          fi
+
+          for platform in darwin-aarch64 darwin-x86_64 windows-x86_64; do
+            signature="$(jq -r --arg platform "$platform" \
+              '.platforms[$platform].signature // ""' "$manifest")"
+
+            if [ -z "$signature" ]; then
+              echo "latest.json has no signed entry for $platform."
+              echo "A parallel job most likely overwrote it."
+              jq -r '.platforms | keys[]' "$manifest"
+              exit 1
+            fi
+          done
+
+          echo "latest.json covers:"
+          jq -r '.platforms | keys[]' "$manifest"
+
+      # Stable filenames so README and the site can link to a URL that never
+      # changes. /releases/latest resolves to the newest non-prerelease, so
+      # release candidates must not carry these names.
+      - name: Attach stable download names
+        if: steps.release_tag.outputs.prerelease == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.release_tag.outputs.tag }}
+          VERSION: ${{ steps.release_tag.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p stable
+          cp "artifacts/Fing_${VERSION}_universal.dmg" stable/Fing-macOS.dmg
+          cp "artifacts/Fing_${VERSION}_x64-setup.exe" \
+            stable/Fing-Windows-setup.exe
+
+          gh release upload "$TAG" \
+            stable/Fing-macOS.dmg \
+            stable/Fing-Windows-setup.exe \
+            --clobber
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.release_tag.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false
