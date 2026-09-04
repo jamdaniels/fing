@@ -935,8 +935,8 @@ body[data-platform="windows"] .titlebar {
 }
 
 .content:has(
-    .dictionary-scrollable > .dictionary-list > .empty-state:only-child
-  ) {
+  .dictionary-scrollable > .dictionary-list > .empty-state:only-child
+) {
   position: relative;
 }
 
