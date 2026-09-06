@@ -419,6 +419,75 @@ function confirm(question: string): boolean {
   return answer?.trim().toLowerCase() === "y";
 }
 
+/** Pause so the changelog can be edited in another window. False means stop. */
+function waitForEdit(): boolean {
+  if (!process.stdin.isTTY) {
+    return false;
+  }
+
+  const answer = prompt(
+    `\nEdit ${CHANGELOG_PATH}, then press Enter to review it again (q to stop):`
+  );
+
+  return answer !== null && answer.trim().toLowerCase() !== "q";
+}
+
+/**
+ * Show what would be published and ask to proceed. The changelog is re-read on
+ * every pass, so declining, editing it, and continuing works. Re-running the
+ * whole command instead would draft entries on top of those edits.
+ */
+async function reviewRelease(
+  tag: string,
+  version: string,
+  warnings: string[],
+  options: ReleaseOptions
+): Promise<boolean> {
+  for (;;) {
+    const notes = extractReleaseNotes(
+      await Bun.file(CHANGELOG_PATH).text(),
+      version
+    );
+
+    heading(`Release notes for ${tag}`);
+    console.log(`${notes}\n`);
+    console.log("These are published to the GitHub release verbatim.");
+
+    if (warnings.length > 0) {
+      heading("Warning");
+      console.log(warnings.join("\n"));
+    }
+
+    heading("Changes to commit");
+    await run(["git", "--no-pager", "diff", "--stat", "--", ...VERSION_FILES]);
+
+    if (options.dryRun) {
+      console.log(
+        `\nDry run. ${CHANGELOG_PATH} and the version files were edited but ` +
+          "nothing was committed."
+      );
+
+      return false;
+    }
+
+    const summary = options.isRc
+      ? `Tag ${tag} and push a prerelease?`
+      : `Tag ${tag} and push a PUBLIC release?`;
+
+    if (options.assumeYes || confirm(`\n${summary}`)) {
+      return true;
+    }
+
+    if (!waitForEdit()) {
+      console.log(
+        `\nStopped. Run \`git checkout -- ${VERSION_FILES.join(" ")}\` to undo.`
+      );
+
+      return false;
+    }
+  }
+}
+
 async function release(
   rawVersion: string,
   options: ReleaseOptions
@@ -468,44 +537,9 @@ async function release(
 
   await verifyTag(tag);
 
-  const notes = extractReleaseNotes(
-    await Bun.file(CHANGELOG_PATH).text(),
-    version
-  );
-
-  heading(`Release notes for ${tag}`);
-  console.log(`${notes}\n`);
-  console.log("These are published to the GitHub release verbatim.");
-
   const warnings = options.isRc ? [] : await warnAboutUntestedChanges(base);
 
-  if (warnings.length > 0) {
-    heading("Warning");
-    console.log(warnings.join("\n"));
-  }
-
-  heading("Changes to commit");
-  await run(["git", "--no-pager", "diff", "--stat", "--", ...VERSION_FILES]);
-
-  if (options.dryRun) {
-    console.log(
-      `\nDry run. ${CHANGELOG_PATH} and the version files were edited but ` +
-        "nothing was committed."
-    );
-
-    return;
-  }
-
-  const summary = options.isRc
-    ? `Tag ${tag} and push a prerelease?`
-    : `Tag ${tag} and push a PUBLIC release?`;
-
-  if (!(options.assumeYes || confirm(`\n${summary}`))) {
-    console.log(
-      `\nStopped. Edit ${CHANGELOG_PATH} and re-run the same command, or ` +
-        `run \`git checkout -- ${VERSION_FILES.join(" ")}\` to undo.`
-    );
-
+  if (!(await reviewRelease(tag, version, warnings, options))) {
     return;
   }
 
