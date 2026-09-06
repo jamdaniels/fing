@@ -2,6 +2,10 @@
 
 All notable changes to Fing will be documented in this file.
 
+## 1.2.2 - 2026-09-06
+
+- Update and refresh dependencies
+
 ## 1.2.1 - 2026-07-27
 
 - Fixed transcription text getting cut off
