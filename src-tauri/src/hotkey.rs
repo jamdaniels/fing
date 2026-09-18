@@ -127,9 +127,16 @@ fn ensure_audio_thread() {
                         tracing::warn!(
                             "Requested microphone {:?} unavailable, recording with '{}'",
                             match_result.requested,
-                            match_result.actual
+                            match_result.actual_name
                         );
-                        persist_fallback_microphone_selection(device_id, match_result.actual);
+                    }
+
+                    if match_result
+                        .requested
+                        .as_ref()
+                        .is_some_and(|requested| requested != &match_result.actual_id)
+                    {
+                        persist_fallback_microphone_selection(device_id, match_result.actual_id);
                     }
                 }
                 Ok(AudioCommand::StopRecording { reply_tx }) => {

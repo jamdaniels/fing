@@ -33,6 +33,7 @@ export interface Transcript {
 export interface AudioDevice {
   id: string;
   isDefault: boolean;
+  legacyId: string;
   name: string;
 }
 

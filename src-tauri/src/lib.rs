@@ -303,7 +303,7 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
 
     let result = MicTestStartResult {
         requested_device: match_result.requested.clone(),
-        actual_device: match_result.actual.clone(),
+        actual_device: match_result.actual_name.clone(),
         device_matched: match_result.matched,
     };
 

@@ -1330,7 +1330,13 @@ async function loadAudioDevices(): Promise<void> {
   state.audioDevices = devices;
 
   if (currentSettings?.selectedMicrophoneId) {
-    state.selectedDeviceId = currentSettings.selectedMicrophoneId;
+    const selectedDevice = state.audioDevices.find(
+      (device) =>
+        device.id === currentSettings.selectedMicrophoneId ||
+        device.legacyId === currentSettings.selectedMicrophoneId
+    );
+    state.selectedDeviceId =
+      selectedDevice?.id ?? currentSettings.selectedMicrophoneId;
   } else if (!state.selectedDeviceId) {
     const defaultDevice = state.audioDevices.find((d) => d.isDefault);
     state.selectedDeviceId = defaultDevice?.id ?? null;

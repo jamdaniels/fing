@@ -1259,7 +1259,10 @@ async function showMicTestModal(): Promise<void> {
   let micTestInterval: number | null = null;
   let currentMicTest: MicrophoneTest | null = null;
   let audioDetected = false;
-  let selectedDeviceId = settings?.selectedMicrophoneId ?? null;
+  let selectedDeviceId = resolveAudioDeviceId(
+    audioDevices,
+    settings?.selectedMicrophoneId
+  );
   let deviceMatchResult: MicTestStartResult | null = null;
   let localDevices = [...audioDevices];
 
@@ -2344,12 +2347,32 @@ function renderDictionary(el: HTMLElement): void {
   `;
 }
 
+function resolveAudioDeviceId(
+  devices: AudioDevice[],
+  selectedDeviceId: string | null | undefined
+): string | null {
+  if (!selectedDeviceId) {
+    return null;
+  }
+
+  return (
+    devices.find(
+      (device) =>
+        device.id === selectedDeviceId || device.legacyId === selectedDeviceId
+    )?.id ?? selectedDeviceId
+  );
+}
+
 function renderSettingsUI(el: HTMLElement): void {
   const isMac = document.body.dataset.platform === "darwin";
+  const selectedMicrophoneId = resolveAudioDeviceId(
+    audioDevices,
+    settings?.selectedMicrophoneId
+  );
   const micOptions = audioDevices
     .map(
       (d) =>
-        `<option value="${escapeHtml(d.id)}" ${settings?.selectedMicrophoneId === d.id || (settings?.selectedMicrophoneId == null && d.isDefault) ? "selected" : ""}>${escapeHtml(d.name)}</option>`
+        `<option value="${escapeHtml(d.id)}" ${selectedMicrophoneId === d.id || (selectedMicrophoneId == null && d.isDefault) ? "selected" : ""}>${escapeHtml(d.name)}</option>`
     )
     .join("");
 
