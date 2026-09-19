@@ -1,5 +1,7 @@
 // Windows-specific platform code
 
+use windows::core::HSTRING;
+use windows::ApplicationModel::{StartupTask, StartupTaskState};
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
@@ -178,4 +180,70 @@ pub fn type_text(text: &str) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 pub fn type_text(_text: &str) -> Result<(), String> {
     Err("type_text only implemented on Windows".to_string())
+}
+
+/// Whether the process runs with MSIX package identity (installed from the
+/// Microsoft Store). Unpackaged (NSIS) installs have no package identity.
+pub fn is_packaged() -> bool {
+    use windows_sys::Win32::Foundation::APPMODEL_ERROR_NO_PACKAGE;
+    use windows_sys::Win32::Storage::Packaging::Appx::GetCurrentPackageFullName;
+
+    let mut length: u32 = 0;
+    let result = unsafe { GetCurrentPackageFullName(&mut length, std::ptr::null_mut()) };
+    result != APPMODEL_ERROR_NO_PACKAGE
+}
+
+/// Task id declared in the MSIX manifest (`windows.startupTask` extension).
+const STARTUP_TASK_ID: &str = "FingStartup";
+
+async fn startup_task() -> Result<StartupTask, String> {
+    StartupTask::GetAsync(&HSTRING::from(STARTUP_TASK_ID))
+        .map_err(|e| format!("StartupTask lookup failed: {e}"))?
+        .await
+        .map_err(|e| format!("StartupTask lookup failed: {e}"))
+}
+
+fn is_enabled_state(state: StartupTaskState) -> bool {
+    state == StartupTaskState::Enabled || state == StartupTaskState::EnabledByPolicy
+}
+
+/// Autostart for the packaged (Store) build. The registry Run key used by
+/// tauri-plugin-autostart is virtualized inside an MSIX container and the
+/// install path changes on every Store update, so the StartupTask API is
+/// the only mechanism that works there.
+pub async fn set_startup_task_enabled(enabled: bool) -> Result<(), String> {
+    let task = startup_task().await?;
+
+    if !enabled {
+        return task
+            .Disable()
+            .map_err(|e| format!("StartupTask disable failed: {e}"));
+    }
+
+    let state = task
+        .RequestEnableAsync()
+        .map_err(|e| format!("StartupTask enable failed: {e}"))?
+        .await
+        .map_err(|e| format!("StartupTask enable failed: {e}"))?;
+
+    if is_enabled_state(state) {
+        Ok(())
+    } else if state == StartupTaskState::DisabledByUser {
+        Err(
+            "Startup was disabled in Windows Settings > Apps > Startup and must be re-enabled there"
+                .to_string(),
+        )
+    } else if state == StartupTaskState::DisabledByPolicy {
+        Err("Startup is disabled by system policy".to_string())
+    } else {
+        Err("Startup could not be enabled".to_string())
+    }
+}
+
+pub async fn is_startup_task_enabled() -> Result<bool, String> {
+    let state = startup_task()
+        .await?
+        .State()
+        .map_err(|e| format!("StartupTask state failed: {e}"))?;
+    Ok(is_enabled_state(state))
 }

@@ -1,3 +1,4 @@
+use crate::distribution::{self, Distribution};
 use serde::{Deserialize, Serialize};
 
 /// Application metadata for the about/settings UI.
@@ -10,6 +11,7 @@ pub struct AppInfo {
     pub build_date: String,
     pub repository: String,
     pub inference_backend: String,
+    pub distribution: Distribution,
 }
 
 /// Build application info from compile-time environment variables.
@@ -29,6 +31,7 @@ pub fn build_app_info() -> AppInfo {
         build_date: option_env!("BUILD_DATE").unwrap_or("unknown").to_string(),
         repository: "https://github.com/jamdaniels/fing".to_string(),
         inference_backend: inference_backend.to_string(),
+        distribution: distribution::current(),
     }
 }
 

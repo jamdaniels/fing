@@ -170,6 +170,7 @@ let updateCheckInProgress = false;
 let updateStatus: UpdateStatus = {
   updateAvailable: false,
   checking: false,
+  supported: true,
 };
 type SettingsPermission = "microphone" | "accessibility";
 const permissionRestartRequired = new Set<SettingsPermission>();
@@ -2363,6 +2364,43 @@ function resolveAudioDeviceId(
   );
 }
 
+function renderSystemSettings(): string {
+  const isStoreBuild = appInfo?.distribution === "microsoft-store";
+  const updatesRow = updateStatus.supported
+    ? `<div class="settings-row">
+          <div>
+            <div class="settings-row-label">
+              ${t("settings.applicationUpdates")}
+              ${updateStatus.updateAvailable ? `<span class="update-chip">${t("updates.available")}</span>` : ""}
+            </div>
+            <div class="settings-row-desc">${t("settings.applicationUpdatesDescription")}</div>
+          </div>
+          <button class="btn ${updateStatus.updateAvailable ? "btn-primary" : "btn-outline"} check-updates-btn" ${updateCheckInProgress ? "disabled" : ""}>
+            ${updateCheckInProgress ? t("common.checking") : getUpdateButtonLabel()}
+          </button>
+        </div>`
+    : "";
+  const startOnLoginDescription = isStoreBuild
+    ? t("settings.startOnLoginStoreDescription")
+    : t("settings.startOnLoginDescription");
+
+  return `
+    <div class="settings-section">
+      <div class="settings-section-title">${t("settings.system")}</div>
+      <div class="settings-card">
+        ${updatesRow}
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">${t("settings.startOnLogin")}</div>
+            <div class="settings-row-desc">${startOnLoginDescription}</div>
+          </div>
+          <div class="toggle ${settings?.autoStart ? "active" : ""}" data-setting="autoStart"></div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderSettingsUI(el: HTMLElement): void {
   const isMac = document.body.dataset.platform === "darwin";
   const selectedMicrophoneId = resolveAudioDeviceId(
@@ -2514,30 +2552,7 @@ function renderSettingsUI(el: HTMLElement): void {
         </div>
       </div>
     </div>
-    <div class="settings-section">
-      <div class="settings-section-title">${t("settings.system")}</div>
-      <div class="settings-card">
-        <div class="settings-row">
-          <div>
-            <div class="settings-row-label">
-              ${t("settings.applicationUpdates")}
-              ${updateStatus.updateAvailable ? `<span class="update-chip">${t("updates.available")}</span>` : ""}
-            </div>
-            <div class="settings-row-desc">${t("settings.applicationUpdatesDescription")}</div>
-          </div>
-          <button class="btn ${updateStatus.updateAvailable ? "btn-primary" : "btn-outline"} check-updates-btn" ${updateCheckInProgress ? "disabled" : ""}>
-            ${updateCheckInProgress ? t("common.checking") : getUpdateButtonLabel()}
-          </button>
-        </div>
-        <div class="settings-row">
-          <div>
-            <div class="settings-row-label">${t("settings.startOnLogin")}</div>
-            <div class="settings-row-desc">${t("settings.startOnLoginDescription")}</div>
-          </div>
-          <div class="toggle ${settings?.autoStart ? "active" : ""}" data-setting="autoStart"></div>
-        </div>
-      </div>
-    </div>
+    ${renderSystemSettings()}
   `;
 
   const langMount = el.querySelector("#transcription-langs") as HTMLElement;

@@ -2,8 +2,10 @@
 
 mod app_info;
 mod audio;
+mod autostart;
 mod db;
 mod dictionary;
+mod distribution;
 mod engine;
 mod hotkey;
 mod hotkey_config;
@@ -36,7 +38,6 @@ use tauri::{
     tray::TrayIconBuilder,
     Emitter, Manager,
 };
-use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 
 /// Consolidated mic test state to prevent race conditions
 /// All state changes go through a single lock acquisition
@@ -529,18 +530,13 @@ fn arm_permission_restart() {
 }
 
 #[tauri::command]
-fn set_auto_start(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    let autostart = app.autolaunch();
-    if enabled {
-        autostart.enable().map_err(|e| e.to_string())
-    } else {
-        autostart.disable().map_err(|e| e.to_string())
-    }
+async fn set_auto_start(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    autostart::set_enabled(&app, enabled).await
 }
 
 #[tauri::command]
-fn get_auto_start(app: tauri::AppHandle) -> bool {
-    app.autolaunch().is_enabled().unwrap_or(false)
+async fn get_auto_start(app: tauri::AppHandle) -> bool {
+    autostart::is_enabled(&app).await
 }
 
 #[tauri::command]
@@ -816,6 +812,15 @@ fn build_tray_menu_for_state(
             None::<&str>,
         )?;
         let separator1 = PredefinedMenuItem::separator(app)?;
+        let quit = MenuItem::with_id(app, "quit", &translations.tray.quit, true, None::<&str>)?;
+
+        if !update::is_supported() {
+            return Ok(Menu::with_items(
+                app,
+                &[&open, &history, &settings, &separator1, &quit],
+            )?);
+        }
+
         let separator2 = PredefinedMenuItem::separator(app)?;
         let updates = MenuItem::with_id(
             app,
@@ -824,7 +829,6 @@ fn build_tray_menu_for_state(
             true,
             None::<&str>,
         )?;
-        let quit = MenuItem::with_id(app, "quit", &translations.tray.quit, true, None::<&str>)?;
         Ok(Menu::with_items(
             app,
             &[

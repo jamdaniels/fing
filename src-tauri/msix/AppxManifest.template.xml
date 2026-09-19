@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Template for the Microsoft Store MSIX package. scripts/msix-pack.ts fills
+  the placeholders from msix.config.json and tauri.conf.json.
+
+  Identity Name/Publisher and Properties/DisplayName must match the values
+  Partner Center shows under Product management > Product identity, byte for
+  byte. VisualElements DisplayName is the Start menu / taskbar name.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap5 rescap">
+
+  <Identity
+    Name="{{IDENTITY_NAME}}"
+    Publisher="{{PUBLISHER}}"
+    Version="{{VERSION}}"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>{{DISPLAY_NAME}}</DisplayName>
+    <PublisherDisplayName>{{PUBLISHER_DISPLAY_NAME}}</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-US" />
+    <Resource Language="de-DE" />
+  </Resources>
+
+  <Applications>
+    <Application Id="Fing" Executable="Fing.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="{{PRODUCT_NAME}}"
+        Description="{{DESCRIPTION}}"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile
+          Square71x71Logo="Assets\Square71x71Logo.png"
+          Square310x310Logo="Assets\Square310x310Logo.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <!-- TaskId must match STARTUP_TASK_ID in src-tauri/src/platform/windows.rs -->
+        <uap5:Extension Category="windows.startupTask" Executable="Fing.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap5:StartupTask TaskId="FingStartup" Enabled="false" DisplayName="{{PRODUCT_NAME}}" />
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <rescap:Capability Name="runFullTrust" />
+    <DeviceCapability Name="microphone" />
+  </Capabilities>
+</Package>

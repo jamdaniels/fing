@@ -134,6 +134,7 @@
     "applicationUpdatesDescription": "Nach der neuesten Version suchen und sie installieren",
     "startOnLogin": "Bei Anmeldung starten",
     "startOnLoginDescription": "Fing beim Anmelden automatisch starten",
+    "startOnLoginStoreDescription": "Fing beim Anmelden automatisch starten. Von Windows verwaltet unter Einstellungen > Apps > Autostart",
     "turnOffHistoryTitle": "Verlauf deaktivieren?",
     "turnOffHistoryBody": "Alle gespeicherten Transkriptionen werden dauerhaft gelöscht."
   },

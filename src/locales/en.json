@@ -134,6 +134,7 @@
     "applicationUpdatesDescription": "Check for and install the latest version",
     "startOnLogin": "Start on login",
     "startOnLoginDescription": "Launch Fing when you log in",
+    "startOnLoginStoreDescription": "Launch Fing when you log in. Managed by Windows under Settings > Apps > Startup",
     "turnOffHistoryTitle": "Turn Off History?",
     "turnOffHistoryBody": "All saved transcripts will be permanently deleted."
   },
