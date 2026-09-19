@@ -2,6 +2,10 @@
 
 All notable changes to Fing will be documented in this file.
 
+## 1.2.3 - 2026-09-19
+
+- Improved microphone naming
+
 ## 1.2.2 - 2026-09-06
 
 - Update and refresh dependencies
