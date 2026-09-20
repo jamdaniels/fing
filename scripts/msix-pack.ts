@@ -17,12 +17,18 @@ const TAURI_CONFIG_PATH = "src-tauri/tauri.conf.json";
 const MSIX_CONFIG_PATH = "src-tauri/msix/msix.config.json";
 const MANIFEST_TEMPLATE_PATH = "src-tauri/msix/AppxManifest.template.xml";
 const ICONS_DIR = "src-tauri/icons";
-// Referenced from AppxManifest.template.xml under Assets\.
+// Referenced from AppxManifest.template.xml under Assets\. Without the
+// unplated/lightunplated (dark/light theme) target-size variants Windows
+// draws the taskbar icon on an accent-colored plate.
+const UNPLATED_TARGET_SIZES = [16, 20, 24, 30, 32, 36, 40, 48, 64, 256];
 const ASSET_FILES = [
   "StoreLogo.png",
   "Square44x44Logo.png",
-  "Square71x71Logo.png",
   "Square150x150Logo.png",
+  ...UNPLATED_TARGET_SIZES.flatMap((size) => [
+    `Square44x44Logo.targetsize-${size}_altform-unplated.png`,
+    `Square44x44Logo.targetsize-${size}_altform-lightunplated.png`,
+  ]),
 ];
 const WINDOWS_KITS_BIN = "C:\\Program Files (x86)\\Windows Kits\\10\\bin";
 const SEMVER_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/;
@@ -200,6 +206,33 @@ async function main(): Promise<void> {
     VERSION: msixVersion,
   });
   await Bun.write(join(stagingDir, "AppxManifest.xml"), manifest);
+
+  // Qualified asset names (targetsize-*, altform-*) are only resolved through
+  // the package resource index, so build resources.pri from the staging dir.
+  const priConfigPath = join(outDir, "priconfig.xml");
+  const makepri = newestSdkTool("makepri");
+  await run([
+    makepri,
+    "createconfig",
+    "/o",
+    "/cf",
+    priConfigPath,
+    "/dq",
+    "en-US",
+  ]);
+  await run([
+    makepri,
+    "new",
+    "/o",
+    "/pr",
+    stagingDir,
+    "/cf",
+    priConfigPath,
+    "/mn",
+    join(stagingDir, "AppxManifest.xml"),
+    "/of",
+    join(stagingDir, "resources.pri"),
+  ]);
 
   await rm(packagePath, { force: true });
   await run([
