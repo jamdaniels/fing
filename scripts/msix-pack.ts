@@ -139,7 +139,7 @@ export function bundleResourceTargets(config: TauriConfig): string[] {
 
 function resolveExe(explicit: string | undefined): string {
   // Same default target dir as scripts/tauri-build.ts on Windows.
-  const targetDir = process.env.CARGO_TARGET_DIR ?? "C:\\ft";
+  const targetDir = process.env.CARGO_TARGET_DIR ?? "C:\\t";
   const candidates = explicit
     ? [explicit]
     : [
