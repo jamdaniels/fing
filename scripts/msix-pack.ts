@@ -23,7 +23,6 @@ const ASSET_FILES = [
   "Square44x44Logo.png",
   "Square71x71Logo.png",
   "Square150x150Logo.png",
-  "Square310x310Logo.png",
 ];
 const WINDOWS_KITS_BIN = "C:\\Program Files (x86)\\Windows Kits\\10\\bin";
 const SEMVER_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/;
