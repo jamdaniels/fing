@@ -1,7 +1,12 @@
 // Windows-specific platform code
 
-use windows::core::HSTRING;
+use windows::core::{h, HSTRING};
 use windows::ApplicationModel::{StartupTask, StartupTaskState};
+use windows::Foundation::Uri;
+use windows::Security::Authorization::AppCapabilityAccess::{
+    AppCapability, AppCapabilityAccessStatus,
+};
+use windows::System::Launcher;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
@@ -18,30 +23,84 @@ pub fn request_accessibility_permission() -> bool {
     true
 }
 
-/// Check microphone permission - Windows doesn't require explicit permission
-/// but we still check if audio capture works
+/// Microphone consent. Packaged (Store) builds run under Windows' per-app
+/// privacy consent, which otherwise pops the OS dialog lazily on the first
+/// capture activation (i.e. mid hotkey press). Unpackaged builds have no
+/// consent gate at all.
 pub fn check_microphone_permission() -> String {
-    use crate::audio::AudioCapture;
+    if !is_packaged() {
+        return "granted".to_string();
+    }
 
-    let mut capture = AudioCapture::new();
-    match capture.test_microphone() {
-        Ok(test) => {
-            if test.is_receiving_audio || test.peak_level > 0.0 {
-                "granted".to_string()
-            } else {
-                let devices = AudioCapture::list_devices();
-                if devices.is_empty() {
-                    "denied".to_string()
-                } else {
-                    // On Windows, if we have devices but no audio, it's likely just silence
-                    "granted".to_string()
-                }
-            }
-        }
+    match microphone_capability().and_then(|capability| capability.CheckAccess()) {
+        Ok(status) => capability_status_to_string(status),
         Err(e) => {
-            tracing::warn!("Microphone check failed: {}", e);
+            tracing::warn!("Microphone capability check failed: {}", e);
             "denied".to_string()
         }
+    }
+}
+
+/// Prompt for microphone consent (joins until the dialog is answered, so
+/// never call this on the main thread), or open the Windows privacy page when
+/// the user already denied it: a denied capability cannot be re-prompted.
+pub fn request_microphone_permission() {
+    if !is_packaged() {
+        return;
+    }
+
+    let capability = match microphone_capability() {
+        Ok(capability) => capability,
+        Err(e) => {
+            tracing::warn!("Microphone capability lookup failed: {}", e);
+            return;
+        }
+    };
+
+    match capability.CheckAccess() {
+        Ok(AppCapabilityAccessStatus::Allowed) => {}
+        Ok(AppCapabilityAccessStatus::UserPromptRequired) => {
+            match capability
+                .RequestAccessAsync()
+                .and_then(|operation| operation.join())
+            {
+                Ok(status) => tracing::info!(
+                    "Microphone consent result: {}",
+                    capability_status_to_string(status)
+                ),
+                Err(e) => tracing::warn!("Microphone consent request failed: {}", e),
+            }
+        }
+        Ok(_) => open_microphone_privacy_settings(),
+        Err(e) => tracing::warn!("Microphone capability check failed: {}", e),
+    }
+}
+
+fn microphone_capability() -> windows::core::Result<AppCapability> {
+    AppCapability::Create(h!("microphone"))
+}
+
+fn capability_status_to_string(status: AppCapabilityAccessStatus) -> String {
+    match status {
+        AppCapabilityAccessStatus::Allowed => "granted",
+        AppCapabilityAccessStatus::UserPromptRequired => "prompt",
+        AppCapabilityAccessStatus::DeniedByUser | AppCapabilityAccessStatus::DeniedBySystem => {
+            "denied"
+        }
+        other => {
+            tracing::warn!("Unexpected microphone capability status: {:?}", other);
+            "denied"
+        }
+    }
+    .to_string()
+}
+
+fn open_microphone_privacy_settings() {
+    let result = Uri::CreateUri(h!("ms-settings:privacy-microphone"))
+        .and_then(|uri| Launcher::LaunchUriAsync(&uri))
+        .and_then(|operation| operation.join());
+    if let Err(e) = result {
+        tracing::warn!("Failed to open microphone privacy settings: {}", e);
     }
 }
 

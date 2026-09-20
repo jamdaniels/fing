@@ -551,18 +551,10 @@ struct PermissionStatus {
 }
 
 #[tauri::command]
-fn request_permissions() -> PermissionStatus {
-    // Check microphone permission
-    let mic_status = if cfg!(target_os = "macos") {
-        platform::check_microphone_permission()
-    } else {
-        // On other platforms, assume granted if devices exist
-        if AudioCapture::list_devices().is_empty() {
-            "denied".to_string()
-        } else {
-            "granted".to_string()
-        }
-    };
+async fn request_permissions() -> PermissionStatus {
+    // Check microphone permission (platform code decides whether an OS
+    // consent gate applies, e.g. MSIX package identity on Windows)
+    let mic_status = platform::check_microphone_permission();
 
     // Check accessibility
     let acc_status = if cfg!(target_os = "macos") {
@@ -665,9 +657,11 @@ async fn get_inference_runtime_info(
 }
 
 #[tauri::command]
-fn request_microphone_permission() {
-    #[cfg(target_os = "macos")]
-    platform::request_microphone_permission();
+async fn request_microphone_permission() -> Result<(), String> {
+    // Blocks until the OS consent dialog is answered; keep it off the main thread
+    tauri::async_runtime::spawn_blocking(platform::request_microphone_permission)
+        .await
+        .map_err(|error| format!("Microphone permission request failed: {error}"))
 }
 
 #[tauri::command]

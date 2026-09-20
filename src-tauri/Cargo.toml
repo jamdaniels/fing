@@ -59,8 +59,14 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Threading",
     "Win32_Storage_Packaging_Appx",
 ] }
-# WinRT StartupTask for autostart when installed from the Microsoft Store (MSIX)
-windows = { version = "0.62", features = ["ApplicationModel", "Foundation"] }
+# WinRT APIs for Microsoft Store (MSIX) installs: StartupTask autostart,
+# AppCapability microphone consent, Launcher for the privacy settings page
+windows = { version = "0.62", features = [
+    "ApplicationModel",
+    "Foundation",
+    "Security_Authorization_AppCapabilityAccess",
+    "System",
+] }
 
 [features]
 default = ["custom-protocol"]

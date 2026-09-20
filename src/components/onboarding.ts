@@ -798,22 +798,46 @@ function renderPermissions(): void {
   const perms = state.permissions;
   const isMac = navigator.userAgent.includes("Mac");
 
-  if (!isMac) {
-    goToStep(5);
-    return;
+  // Windows only gates the microphone (Store builds), and consent takes
+  // effect immediately, so no accessibility row and no restart there.
+  const allGranted =
+    perms?.microphone === "granted" &&
+    (!isMac || perms?.accessibility === "granted");
+  const micDeniedOnWindows = !isMac && perms?.microphone === "denied";
+
+  const accessibilityRow = isMac
+    ? `<div class="permission-row">
+            <div class="permission-info">
+              <span class="onb-ibox onb-ibox-lg">${createIcon(PersonStanding)}</span>
+              <div>
+                <div class="permission-label">${t("onboarding.accessibilityAccess")}</div>
+                <div class="permission-desc">${t("onboarding.accessibilityRequired")}</div>
+              </div>
+            </div>
+            ${renderAccessibilityPermissionStatus(perms?.accessibility)}
+          </div>`
+    : "";
+
+  let footHint = "";
+  if (micDeniedOnWindows) {
+    footHint = t("onboarding.microphoneDeniedWindows");
+  } else if (!allGranted && isMac) {
+    footHint = t("onboarding.grantRemaining");
   }
 
-  const allGranted =
-    perms?.microphone === "granted" && perms?.accessibility === "granted";
+  const footButton =
+    !allGranted && isMac
+      ? `<button class="btn btn-accent btn-lg btn-block" id="restart-btn">${t("onboarding.restartApply")}</button>`
+      : `<button class="btn btn-accent btn-lg btn-block" id="continue-btn" ${allGranted ? "" : "disabled"}>${t("common.continue")}</button>`;
 
   container.innerHTML = `
     <div class="onboarding">
       <div class="onboarding-header">
         <div class="onboarding-icon">
-          ${createIcon(PersonStanding)}
+          ${createIcon(isMac ? PersonStanding : Mic)}
         </div>
         <h1 class="onboarding-title">${t("onboarding.permissionsTitle")}</h1>
-        <p class="onboarding-desc">${t("onboarding.permissionsSubtitle")}</p>
+        <p class="onboarding-desc">${t(isMac ? "onboarding.permissionsSubtitle" : "onboarding.permissionsSubtitleWindows")}</p>
       </div>
       <div class="onboarding-body">
         <div class="permissions-list">
@@ -827,30 +851,12 @@ function renderPermissions(): void {
             </div>
             ${renderMicPermissionStatus(perms?.microphone)}
           </div>
-
-          <div class="permission-row">
-            <div class="permission-info">
-              <span class="onb-ibox onb-ibox-lg">${createIcon(PersonStanding)}</span>
-              <div>
-                <div class="permission-label">${t("onboarding.accessibilityAccess")}</div>
-                <div class="permission-desc">${t("onboarding.accessibilityRequired")}</div>
-              </div>
-            </div>
-            ${renderAccessibilityPermissionStatus(perms?.accessibility)}
-          </div>
+          ${accessibilityRow}
         </div>
       </div>
       <div class="onboarding-footer">
-        ${
-          allGranted
-            ? ""
-            : `<p class="onboarding-foot-hint">${t("onboarding.grantRemaining")}</p>`
-        }
-        ${
-          allGranted
-            ? `<button class="btn btn-accent btn-lg btn-block" id="continue-btn">${t("common.continue")}</button>`
-            : `<button class="btn btn-accent btn-lg btn-block" id="restart-btn">${t("onboarding.restartApply")}</button>`
-        }
+        ${footHint ? `<p class="onboarding-foot-hint">${footHint}</p>` : ""}
+        ${footButton}
         ${renderStepIndicator(4)}
       </div>
     </div>
@@ -1191,8 +1197,9 @@ async function goToStep(step: OnboardingStep): Promise<void> {
   await stopPolling();
   state.step = step;
 
-  if (step === 4) {
-    await handleRequestPermissions();
+  if (step === 4 && !(await enterPermissionsStep())) {
+    await goToStep(5);
+    return;
   }
 
   if (step === 5) {
@@ -1301,25 +1308,44 @@ function handleStartDownload(): void {
   startDownloadPolling();
 }
 
-async function handleRequestPermissions(): Promise<void> {
+// Loads the current status and reports whether step 4 should be shown.
+// macOS always shows it; elsewhere only while the OS still gates the
+// microphone (the backend reports "granted" when there is no consent gate).
+async function enterPermissionsStep(): Promise<boolean> {
+  state.permissions = await requestPermissions();
+  const needed =
+    navigator.userAgent.includes("Mac") ||
+    state.permissions.microphone !== "granted";
+  if (needed) {
+    window.addEventListener("focus", handlePermissionsFocus);
+  }
+  return needed;
+}
+
+async function refreshPermissions(): Promise<void> {
   state.permissions = await requestPermissions();
   render();
 }
 
+// Grant flows can send the user to the OS settings app; re-check when they
+// come back so the step reflects what they changed there.
+function handlePermissionsFocus(): void {
+  if (state.step === 4) {
+    refreshPermissions().catch((err) => {
+      console.error("Failed to refresh permissions:", err);
+    });
+  }
+}
+
 async function handleGrantAccessibility(): Promise<void> {
   await requestAccessibilityPermission();
-  setTimeout(async () => {
-    state.permissions = await requestPermissions();
-    render();
-  }, 1000);
+  setTimeout(refreshPermissions, 1000);
 }
 
 async function handleGrantMicrophone(): Promise<void> {
+  // Resolves once the OS dialog is answered (or the settings app is opened)
   await requestMicrophonePermission();
-  setTimeout(async () => {
-    state.permissions = await requestPermissions();
-    render();
-  }, 1000);
+  await refreshPermissions();
 }
 
 async function loadAudioDevices(): Promise<void> {
@@ -1448,6 +1474,7 @@ function startDownloadPolling(): void {
 }
 
 async function stopPolling(): Promise<void> {
+  window.removeEventListener("focus", handlePermissionsFocus);
   if (downloadPollInterval) {
     clearInterval(downloadPollInterval);
     downloadPollInterval = null;

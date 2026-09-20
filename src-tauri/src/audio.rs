@@ -539,57 +539,6 @@ impl AudioCapture {
         output
     }
 
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    pub fn test_microphone(&mut self) -> Result<MicrophoneTest, AudioError> {
-        let (_, match_result) = self.get_device()?;
-        let device_name = match_result.actual_name;
-
-        // Initialize if not already
-        let was_init = self.stream.is_some();
-        if !was_init {
-            let _ = self.init_capture()?;
-        }
-
-        // Clear buffer and record briefly
-        if let Ok(mut buf) = self.buffer.lock() {
-            buf.clear();
-        }
-
-        if let Some(ref stream) = self.stream {
-            let _ = stream.play();
-        }
-
-        // Wait a bit for samples (keep short to avoid blocking IPC)
-        std::thread::sleep(std::time::Duration::from_millis(50));
-
-        if let Some(ref stream) = self.stream {
-            let _ = stream.pause();
-        }
-
-        // Analyze buffer
-        let buf = match self.buffer.lock() {
-            Ok(buf) => buf,
-            Err(poisoned) => {
-                tracing::warn!("Audio buffer mutex poisoned in test_microphone, recovering");
-                poisoned.into_inner()
-            }
-        };
-        let peak_level = buf.iter().map(|&s| s.abs()).fold(0.0f32, f32::max);
-        let is_receiving_audio = !buf.is_empty() && peak_level > 0.001;
-
-        // Clean up if we initialized
-        if !was_init {
-            drop(buf);
-            self.close_capture();
-        }
-
-        Ok(MicrophoneTest {
-            device_name,
-            peak_level,
-            is_receiving_audio,
-        })
-    }
-
     /// Start continuous mic test - keeps stream open
     pub fn start_mic_test(&mut self) -> Result<DeviceMatchResult, AudioError> {
         let match_result = self.init_capture()?;

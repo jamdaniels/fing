@@ -2616,38 +2616,35 @@ function updatePermissionStatus(grantedPermission?: SettingsPermission): void {
 
 async function refreshPermissionStatus(
   grantedPermission?: SettingsPermission
-): Promise<void> {
+): Promise<PermissionStatus | null> {
   const micBadge = document.querySelector(
     '[data-permission="microphone"]'
-  ) as HTMLElement;
+  ) as HTMLElement | null;
   const accBadge = document.querySelector(
     '[data-permission="accessibility"]'
-  ) as HTMLElement;
+  ) as HTMLElement | null;
 
   if (!micBadge) {
-    return;
-  }
-
-  const isMac = document.body.dataset.platform === "darwin";
-
-  if (!isMac) {
-    updateBadge(micBadge, "granted", "microphone");
-    return;
-  }
-
-  if (!accBadge) {
-    return;
+    return null;
   }
 
   const status = await requestPermissions();
-  trackPermissionRestartRequirement(status);
 
-  if (grantedPermission && status[grantedPermission] === "granted") {
-    markPermissionRestartRequired(grantedPermission);
+  // Only macOS needs a restart after granting; Windows consent (Store
+  // builds) takes effect immediately.
+  if (document.body.dataset.platform === "darwin") {
+    trackPermissionRestartRequirement(status);
+
+    if (grantedPermission && status[grantedPermission] === "granted") {
+      markPermissionRestartRequired(grantedPermission);
+    }
   }
 
   updateBadge(micBadge, status.microphone, "microphone");
-  updateBadge(accBadge, status.accessibility, "accessibility");
+  if (accBadge) {
+    updateBadge(accBadge, status.accessibility, "accessibility");
+  }
+  return status;
 }
 
 function updateBadge(
@@ -2696,9 +2693,10 @@ function pollPermissionStatusAfterRequest(type: SettingsPermission): void {
   const intervalMs = 500;
 
   const refresh = async (): Promise<void> => {
-    await refreshPermissionStatus(type);
+    const status = await refreshPermissionStatus(type);
 
     if (
+      status?.[type] === "granted" ||
       permissionRestartRequired.has(type) ||
       Date.now() - startedAt >= timeoutMs
     ) {
