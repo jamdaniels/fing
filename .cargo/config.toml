@@ -1,0 +1,6 @@
+# Statically link the MSVC C/C++ runtime so Fing.exe does not depend on the
+# Visual C++ Redistributable (MSVCP140.dll / VCRUNTIME140.dll). Required for
+# Microsoft Store certification and keeps direct installs working on clean
+# machines. The cmake/cc crates pick this up and build whisper.cpp with /MT.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

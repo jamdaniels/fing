@@ -77,3 +77,10 @@ strip = true
 lto = true
 codegen-units = 1
 panic = "abort"
+
+# whisper-rs-sys builds whisper.cpp with `--config Release` but, when its build
+# script has debug assertions, sets CMAKE_BUILD_TYPE=RelWithDebInfo. On MSVC
+# the static CRT flag (.cargo/config.toml) then misses the Release config and
+# debug builds fail to link (/MD vs /MT). Keep its build type Release.
+[profile.dev.package.whisper-rs-sys]
+debug-assertions = false
