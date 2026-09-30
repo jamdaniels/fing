@@ -2,6 +2,11 @@
 
 All notable changes to Fing will be documented in this file.
 
+## 1.2.5 - 2026-09-30
+
+- Windows: Fixed Notepad text pasting
+- Windows: Added Microsoft Store release
+
 ## 1.2.3 - 2026-09-19
 
 - Improved microphone naming
