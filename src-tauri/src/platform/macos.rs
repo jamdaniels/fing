@@ -70,6 +70,11 @@ pub fn check_accessibility_permission() -> bool {
     unsafe { AXIsProcessTrusted() }
 }
 
+/// macOS builds are never installed with a store package identity.
+pub fn is_packaged() -> bool {
+    false
+}
+
 pub fn request_accessibility_permission() -> bool {
     unsafe {
         let keys = [kAXTrustedCheckOptionPrompt];

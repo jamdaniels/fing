@@ -33,7 +33,7 @@ if (process.platform === "darwin") {
 }
 
 if (process.platform === "win32") {
-  env.CARGO_TARGET_DIR ??= "C:\\ft";
+  env.CARGO_TARGET_DIR ??= "C:\\t";
   env.GGML_CCACHE ??= "OFF";
 }
 

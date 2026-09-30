@@ -20,6 +20,8 @@ const CURRENT_APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub struct UpdateStatus {
     pub update_available: bool,
     pub checking: bool,
+    /// False when another channel (the Microsoft Store) delivers updates.
+    pub supported: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -128,6 +130,21 @@ fn runtime_status() -> UpdateStatus {
     UpdateStatus {
         update_available: state.update_available,
         checking: state.checking,
+        supported: is_supported(),
+    }
+}
+
+/// Whether this build updates itself. Store builds never check: the store
+/// delivers updates and the install directory is read-only.
+pub fn is_supported() -> bool {
+    !crate::distribution::is_store_build()
+}
+
+fn unavailable_reason() -> String {
+    if is_supported() {
+        "Update checks are unavailable during setup".to_string()
+    } else {
+        "Updates are delivered by the store".to_string()
     }
 }
 
@@ -253,7 +270,7 @@ pub fn current_update_status() -> UpdateStatus {
 }
 
 pub async fn initialize_for_ready_app() -> Result<(), String> {
-    mark_enabled(true);
+    mark_enabled(is_supported());
     let persisted = read_persisted_state_from_disk()?;
     apply_persisted_state(persisted)?;
     Ok(())
@@ -338,7 +355,7 @@ async fn run_check(app: &AppHandle) -> Result<UpdateStatus, String> {
         };
 
         if !state.enabled {
-            return Err("Update checks are unavailable during setup".to_string());
+            return Err(unavailable_reason());
         }
 
         if state.update_available
@@ -427,7 +444,7 @@ pub async fn check_for_updates_now(app: AppHandle) -> Result<UpdateCheckResult, 
         };
 
         if !state.enabled {
-            return Err("Update checks are unavailable during setup".to_string());
+            return Err(unavailable_reason());
         }
     }
 
@@ -476,7 +493,8 @@ pub async fn clear_update_status(app: AppHandle) -> Result<UpdateStatus, String>
         };
 
         if !state.enabled {
-            return Ok(UpdateStatus::default());
+            drop(state);
+            return Ok(runtime_status());
         }
 
         state.update_available = false;

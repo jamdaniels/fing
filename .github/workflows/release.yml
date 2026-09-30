@@ -56,6 +56,7 @@ jobs:
 
           git check-ref-format "refs/tags/$tag" >/dev/null
           printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "${tag#v}" >> "$GITHUB_OUTPUT"
 
       - name: Check out release tag
         shell: bash
@@ -205,6 +206,21 @@ jobs:
           updaterJsonKeepUniversal: ${{ matrix.updater_json_keep_universal }}
           args: ${{ steps.tauri_args.outputs.args }}
 
+      # The Store re-signs MSIX packages after certification, so this stays
+      # unsigned. It is for the Partner Center upload only, not for end users.
+      - name: Package Microsoft Store MSIX
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release_tag.outputs.tag }}
+          VERSION: ${{ steps.release_tag.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          bun run scripts/msix-pack.ts --version $env:VERSION
+          gh release upload $env:TAG "src-tauri/target/release/bundle/msix/Fing_$($env:VERSION)_x64_store.msix" --clobber
+
       - name: Verify macOS signing and notarization
         if: runner.os == 'macOS'
         shell: bash
@@ -326,12 +342,14 @@ jobs:
           gh release download "$TAG" --dir artifacts \
             --pattern "*.dmg" \
             --pattern "*-setup.exe" \
+            --pattern "*_store.msix" \
             --pattern "latest.json"
 
           dmg="artifacts/Fing_${VERSION}_universal.dmg"
           exe="artifacts/Fing_${VERSION}_x64-setup.exe"
+          msix="artifacts/Fing_${VERSION}_x64_store.msix"
 
-          for artifact in "$dmg" "$exe"; do
+          for artifact in "$dmg" "$exe" "$msix"; do
             if [ ! -f "$artifact" ]; then
               echo "Missing release artifact: $artifact"
               ls -la artifacts
@@ -339,8 +357,8 @@ jobs:
             fi
           done
 
-          echo "Found both installers:"
-          ls -la "$dmg" "$exe"
+          echo "Found all installers:"
+          ls -la "$dmg" "$exe" "$msix"
 
       # tauri-action merges each platform into latest.json from two jobs running
       # in parallel, so confirm neither leg clobbered the other before shipping.
@@ -392,10 +410,13 @@ jobs:
           cp "artifacts/Fing_${VERSION}_universal.dmg" stable/Fing-macOS.dmg
           cp "artifacts/Fing_${VERSION}_x64-setup.exe" \
             stable/Fing-Windows-setup.exe
+          cp "artifacts/Fing_${VERSION}_x64_store.msix" \
+            stable/Fing-Windows-Store.msix
 
           gh release upload "$TAG" \
             stable/Fing-macOS.dmg \
             stable/Fing-Windows-setup.exe \
+            stable/Fing-Windows-Store.msix \
             --clobber
 
       - name: Publish release

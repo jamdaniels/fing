@@ -103,9 +103,12 @@ export type BootstrapReason =
   | "model_missing"
   | "model_invalid";
 
+export type Distribution = "direct" | "microsoft-store";
+
 export interface AppInfo {
   buildDate: string;
   commit: string;
+  distribution: Distribution;
   inferenceBackend: "Metal" | "Vulkan" | "CPU";
   name: string;
   repository: string;
@@ -114,6 +117,8 @@ export interface AppInfo {
 
 export interface UpdateStatus {
   checking: boolean;
+  /** False when another channel (the Microsoft Store) delivers updates. */
+  supported: boolean;
   updateAvailable: boolean;
 }
 
