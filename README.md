@@ -36,7 +36,7 @@ Hold your hotkey, speak, release — transcribed text is pasted instantly. Your 
 ## Download
 
 - **[macOS (Universal)](https://github.com/jamdaniels/fing/releases/latest/download/Fing-macOS.dmg)** — signed and notarized, open the DMG and move Fing to Applications
-- **[Windows](https://github.com/jamdaniels/fing/releases/latest/download/Fing-Windows-setup.exe)** — if SmartScreen warns you, click "More info" then "Run anyway"
+- **[Windows](https://apps.microsoft.com/detail/9PBSTM5FG3XH)** — install from the Microsoft Store, signed directly by Microsoft
 
 ## License
 
