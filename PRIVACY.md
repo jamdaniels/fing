@@ -1,112 +1,69 @@
 # Privacy Policy
 
-Effective date: September 13, 2026
+Effective date: October 2, 2026
 
 The canonical version of this policy is published at [https://getfing.com/privacy](https://getfing.com/privacy).
 
-Fing is designed to be private by default.
+Fing is private by default.
 
-- No account required.
-- No app telemetry or app analytics.
-- Basic, cookie-free website analytics only.
-- Your audio and transcripts never leave your device.
-- Speech transcription runs locally using Whisper.
-- Your microphone is active only while holding the hotkey or testing the mic.
-- Transcript history is stored locally and auto-cleared after 30 days; you can disable it in settings.
+- No account, app telemetry, or app analytics.
+- Speech is transcribed locally with Whisper. Your audio and transcripts never leave your device.
+- Your microphone is on only while you hold the hotkey or run the mic test.
+- Transcript history stays on your device, is deleted after 30 days, and can be turned off.
+- The website uses basic, cookie-free analytics.
 
 ## Who We Are
 
-Fing is an open-source project developed and maintained by jamdaniels.
+Fing is an open-source app developed and maintained by jamdaniels. The source code is on [GitHub](https://github.com/jamdaniels/fing). For questions or privacy requests, email [contact@getfing.com](mailto:contact@getfing.com).
 
-- Contact: [contact@getfing.com](mailto:contact@getfing.com)
-- Website: [https://getfing.com](https://getfing.com)
-- Source code: [https://github.com/jamdaniels/fing](https://github.com/jamdaniels/fing)
-
-## What the App Processes
+## What Stays on Your Device
 
 ### Audio
 
-For dictation, your microphone is active only while you hold the hotkey. Fing may also access the microphone when you run the microphone test. Audio is processed locally on your device using Whisper. It is not uploaded anywhere: not to our servers, a cloud transcription service, or any third-party API. Fing does not store raw audio after transcription.
+For dictation, your microphone is on only while you hold the hotkey. Fing also uses it when you run the microphone test. Audio is transcribed locally with Whisper and is never uploaded: not to us, not to a cloud transcription service, and not to any third-party API. Raw audio is not saved.
 
 ### Transcripts
 
-Fing converts your speech to text and pastes it into the active app, or makes it available to copy. Transcribed text stays on your device unless you choose to paste, copy, or share it yourself.
+Fing types the text into the active app without using your clipboard. If transcript history is on, which is the default, transcripts are stored locally so you can search and reuse them, and each one is deleted after 30 days. You can turn history off during setup or in settings.
 
-If transcript history is turned on, Fing stores transcripts locally so you can search and reuse them. You can turn it off during setup or later in settings, and it is automatically cleared after 30 days.
+### Settings and Logs
 
-### Settings and Dictionary Terms
-
-Fing stores local settings such as your hotkey, language preferences, model selection, appearance, and custom dictionary terms. These are stored on your device and are never sent to us.
+Your settings (such as hotkey, language, model, and appearance) and custom dictionary terms are stored only on your device. Fing may also keep a small diagnostic log there, which never contains audio or transcripts.
 
 ## Network Connections
 
-Fing does not use the network for transcription, app telemetry, advertising, or app analytics. It may make limited network connections for the following purposes:
+Fing never uses the network for transcription, telemetry, analytics, or advertising. It connects only for:
 
-### Model Downloads
+- Model downloads. Speech models are downloaded from Hugging Face during setup or when you choose a new model.
+- Updates on macOS, and on Windows if you used the installer from GitHub. Fing checks GitHub Releases for updates automatically and whenever you check manually.
+- Updates from the Microsoft Store. If you installed Fing from the Microsoft Store, the Store delivers updates and Fing never checks GitHub.
 
-During setup, or when you choose to download a speech model, Fing downloads model files from third-party hosting providers such as Hugging Face. Those providers may receive standard technical information including your IP address, user agent, and request metadata, subject to their own privacy policies.
+Hugging Face, GitHub, and Microsoft may receive standard technical information such as your IP address and user agent, which they handle under their own privacy policies.
 
-### App Updates
+## Website
 
-After setup, Fing may automatically check GitHub Releases for updates, and you can also check manually. GitHub may receive standard technical information such as your IP address and user agent.
+Cloudflare hosts [getfing.com](https://getfing.com) and processes standard server logs, such as IP address and browser type, for security and delivery. We use [Glance](https://github.com/chrisgreg/glance), an open-source, self-hosted analytics tool, for basic visitor statistics. It sets no cookies and does not store IP addresses. There are no ad trackers, session replays, or marketing pixels.
 
-If you installed Fing from the Microsoft Store, the app does not check GitHub for updates; updates are delivered by the Microsoft Store under Microsoft's privacy policy.
+## What We Don't Collect or Share
 
-### Website
+We never receive your audio, transcripts, keystrokes, clipboard contents, dictionary terms, or settings. We don't collect app telemetry, usage analytics, advertising IDs, location, or payment information, and Fing has no accounts. We do not sell personal information.
 
-When you visit [https://getfing.com](https://getfing.com), our hosting provider (Cloudflare) processes standard server logs such as IP address and browser type for security and delivery. We also use [Glance](https://github.com/chrisgreg/glance), an open-source, self-hosted analytics tool, for basic website statistics. It sets no cookies and does not store IP addresses. No advertising trackers, session replay, or marketing pixels.
+## Legal Basis
 
-## What We Do Not Collect
-
-We do not collect:
-
-- Audio recordings
-- Transcripts
-- Keystrokes or clipboard contents
-- Custom dictionary terms
-- App telemetry or app usage analytics
-- Advertising identifiers or location data
-- Account credentials or payment information
-
-Fing has no user accounts.
-
-## Data Sharing
-
-We do not sell personal information. We do not share your audio, transcripts, dictionary terms, or local settings with third parties.
-
-Limited technical data may be incidentally processed by third-party providers when you interact with their infrastructure: Cloudflare (website delivery), GitHub (releases and updates), Microsoft (Microsoft Store installs and updates), and Hugging Face or similar providers (model downloads). Each operates under its own privacy policy.
-
-## Legal Bases for Processing
-
-Where laws such as the GDPR apply, we rely on legitimate interests to deliver the website, maintain security, understand basic website usage, and provide software updates, and on your choice when you enable optional features such as local transcript history.
+Where the GDPR or similar laws apply, we rely on legitimate interests to run and secure the website, measure basic website usage, and deliver app updates.
 
 ## Data Retention
 
-Fing stores app data locally on your device for as long as needed to provide the app's features. Optional transcript history is automatically cleared after 30 days. You can delete local app data by clearing history in the app, or by removing Fing's application data from your device.
-
-Website logs and analytics are retained for a limited period.
+App data stays on your device until you delete it, and transcript history is deleted automatically after 30 days. Website logs and analytics are kept only for a limited period.
 
 ## Your Rights and Choices
 
-Depending on where you live, you may have rights to access, correct, delete, or restrict processing of your personal information. Because Fing is designed not to collect your audio, transcripts, or app usage data on our servers, we typically do not hold that data ourselves.
+Depending on where you live, you may have the right to access, correct, delete, or restrict the use of your personal information. Because your app data never reaches us, you control it directly: clear or turn off transcript history, delete dictionary terms, or uninstall Fing and remove its app data. For anything else, email [contact@getfing.com](mailto:contact@getfing.com).
 
-You can control your data directly by:
+## Children
 
-- Disabling or clearing transcript history in the app
-- Deleting custom dictionary terms
-- Uninstalling the app and removing its local data from your device
+Fing is not directed to children under 13, or the minimum age required in your country, and we do not knowingly collect their personal information.
 
-To make a privacy request, contact us at [contact@getfing.com](mailto:contact@getfing.com).
+## Changes
 
-## Children's Privacy
-
-Fing is not directed to children under 13, or the minimum age required by law in your country. We do not knowingly collect personal information from children.
-
-## Changes to This Policy
-
-We may update this Privacy Policy from time to time. If we make material changes, we will update the effective date above and publish the new version at [https://getfing.com/privacy](https://getfing.com/privacy).
-
-## Contact
-
-jamdaniels
-[contact@getfing.com](mailto:contact@getfing.com)
+If we make material changes to this policy, we will update the effective date and publish the new version at [https://getfing.com/privacy](https://getfing.com/privacy).
