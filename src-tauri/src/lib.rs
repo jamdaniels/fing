@@ -946,80 +946,10 @@ fn handle_menu_event(app: &tauri::AppHandle, event_id: &str) {
     }
 }
 
-/// Windows release builds have no console, so stdout logging is invisible —
-/// this made settings-load failures undiagnosable. Logs are written to
-/// `<app_data>/logs/fing.log` instead. The file can only be opened once
-/// Tauri resolves the app data dir (which depends on the configured
-/// identifier, e.g. dev builds use a separate dir), so the subscriber uses a
-/// deferred writer: stdout until `bind_windows_log_file` runs during setup,
-/// the log file afterwards.
-#[cfg(target_os = "windows")]
-static WINDOWS_LOG_FILE: std::sync::OnceLock<std::fs::File> = std::sync::OnceLock::new();
-
-#[cfg(target_os = "windows")]
-struct DeferredLogWriter;
-
-#[cfg(target_os = "windows")]
-impl std::io::Write for DeferredLogWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        match WINDOWS_LOG_FILE.get() {
-            Some(mut file) => file.write(buf),
-            None => std::io::stdout().write(buf),
-        }
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        match WINDOWS_LOG_FILE.get() {
-            Some(mut file) => file.flush(),
-            None => std::io::stdout().flush(),
-        }
-    }
-}
-
-/// Open the log file (truncating it past 5 MB) and route tracing output to
-/// it. Called during setup, right after `paths::init`.
-#[cfg(target_os = "windows")]
-fn bind_windows_log_file() {
-    let Some(dir) = paths::log_dir() else {
-        return;
-    };
-    if std::fs::create_dir_all(&dir).is_err() {
-        return;
-    }
-    let path = dir.join("fing.log");
-    if let Ok(metadata) = std::fs::metadata(&path) {
-        if metadata.len() > 5 * 1024 * 1024 {
-            let _ = std::fs::remove_file(&path);
-        }
-    }
-    if let Ok(file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-    {
-        let _ = WINDOWS_LOG_FILE.set(file);
-    }
-}
-
-fn init_tracing() {
-    #[cfg(target_os = "windows")]
-    {
-        let _ = tracing_subscriber::fmt()
-            .with_ansi(false)
-            .with_writer(|| DeferredLogWriter)
-            .try_init();
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        // Use try_init to avoid panic if stderr isn't available.
-        let _ = tracing_subscriber::fmt::try_init();
-    }
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    init_tracing();
+    // Use try_init to avoid panic if stderr isn't available (Windows without console).
+    let _ = tracing_subscriber::fmt::try_init();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -1043,9 +973,6 @@ pub fn run() {
 
             // Initialize paths first (required by db, settings, model)
             paths::init(app)?;
-
-            #[cfg(target_os = "windows")]
-            bind_windows_log_file();
 
             // Initialize database
             if let Err(e) = db::init_db() {

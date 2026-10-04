@@ -80,14 +80,6 @@ pub fn models_dir() -> Option<PathBuf> {
     app_data_dir().map(|p| p.join("models"))
 }
 
-/// Log directory inside the app data dir (used by Windows file logging,
-/// where stdout is invisible in release builds). Returns None if paths not
-/// initialized.
-#[cfg(target_os = "windows")]
-pub fn log_dir() -> Option<PathBuf> {
-    app_data_dir().map(|p| p.join("logs"))
-}
-
 #[cfg(test)]
 pub fn init_test_app_data_dir(path: PathBuf) {
     let _ = TEST_APP_DATA_DIR.set(path);
