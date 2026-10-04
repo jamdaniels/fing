@@ -244,25 +244,11 @@ fn should_check_for_current_app_version() -> bool {
     )
 }
 
-fn update_menu_label() -> String {
-    let state = match UPDATE_STATE.read() {
-        Ok(state) => state,
-        Err(poisoned) => {
-            tracing::warn!("Update state read lock poisoned while reading menu label, recovering");
-            poisoned.into_inner()
-        }
-    };
-
-    let translations = crate::i18n::current();
-    if state.update_available {
-        translations.tray.update_available.clone()
-    } else {
-        translations.tray.check_for_updates.clone()
-    }
-}
-
-pub fn tray_menu_label() -> String {
-    update_menu_label()
+/// Whether the tray should show the "Update Available" item. The tray is
+/// rebuilt from `emit_status_changed` whenever this can change.
+pub fn should_show_tray_update_item() -> bool {
+    let status = runtime_status();
+    status.supported && status.update_available
 }
 
 pub fn current_update_status() -> UpdateStatus {

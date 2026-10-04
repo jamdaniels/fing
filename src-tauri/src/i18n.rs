@@ -10,7 +10,6 @@ pub struct TrayTranslations {
     pub open_app: String,
     pub history: String,
     pub settings: String,
-    pub check_for_updates: String,
     pub update_available: String,
 }
 
@@ -73,7 +72,6 @@ mod tests {
             assert!(!catalog.tray.open_app.is_empty());
             assert!(!catalog.tray.history.is_empty());
             assert!(!catalog.tray.settings.is_empty());
-            assert!(!catalog.tray.check_for_updates.is_empty());
             assert!(!catalog.tray.update_available.is_empty());
             assert!(!catalog.notifications.recording_stopped_title.is_empty());
             assert!(!catalog.notifications.maximum_recording_duration.is_empty());

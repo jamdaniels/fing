@@ -54,6 +54,8 @@
     "search": "Search transcripts...",
     "copy": "Copy to clipboard",
     "loadMore": "Load more",
+    "showMore": "Show more",
+    "showLess": "Show less",
     "noResults": "No results found",
     "noTranscripts": "No transcripts yet",
     "differentSearch": "Try a different search term",

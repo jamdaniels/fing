@@ -54,6 +54,8 @@
     "search": "Transkriptionen durchsuchen...",
     "copy": "In die Zwischenablage kopieren",
     "loadMore": "Mehr laden",
+    "showMore": "Mehr anzeigen",
+    "showLess": "Weniger anzeigen",
     "noResults": "Keine Ergebnisse gefunden",
     "noTranscripts": "Noch keine Transkriptionen",
     "differentSearch": "Versuche einen anderen Suchbegriff",

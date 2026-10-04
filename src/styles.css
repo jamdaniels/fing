@@ -534,13 +534,24 @@ body[data-platform="windows"] .titlebar {
   height: 24px;
   background-color: var(--border);
   border-radius: 12px;
-  transition: background-color 200ms ease-out;
+}
+
+.toggle:not(.active, .disabled):hover {
+  background-color: color-mix(
+    in srgb,
+    var(--border) 92%,
+    var(--text-secondary) 8%
+  );
 }
 
 .toggle.active {
   background-color: var(--accent);
   background-image: var(--btn-accent-overlay);
   box-shadow: var(--btn-shadow);
+}
+
+.toggle.active:not(.disabled):hover {
+  filter: brightness(1.03);
 }
 
 .toggle.disabled {
@@ -1134,8 +1145,18 @@ body[data-platform="windows"] .titlebar {
 }
 
 .list-item-text {
+  overflow: hidden;
   line-height: 1.4;
   color: var(--text-primary);
+  overflow-wrap: break-word;
+}
+
+/* Line count must match HISTORY_TEXT_CLAMP_LINES in main.ts */
+.list-item-text.clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
 }
 
 .list-item-actions {
@@ -1902,6 +1923,29 @@ body[data-platform="windows"] .titlebar {
   width: 16px;
   height: 16px;
   pointer-events: none;
+}
+
+.list-item-actions .expand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.list-item-actions .expand-btn[hidden] {
+  display: none;
+}
+
+.list-item-actions .expand-btn svg {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.2s ease;
+}
+
+.list-item-actions .expand-btn[aria-expanded="true"] svg {
+  transform: rotate(180deg);
 }
 
 /* Dialog Component */
@@ -3153,6 +3197,10 @@ body[data-platform="windows"] .titlebar {
   background: transparent;
   border: none;
   border-radius: 6px;
+}
+
+.appearance-option:not(.selected):hover {
+  color: color-mix(in srgb, var(--text-secondary) 40%, var(--text-primary));
 }
 
 .appearance-option.selected {

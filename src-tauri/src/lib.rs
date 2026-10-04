@@ -808,7 +808,7 @@ fn build_tray_menu_for_state(
         let separator1 = PredefinedMenuItem::separator(app)?;
         let quit = MenuItem::with_id(app, "quit", &translations.tray.quit, true, None::<&str>)?;
 
-        if !update::is_supported() {
+        if !update::should_show_tray_update_item() {
             return Ok(Menu::with_items(
                 app,
                 &[&open, &history, &settings, &separator1, &quit],
@@ -819,7 +819,7 @@ fn build_tray_menu_for_state(
         let updates = MenuItem::with_id(
             app,
             "check_updates",
-            update::tray_menu_label(),
+            &translations.tray.update_available,
             true,
             None::<&str>,
         )?;

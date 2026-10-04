@@ -7,6 +7,7 @@ import {
   BookOpen,
   Check,
   CheckCircle,
+  ChevronDown,
   Copy,
   History,
   Home,
@@ -251,6 +252,10 @@ function navigateToTab(tab: SidebarItem): void {
   const content = document.getElementById("content");
   if (content) {
     content.innerHTML = "";
+  }
+
+  if (currentView === "history" && tab !== "history") {
+    expandedTranscriptIds.clear();
   }
 
   currentView = tab;
@@ -588,11 +593,106 @@ function getDateGroupLabel(group: DateGroup): string {
   }
 }
 
-function truncateText(text: string, maxLength: number): string {
-  if (text.length <= maxLength) {
-    return text;
+// Must match `-webkit-line-clamp` on `.list-item-text.clamped`.
+const HISTORY_TEXT_CLAMP_LINES = 3;
+const expandedTranscriptIds = new Set<number>();
+const reducedMotionQuery = window.matchMedia(
+  "(prefers-reduced-motion: reduce)"
+);
+let transcriptListWidth = 0;
+let transcriptListObserver: ResizeObserver | null = null;
+
+function setExpandToggleState(toggle: HTMLElement, expanded: boolean): void {
+  toggle.setAttribute("aria-expanded", String(expanded));
+  const label = toggle.querySelector(".expand-btn-label");
+  if (label) {
+    label.textContent = expanded
+      ? t("history.showLess")
+      : t("history.showMore");
   }
-  return `${text.slice(0, maxLength)}...`;
+}
+
+/** Show the expand toggle only on transcripts taller than the clamp. */
+function updateTranscriptExpandToggles(list: Element): void {
+  const texts = list.querySelectorAll<HTMLElement>(".list-item-text");
+  const first = texts[0];
+  if (!first) {
+    return;
+  }
+  const lineHeight = Number.parseFloat(getComputedStyle(first).lineHeight);
+  const clampHeight = lineHeight * HISTORY_TEXT_CLAMP_LINES;
+  // Read all heights before toggling visibility to avoid layout thrash.
+  const overflowing = Array.from(texts, (text) =>
+    Number.isFinite(clampHeight)
+      ? text.scrollHeight > clampHeight + 1
+      : text.scrollHeight > text.clientHeight
+  );
+  texts.forEach((text, index) => {
+    const toggle =
+      text.parentElement?.querySelector<HTMLElement>(".expand-btn");
+    if (toggle) {
+      toggle.hidden = !overflowing[index];
+    }
+  });
+}
+
+/** Re-measure toggles on first layout and whenever the list width changes. */
+function observeTranscriptList(list: HTMLElement | null): void {
+  transcriptListObserver?.disconnect();
+  transcriptListWidth = 0;
+  if (!list) {
+    return;
+  }
+  transcriptListObserver ??= new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const width = entry.contentRect.width;
+      if (width === 0 || width === transcriptListWidth) {
+        continue;
+      }
+      transcriptListWidth = width;
+      updateTranscriptExpandToggles(entry.target);
+    }
+  });
+  transcriptListObserver.observe(list);
+}
+
+function toggleTranscriptExpanded(listItem: HTMLElement, id: number): void {
+  const text = listItem.querySelector<HTMLElement>(".list-item-text");
+  const toggle = listItem.querySelector<HTMLElement>(".expand-btn");
+  if (!text || !toggle) {
+    return;
+  }
+
+  const expand = !expandedTranscriptIds.has(id);
+  if (expand) {
+    expandedTranscriptIds.add(id);
+  } else {
+    expandedTranscriptIds.delete(id);
+  }
+  setExpandToggleState(toggle, expand);
+
+  // Read the (possibly mid-animation) height before cancelling for a smooth reversal.
+  const from = text.offsetHeight;
+  for (const animation of text.getAnimations()) {
+    animation.cancel();
+  }
+  text.classList.add("clamped");
+  const clampedHeight = text.offsetHeight;
+  text.classList.remove("clamped");
+  const to = expand ? text.offsetHeight : clampedHeight;
+  if (from === to || reducedMotionQuery.matches) {
+    text.classList.toggle("clamped", !expand);
+    return;
+  }
+
+  // Animate unclamped so collapsing text stays visible; clamp once done.
+  const animation = text.animate(
+    [{ height: `${from}px` }, { height: `${to}px` }],
+    { duration: 200, easing: "ease-out" }
+  );
+  if (!expand) {
+    animation.onfinish = () => text.classList.add("clamped");
+  }
 }
 
 async function loadTranscripts(append = false): Promise<void> {
@@ -618,6 +718,7 @@ async function loadTranscripts(append = false): Promise<void> {
 async function handleDeleteTranscript(id: number): Promise<void> {
   try {
     await deleteTranscript(id);
+    expandedTranscriptIds.delete(id);
     transcriptOffset = 0;
     await loadTranscripts();
     stats = await getStats().catch(() => null);
@@ -640,6 +741,7 @@ async function handleClearAll(): Promise<void> {
 
   try {
     await deleteAllTranscripts();
+    expandedTranscriptIds.clear();
     transcriptOffset = 0;
     await loadTranscripts();
     stats = await getStats().catch(() => null);
@@ -687,6 +789,18 @@ function handleHistoryClick(e: MouseEvent, el: HTMLElement): void {
     const id = listItem?.getAttribute("data-id");
     if (id) {
       handleDeleteTranscript(Number(id));
+    }
+    return;
+  }
+
+  // Handle expand/collapse toggle
+  const expandBtn = target.closest(".expand-btn");
+  if (expandBtn) {
+    e.stopPropagation();
+    const listItem = expandBtn.closest<HTMLElement>(".list-item");
+    const id = listItem?.getAttribute("data-id");
+    if (listItem && id) {
+      toggleTranscriptExpanded(listItem, Number(id));
     }
     return;
   }
@@ -799,16 +913,20 @@ function renderHistory(
       for (const [group, items] of grouped) {
         listHtml += `<div class="date-group-header">${getDateGroupLabel(group)}</div>`;
         for (const item of items) {
+          const expanded = expandedTranscriptIds.has(item.id);
           listHtml += `
             <div class="list-item" data-id="${item.id}">
               <div class="list-item-header">
                 <span class="list-item-time">${formatTime(item.createdAt)}</span>
                 <span class="list-item-words">${tp("common.wordOne", "common.wordOther", item.wordCount)}</span>
               </div>
-              <div class="list-item-text">${escapeHtml(truncateText(item.text, 150))}</div>
+              <div class="list-item-text${expanded ? "" : " clamped"}">${escapeHtml(item.text)}</div>
               <div class="list-item-actions">
                 <button class="copy-btn" title="${t("history.copy")}">${createIcon(Copy)}</button>
                 <button class="delete-btn" title="${t("common.delete")}">${createIcon(Trash2)}</button>
+                <button class="expand-btn" type="button" aria-expanded="${expanded}" hidden>
+                  <span class="expand-btn-label">${expanded ? t("history.showLess") : t("history.showMore")}</span>${createIcon(ChevronDown)}
+                </button>
               </div>
             </div>
           `;
@@ -849,6 +967,7 @@ function renderHistory(
       searchInput.setSelectionRange(searchQuery.length, searchQuery.length);
     }
 
+    observeTranscriptList(el.querySelector<HTMLElement>(".transcript-list"));
     setupScrollFade(el.querySelector<HTMLElement>(".history-scrollable"));
   };
 
