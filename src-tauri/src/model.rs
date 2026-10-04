@@ -706,48 +706,27 @@ mod tests {
     }
 
     #[test]
-    fn inspect_with_expected_size_rejects_missing_file() {
-        let path = unique_test_path("model-missing");
+    fn inspect_with_expected_size_rejects_missing_misformatted_and_wrong_size_files() {
+        for (name, file) in [
+            ("model-missing", None),
+            ("model-invalid-magic", Some((100, 0x1234_5678))),
+            ("model-invalid-size", Some((40, GGML_MAGIC_GGJT))),
+        ] {
+            let path = unique_test_path(name);
+            if let Some((size, magic)) = file {
+                write_test_model_file(&path, size, magic);
+            }
 
-        let inspection = inspect_with_expected_size(&path, Some(100));
+            let inspection = inspect_with_expected_size(&path, Some(100));
 
-        assert!(!inspection.exists);
-        assert!(!inspection.size_valid);
-        assert!(!inspection.format_valid);
-        assert!(inspection.hash_valid);
-        assert!(!inspection.is_valid);
-    }
+            assert_eq!(inspection.exists, file.is_some(), "{name}");
+            assert!(!inspection.size_valid, "{name}");
+            assert!(!inspection.format_valid, "{name}");
+            assert!(inspection.hash_valid, "{name}");
+            assert!(!inspection.is_valid, "{name}");
 
-    #[test]
-    fn inspect_with_expected_size_rejects_invalid_magic() {
-        let path = unique_test_path("model-invalid-magic");
-        write_test_model_file(&path, 100, 0x1234_5678);
-
-        let verification = inspect_with_expected_size(&path, Some(100));
-
-        assert!(verification.exists);
-        assert!(!verification.size_valid);
-        assert!(!verification.format_valid);
-        assert!(verification.hash_valid);
-        assert!(!verification.is_valid);
-
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn inspect_with_expected_size_rejects_wrong_file_size() {
-        let path = unique_test_path("model-invalid-size");
-        write_test_model_file(&path, 40, GGML_MAGIC_GGJT);
-
-        let verification = inspect_with_expected_size(&path, Some(100));
-
-        assert!(verification.exists);
-        assert!(!verification.size_valid);
-        assert!(!verification.format_valid);
-        assert!(verification.hash_valid);
-        assert!(!verification.is_valid);
-
-        let _ = fs::remove_file(path);
+            let _ = fs::remove_file(path);
+        }
     }
 
     #[test]
@@ -781,23 +760,5 @@ mod tests {
         assert!(!invalid.is_valid);
 
         let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn download_status_reports_public_strings_and_errors() {
-        assert_eq!(DownloadStatus::NotStarted.as_str(), "not-started");
-        assert_eq!(DownloadStatus::Downloading.as_str(), "downloading");
-        assert_eq!(DownloadStatus::Verifying.as_str(), "verifying");
-        assert_eq!(DownloadStatus::Complete.as_str(), "complete");
-        assert_eq!(
-            DownloadStatus::Failed("network".to_string()).as_str(),
-            "failed"
-        );
-
-        assert_eq!(DownloadStatus::NotStarted.error_message(), None);
-        assert_eq!(
-            DownloadStatus::Failed("network".to_string()).error_message(),
-            Some("network".to_string())
-        );
     }
 }

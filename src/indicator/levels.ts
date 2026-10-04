@@ -19,9 +19,9 @@ const PEAK_FLOOR = 0.4;
 const DYNAMIC_SPAN = 0.3;
 
 /** Fraction of the remaining distance covered per 60 Hz frame when rising. */
-export const ATTACK_PER_FRAME = 0.7;
+const ATTACK_PER_FRAME = 0.7;
 /** Fraction of the remaining distance covered per 60 Hz frame when falling. */
-export const RELEASE_PER_FRAME = 0.2;
+const RELEASE_PER_FRAME = 0.2;
 /** Without fresh levels for this long, the dots decay back to rest. */
 export const LEVELS_STALE_MS = 150;
 /** Below this every dot counts as resting, so an idle loop may stop. */

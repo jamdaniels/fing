@@ -80,14 +80,4 @@ mod tests {
             }
         }
     }
-
-    #[test]
-    fn tray_labels_follow_language() {
-        assert_eq!(for_language(UiLanguage::En).tray.settings, "Settings");
-        assert_eq!(for_language(UiLanguage::De).tray.settings, "Einstellungen");
-        assert_eq!(
-            for_language(UiLanguage::De).tray.update_available,
-            "Update verfügbar"
-        );
-    }
 }

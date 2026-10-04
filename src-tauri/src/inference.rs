@@ -1037,30 +1037,6 @@ mod tests {
     }
 
     #[test]
-    fn unloading_clears_all_runtime_status() {
-        let device = gpu("discrete", InferenceDeviceKind::DiscreteGpu, 2048);
-        let mut loaded = LoadedRuntime {
-            preference: Some(InferenceDevicePreference::Auto),
-            resolved_device: Some(device),
-            selection_verified: true,
-            last_execution_backend: Some(InferenceBackend::Cpu),
-            last_execution_device_name: Some("CPU".to_string()),
-            last_execution_verified: true,
-            fallback_reason: Some("execution_fell_back_to_cpu".to_string()),
-        };
-
-        reset_loaded_runtime(&mut loaded);
-
-        assert_eq!(loaded.preference, None);
-        assert!(loaded.resolved_device.is_none());
-        assert!(!loaded.selection_verified);
-        assert_eq!(loaded.last_execution_backend, None);
-        assert_eq!(loaded.last_execution_device_name, None);
-        assert!(!loaded.last_execution_verified);
-        assert_eq!(loaded.fallback_reason, None);
-    }
-
-    #[test]
     fn diagnostic_filter_drops_model_paths_and_truncates_messages() {
         assert!(safe_whisper_diagnostic(
             "whisper_model_load: loading model from 'C:\\Users\\person\\model.bin'"

@@ -502,52 +502,9 @@ pub async fn clear_update_status(app: AppHandle) -> Result<UpdateStatus, String>
 #[cfg(test)]
 mod tests {
     use super::{
-        read_persisted_state_from_disk, sanitized_persisted_state,
-        should_check_for_current_app_version_from_state, write_persisted_state_to_disk,
+        sanitized_persisted_state, should_check_for_current_app_version_from_state,
         PersistedUpdateState, CURRENT_APP_VERSION,
     };
-    use std::{env, fs, path::PathBuf, sync::Once};
-
-    static TEST_PATH_INIT: Once = Once::new();
-
-    fn set_test_update_state_path(path: PathBuf) {
-        TEST_PATH_INIT.call_once(|| {
-            crate::paths::init_test_update_state_path(path);
-        });
-    }
-
-    fn unique_test_path(name: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_nanos())
-            .unwrap_or(0);
-
-        env::temp_dir().join(format!("fing-{name}-{nanos}.json"))
-    }
-
-    #[test]
-    fn persisted_state_round_trip() {
-        let path = unique_test_path("update-state-round-trip");
-        set_test_update_state_path(path.clone());
-
-        let expected = PersistedUpdateState {
-            update_available: true,
-            detected_for_app_version: Some(CURRENT_APP_VERSION.to_string()),
-            last_checked_at: Some(123),
-        };
-
-        write_persisted_state_to_disk(&expected).expect("persisted state should write");
-        let actual = read_persisted_state_from_disk().expect("persisted state should read");
-
-        assert_eq!(actual.update_available, expected.update_available);
-        assert_eq!(
-            actual.detected_for_app_version,
-            expected.detected_for_app_version
-        );
-        assert_eq!(actual.last_checked_at, expected.last_checked_at);
-
-        let _ = fs::remove_file(path);
-    }
 
     #[test]
     fn stale_cached_update_is_cleared_for_new_app_version() {

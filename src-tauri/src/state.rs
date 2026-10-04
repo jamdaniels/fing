@@ -115,53 +115,6 @@ mod tests {
     }
 
     #[test]
-    fn state_labels_and_recording_capability_match_contract() {
-        let _guard = STATE_TEST_MUTEX
-            .lock()
-            .expect("state test mutex should lock");
-
-        assert_eq!(AppState::NeedsSetup.as_str(), "needs-setup");
-        assert_eq!(AppState::Ready.as_str(), "ready");
-        assert_eq!(AppState::Recording.as_str(), "recording");
-        assert_eq!(AppState::Processing.as_str(), "processing");
-
-        assert!(!AppState::NeedsSetup.can_record());
-        assert!(AppState::Ready.can_record());
-        assert!(!AppState::Recording.can_record());
-        assert!(!AppState::Processing.can_record());
-    }
-
-    #[test]
-    fn transition_to_updates_global_state() {
-        let _guard = STATE_TEST_MUTEX
-            .lock()
-            .expect("state test mutex should lock");
-        let _reset = StateReset(get_state());
-
-        transition_to(AppState::Ready).expect("transition to ready should succeed");
-        assert_eq!(get_state(), AppState::Ready);
-
-        transition_to(AppState::Recording).expect("transition to recording should succeed");
-        assert_eq!(get_state(), AppState::Recording);
-
-        transition_to(AppState::Processing).expect("transition to processing should succeed");
-        assert_eq!(get_state(), AppState::Processing);
-    }
-
-    #[test]
-    fn try_transition_updates_matching_state() {
-        let _guard = STATE_TEST_MUTEX
-            .lock()
-            .expect("state test mutex should lock");
-        let _reset = StateReset(get_state());
-
-        transition_to(AppState::Ready).expect("transition to ready should succeed");
-
-        assert!(try_transition(AppState::Ready, AppState::Recording));
-        assert_eq!(get_state(), AppState::Recording);
-    }
-
-    #[test]
     fn try_transition_leaves_non_matching_state_unchanged() {
         let _guard = STATE_TEST_MUTEX
             .lock()

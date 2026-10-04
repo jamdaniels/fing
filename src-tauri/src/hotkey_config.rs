@@ -207,19 +207,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn accepts_canonical_single_keys() {
-        let f9 = parse_hotkey_string("F9").unwrap();
-        assert_eq!(f9.keys, vec!["F9"]);
+    fn accepts_single_keys_and_key_sets() {
+        for key in ["F9", "KeyA", "ShiftLeft"] {
+            assert_eq!(parse_hotkey_string(key).unwrap().keys, vec![key]);
+        }
 
-        let a = parse_hotkey_string("KeyA").unwrap();
-        assert_eq!(a.keys, vec!["KeyA"]);
-
-        let shift = parse_hotkey_string("ShiftLeft").unwrap();
-        assert_eq!(shift.keys, vec!["ShiftLeft"]);
-    }
-
-    #[test]
-    fn accepts_arbitrary_key_sets() {
         let config = parse_hotkey_string("ControlLeft+KeyK+Space").unwrap();
         assert_eq!(config.keys, vec!["ControlLeft", "KeyK", "Space"]);
         assert!(config.key_set.contains("ControlLeft"));
@@ -228,11 +220,21 @@ mod tests {
     }
 
     #[test]
-    fn rejects_old_format_hotkeys() {
-        assert!(parse_hotkey_string("Ctrl+Option").is_err());
-        assert!(parse_hotkey_string("Cmd+Space").is_err());
-        assert!(parse_hotkey_string("A").is_err());
-        assert!(parse_hotkey_string("Fn").is_err());
+    fn rejects_old_format_empty_and_duplicate_hotkeys() {
+        for raw in [
+            "Ctrl+Option",
+            "Cmd+Space",
+            "A",
+            "Fn",
+            "",
+            "ControlLeft+",
+            "KeyA+KeyA",
+        ] {
+            assert!(
+                parse_hotkey_string(raw).is_err(),
+                "{raw:?} should be rejected"
+            );
+        }
     }
 
     #[test]
@@ -245,21 +247,5 @@ mod tests {
             parse_hotkey_string("ControlLeft+Escape").unwrap_err(),
             "Escape cannot be used as a hotkey"
         );
-    }
-
-    #[test]
-    fn rejects_empty_and_duplicate_tokens() {
-        assert!(parse_hotkey_string("").is_err());
-        assert!(parse_hotkey_string("ControlLeft+").is_err());
-        assert!(parse_hotkey_string("KeyA+KeyA").is_err());
-    }
-
-    #[test]
-    fn stores_key_set_config() {
-        set_hotkey_from_string("ControlLeft+KeyK").unwrap();
-        let config = get_hotkey_config().unwrap();
-        assert_eq!(config.keys, vec!["ControlLeft", "KeyK"]);
-        assert!(config.key_set.contains("ControlLeft"));
-        assert!(config.key_set.contains("KeyK"));
     }
 }

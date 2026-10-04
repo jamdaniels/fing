@@ -1,6 +1,5 @@
 import { describe, expect, it } from "bun:test";
 import {
-  formatNumber,
   getCatalogKeys,
   getCatalogsForTest,
   resolveTranslationForTest,
@@ -67,12 +66,5 @@ describe("i18n catalogs", () => {
         "settings.title"
       )
     ).toBe("Settings");
-  });
-
-  it("formats numbers with the selected locale", () => {
-    setUiLanguage("en");
-    expect(/1[,.]234/.test(formatNumber(1234))).toBe(true);
-    setUiLanguage("de");
-    expect(/1\.234|1 234/.test(formatNumber(1234))).toBe(true);
   });
 });

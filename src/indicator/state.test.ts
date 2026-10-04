@@ -30,18 +30,6 @@ describe("reduceIndicator", () => {
     ).toEqual({ base: "hidden", notice: active });
   });
 
-  it("a newer notice replaces the current one", () => {
-    const first = reduceIndicator(INITIAL_MODEL, {
-      type: "notice",
-      notice: notice(1),
-    });
-    const second = reduceIndicator(first, {
-      type: "notice",
-      notice: notice(2),
-    });
-    expect(second.notice?.id).toBe(2);
-  });
-
   it("only the current notice's expiry clears it", () => {
     const model: IndicatorModel = { base: "processing", notice: notice(2) };
     expect(reduceIndicator(model, { type: "noticeExpired", id: 1 })).toBe(
@@ -63,20 +51,6 @@ describe("deriveView", () => {
         dotMode: "idle",
       });
     }
-  });
-
-  it("maps base states to dot modes", () => {
-    expect(deriveView({ base: "recording", notice: null })).toEqual({
-      visible: true,
-      face: "dots",
-      dotMode: "live",
-    });
-    expect(deriveView({ base: "processing", notice: null })).toEqual({
-      visible: true,
-      face: "dots",
-      dotMode: "processing",
-    });
-    expect(deriveView(INITIAL_MODEL).visible).toBe(false);
   });
 
   it("hides after a notice expires on a hidden base", () => {

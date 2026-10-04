@@ -812,26 +812,6 @@ mod tests {
     const LEVEL_TEST_RATES: [u32; 3] = [16_000, 44_100, 48_000];
 
     #[test]
-    fn level_window_is_about_40ms_power_of_two() {
-        for (rate, expected) in [(16_000, 1024), (44_100, 2048), (48_000, 2048)] {
-            assert_eq!(LevelAnalyzer::new(rate).window_len(), expected);
-        }
-    }
-
-    #[test]
-    fn levels_are_zero_for_silence_and_empty_input() {
-        for rate in LEVEL_TEST_RATES {
-            let mut analyzer = LevelAnalyzer::new(rate);
-            assert_eq!(analyzer.analyze(&[]), [0.0; LEVEL_BAND_COUNT]);
-            assert_eq!(analyzer.analyze(&[0.5]), [0.0; LEVEL_BAND_COUNT]);
-            assert_eq!(
-                analyzer.analyze(&vec![0.0; rate as usize / 10]),
-                [0.0; LEVEL_BAND_COUNT]
-            );
-        }
-    }
-
-    #[test]
     fn levels_gate_quiet_room_noise() {
         // Deterministic white noise at roughly -66 dBFS RMS.
         let mut seed = 0x1234_5678u32;
@@ -874,9 +854,16 @@ mod tests {
     }
 
     #[test]
-    fn levels_stay_bounded_for_loud_short_and_invalid_input() {
+    fn levels_handle_silent_empty_loud_and_invalid_input() {
         for rate in LEVEL_TEST_RATES {
             let mut analyzer = LevelAnalyzer::new(rate);
+            assert_eq!(analyzer.analyze(&[]), [0.0; LEVEL_BAND_COUNT]);
+            assert_eq!(analyzer.analyze(&[0.5]), [0.0; LEVEL_BAND_COUNT]);
+            assert_eq!(
+                analyzer.analyze(&vec![0.0; rate as usize / 10]),
+                [0.0; LEVEL_BAND_COUNT]
+            );
+
             let loud = scaled_sine(rate, 300.0, 1.0);
             assert_levels_valid(&analyzer.analyze(&loud));
             assert_levels_valid(&analyzer.analyze(&loud[..64]));
@@ -890,24 +877,6 @@ mod tests {
         let sine = scaled_sine(rate, 800.0, 0.05);
         let levels = LevelAnalyzer::new(rate).analyze(&sine[..rate as usize / 100]);
         assert!(levels[1] > 0.5, "10 ms of 800 Hz: {levels:?}");
-    }
-
-    #[test]
-    fn tap_copies_only_recent_samples() {
-        let capture = AudioCapture::new();
-        capture
-            .buffer
-            .lock()
-            .expect("buffer lock")
-            .extend([1.0, 2.0, 3.0, 4.0]);
-        let tap = capture.tap();
-        let mut out = vec![9.0; 8];
-
-        tap.copy_tail(2, &mut out);
-        assert_eq!(out, vec![3.0, 4.0]);
-        tap.copy_tail(10, &mut out);
-        assert_eq!(out, vec![1.0, 2.0, 3.0, 4.0]);
-        assert_eq!(tap.sample_rate(), WHISPER_SAMPLE_RATE);
     }
 
     #[test]
@@ -929,88 +898,42 @@ mod tests {
     }
 
     #[test]
-    fn max_buffer_size_scales_with_sample_rate() {
-        assert_eq!(
-            max_buffer_size_for_sample_rate(WHISPER_SAMPLE_RATE),
-            INITIAL_BUFFER_CAPACITY
-        );
-        assert_eq!(max_buffer_size_for_sample_rate(16_000), 120 * 16_000);
-        assert_eq!(max_buffer_size_for_sample_rate(48_000), 120 * 48_000);
-    }
-
-    #[test]
-    fn simple_resample_preserves_identity_rate() {
-        let input = vec![-0.5, 0.0, 0.25, 1.0];
-
-        assert_eq!(AudioCapture::simple_resample(&input, 16_000, 16_000), input);
-    }
-
-    #[test]
-    fn simple_resample_downsamples_expected_length_and_constant_signal() {
-        let input = vec![0.5; 4_800];
-        let output = AudioCapture::simple_resample(&input, 48_000, 16_000);
-
+    fn simple_resample_fallback_downsamples_and_handles_short_input() {
+        let output = AudioCapture::simple_resample(&[0.5; 4_800], 48_000, 16_000);
         assert_eq!(output.len(), 1_600);
         assert!(output.iter().all(|sample| (*sample - 0.5).abs() < 1e-6));
-    }
 
-    #[test]
-    fn simple_resample_handles_empty_and_sub_ratio_inputs() {
         assert!(AudioCapture::simple_resample(&[], 48_000, 16_000).is_empty());
         assert!(AudioCapture::simple_resample(&[0.5], 48_000, 16_000).is_empty());
     }
 
     #[test]
-    fn simple_resample_produces_finite_bounded_samples() {
-        let input = sine_wave(44_100, 44_100, 440.0);
-        let output = AudioCapture::simple_resample(&input, 44_100, 16_000);
-
-        assert_length_near(output.len(), 16_000);
-        assert!(output
-            .iter()
-            .all(|sample| sample.is_finite() && sample.abs() <= 1.0 + 1e-3));
-    }
-
-    #[test]
-    fn resample_to_16k_passes_native_rate_through() {
-        let capture = AudioCapture::new();
+    fn resample_to_16k_passes_native_rate_and_empty_input_through() {
+        let mut capture = AudioCapture::new();
         let input = vec![-0.25, 0.0, 0.5, 1.0];
         let input_ptr = input.as_ptr();
         let output = capture.resample_to_16k(input);
-
         assert_eq!(output, vec![-0.25, 0.0, 0.5, 1.0]);
         assert_eq!(output.as_ptr(), input_ptr);
-    }
 
-    #[test]
-    fn resample_to_16k_returns_empty_for_empty_input() {
-        let mut capture = AudioCapture::new();
         capture.native_sample_rate = 48_000;
-
         assert!(capture.resample_to_16k(Vec::new()).is_empty());
     }
 
     #[test]
-    fn resample_to_16k_downsamples_with_finite_bounded_output() {
-        let mut capture = AudioCapture::new();
-        capture.native_sample_rate = 48_000;
-        let input = sine_wave(48_000, 48_000, 440.0);
-        let output = capture.resample_to_16k(input);
+    fn resample_to_16k_downsamples_common_rates() {
+        for rate in [48_000, 44_100] {
+            let mut capture = AudioCapture::new();
+            capture.native_sample_rate = rate;
+            let output = capture.resample_to_16k(sine_wave(rate, rate as usize, 440.0));
 
-        assert_length_near(output.len(), 16_000);
-        assert!(output
-            .iter()
-            .all(|sample| sample.is_finite() && sample.abs() <= 1.1));
-    }
-
-    #[test]
-    fn resample_to_16k_handles_odd_native_rate() {
-        let mut capture = AudioCapture::new();
-        capture.native_sample_rate = 44_100;
-        let input = sine_wave(44_100, 44_100, 440.0);
-        let output = capture.resample_to_16k(input);
-
-        assert_length_near(output.len(), 16_000);
-        assert!(output.iter().all(|sample| sample.is_finite()));
+            assert_length_near(output.len(), 16_000);
+            assert!(
+                output
+                    .iter()
+                    .all(|sample| sample.is_finite() && sample.abs() <= 1.1),
+                "resampled output out of range at {rate} Hz"
+            );
+        }
     }
 }

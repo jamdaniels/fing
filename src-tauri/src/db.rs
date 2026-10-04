@@ -624,7 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_removes_only_expired_transcripts() {
+    fn prune_removes_expired_transcripts_and_their_indexes() {
         let _guard = DB_TEST_MUTEX
             .lock()
             .expect("database test mutex should lock");
@@ -641,22 +641,6 @@ mod tests {
         let remaining = get_recent_transcripts(25, 0).expect("transcripts should load");
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].id, fresh.id);
-    }
-
-    #[test]
-    fn prune_keeps_search_and_term_indexes_consistent() {
-        let _guard = DB_TEST_MUTEX
-            .lock()
-            .expect("database test mutex should lock");
-        let _reset = setup_test_db();
-
-        let expired = save_transcript(&new_transcript("obsoletequartz archive"))
-            .expect("expired transcript should save");
-        save_transcript(&new_transcript("currentzephyr retained"))
-            .expect("fresh transcript should save");
-        backdate_transcript(expired.id);
-
-        prune_old_transcripts().expect("expired transcript should prune");
 
         assert!(search_transcripts("obsoletequartz", 25, 0)
             .expect("expired search should run")

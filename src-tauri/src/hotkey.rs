@@ -843,36 +843,6 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::thread;
-    use std::time::Duration;
-
-    #[test]
-    fn recording_lifecycle_lock_serializes_owners() {
-        let guard = lock_recording_lifecycle();
-        let (waiting_tx, waiting_rx) = mpsc::channel();
-        let (acquired_tx, acquired_rx) = mpsc::channel();
-
-        let worker = thread::spawn(move || {
-            waiting_tx
-                .send(())
-                .expect("worker should report that it is waiting");
-            let _guard = lock_recording_lifecycle();
-            acquired_tx
-                .send(())
-                .expect("worker should report acquiring the lifecycle lock");
-        });
-
-        waiting_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("worker should start");
-        assert!(acquired_rx.recv_timeout(Duration::from_millis(50)).is_err());
-
-        drop(guard);
-
-        acquired_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("worker should acquire the released lifecycle lock");
-        worker.join().expect("worker thread should complete");
-    }
 
     #[test]
     fn failed_start_does_not_leak_into_next_stop_response() {

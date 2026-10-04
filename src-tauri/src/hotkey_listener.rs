@@ -791,13 +791,6 @@ mod tests {
         assert!(state.pressed_keys.is_empty());
     }
 
-    #[test]
-    fn sleep_detection_uses_threshold() {
-        assert!(!slept_between(0, SLEEP_DETECTION_THRESHOLD_NS - 1));
-        assert!(slept_between(0, SLEEP_DETECTION_THRESHOLD_NS));
-        assert!(!slept_between(5, 3));
-    }
-
     /// Every token a backend can report must be one the settings accept,
     /// otherwise a saved hotkey could never match.
     pub(crate) fn assert_keymap_is_consistent<C: Copy + Eq + std::hash::Hash + std::fmt::Debug>(

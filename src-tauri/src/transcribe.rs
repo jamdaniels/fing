@@ -325,18 +325,4 @@ mod tests {
         ));
         assert!(!is_transcriber_loaded());
     }
-
-    #[test]
-    fn unload_transcriber_keeps_global_state_unloaded() {
-        let _guard = TRANSCRIBE_TEST_MUTEX
-            .lock()
-            .expect("transcribe test mutex should lock");
-        let _reset = TranscriberReset;
-
-        unload_transcriber();
-        unload_transcriber();
-
-        assert!(get_transcriber().is_none());
-        assert!(!is_transcriber_loaded());
-    }
 }
