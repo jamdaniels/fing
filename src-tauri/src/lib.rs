@@ -688,7 +688,7 @@ fn apply_saved_hotkey(app: &tauri::AppHandle, hotkey: &str, warning: &str) {
 
     if let Err(e) = hotkey::register_hotkey(app) {
         tracing::warn!(
-            "Failed to register hotkey: {} - hotkey will work after app restart with proper permissions",
+            "Failed to register hotkey: {} - hotkey will activate once permission is granted",
             e
         );
     }

@@ -59,6 +59,8 @@ enum AudioCommand {
     StopRecording {
         reply_tx: Sender<Result<Vec<f32>, String>>,
     },
+    /// Stop capturing and drop the audio without resampling it.
+    Discard,
 }
 
 #[derive(Clone, Debug)]
@@ -151,6 +153,11 @@ fn ensure_audio_thread() {
 
                     let _ = reply_tx.send(Ok(resampled));
                 }
+                Ok(AudioCommand::Discard) => {
+                    drop(capture.end_recording());
+                    capture.close_capture();
+                    tracing::info!("Audio recording cancelled, buffer discarded");
+                }
                 Err(_) => {
                     tracing::info!("Audio thread shutting down");
                     capture.close_capture();
@@ -193,6 +200,19 @@ fn lock_recording_lifecycle() -> MutexGuard<'static, ()> {
             poisoned.into_inner()
         }
     }
+}
+
+/// The audio thread's command sender, if the thread is running.
+fn audio_cmd_tx(context: &str) -> Option<Sender<AudioCommand>> {
+    match AUDIO_THREAD.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!("Audio thread mutex poisoned on {}, recovering", context);
+            poisoned.into_inner()
+        }
+    }
+    .as_ref()
+    .map(|thread| thread.cmd_tx.clone())
 }
 
 fn send_start_recording_command(
@@ -420,15 +440,7 @@ pub fn on_key_down(app: &AppHandle) {
     // Ensure audio thread is running and start recording
     ensure_audio_thread();
 
-    let cmd_tx = match AUDIO_THREAD.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            tracing::warn!("Audio thread mutex poisoned on key down, recovering");
-            poisoned.into_inner()
-        }
-    }
-    .as_ref()
-    .map(|thread| thread.cmd_tx.clone());
+    let cmd_tx = audio_cmd_tx("key down");
 
     let start_result = if let Some(cmd_tx) = cmd_tx {
         send_start_recording_command(&cmd_tx, settings_snapshot.selected_microphone_id)
@@ -540,15 +552,7 @@ pub fn on_key_up(app: &AppHandle) {
 
     let duration_ms = duration_ms as i64;
 
-    let cmd_tx = match AUDIO_THREAD.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            tracing::warn!("Audio thread mutex poisoned on stop, recovering");
-            poisoned.into_inner()
-        }
-    }
-    .as_ref()
-    .map(|thread| thread.cmd_tx.clone());
+    let cmd_tx = audio_cmd_tx("stop");
 
     // Spawn async task for transcription
     let app_handle = app.clone();
@@ -703,6 +707,51 @@ pub fn on_key_up(app: &AppHandle) {
     });
 }
 
+/// Called when Escape is pressed while the hotkey is held: stop recording and
+/// discard the audio, so nothing is transcribed, pasted or saved.
+pub fn on_key_cancel(app: &AppHandle) {
+    let _lifecycle_guard = lock_recording_lifecycle();
+    let is_test_mode = ONBOARDING_TEST_MODE.load(Ordering::SeqCst);
+
+    if !KEY_HELD.swap(false, Ordering::SeqCst) {
+        return;
+    }
+
+    tracing::info!("Recording cancelled by Escape");
+
+    let session_id = RECORDING_SESSION_ID.load(Ordering::SeqCst);
+    let recording_started = matches!(
+        current_recording_start_status(),
+        RecordingStartStatus::Started { session_id: started_session_id }
+            if started_session_id == session_id
+    );
+    set_recording_start_status(RecordingStartStatus::Idle);
+
+    if recording_started {
+        // The audio thread handles commands in order, so the next
+        // StartRecording can't overtake this.
+        let sent =
+            audio_cmd_tx("cancel").is_some_and(|cmd_tx| cmd_tx.send(AudioCommand::Discard).is_ok());
+        if !sent {
+            tracing::warn!("Failed to send Discard command");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        match FRONTMOST_APP.lock() {
+            Ok(app) => app,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+        .take();
+    }
+
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        finish_transcription(&app_handle, None, 0, is_test_mode).await;
+    });
+}
+
 async fn finish_transcription(
     app: &AppHandle,
     text: Option<String>,
@@ -717,8 +766,9 @@ async fn finish_transcription(
         tokio::time::sleep(Duration::from_millis(crate::indicator::HIDE_ANIMATION_MS)).await;
         crate::state::transition_to(crate::state::AppState::Ready).ok();
         app.emit("app-state-changed", "ready").ok();
-        // Defensive: clear any stale listener state so the next press always works.
-        crate::hotkey_listener::reset_listener_state();
+        // Defensive: drop stale listener state so the next press always works,
+        // while keeping keys the user is still physically holding.
+        crate::hotkey_listener::resync_listener_state();
     }
 
     if let Some(t) = text {
@@ -840,7 +890,7 @@ mod tests {
                 AudioCommand::StartRecording { reply_tx, .. } => {
                     let _ = reply_tx.send(Err("mic init failed".to_string()));
                 }
-                AudioCommand::StopRecording { .. } => {
+                AudioCommand::StopRecording { .. } | AudioCommand::Discard => {
                     panic!("first command should be StartRecording");
                 }
             }
@@ -849,7 +899,7 @@ mod tests {
                 AudioCommand::StartRecording { reply_tx, .. } => {
                     let _ = reply_tx.send(Ok(()));
                 }
-                AudioCommand::StopRecording { .. } => {
+                AudioCommand::StopRecording { .. } | AudioCommand::Discard => {
                     panic!("second command should be StartRecording");
                 }
             }
@@ -858,7 +908,7 @@ mod tests {
                 AudioCommand::StopRecording { reply_tx } => {
                     let _ = reply_tx.send(Ok(vec![0.25, 0.5]));
                 }
-                AudioCommand::StartRecording { .. } => {
+                AudioCommand::StartRecording { .. } | AudioCommand::Discard => {
                     panic!("third command should be StopRecording");
                 }
             }

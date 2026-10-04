@@ -14,6 +14,10 @@ static HOTKEY_CONFIG: Lazy<RwLock<Option<HotkeyConfig>>> = Lazy::new(|| RwLock::
 const MAX_HOTKEY_LENGTH: usize = 200;
 const MAX_HOTKEY_PARTS: usize = 16;
 
+/// Token for the Escape key. It is never a valid hotkey token: the listener
+/// reserves Escape for cancelling a recording.
+pub const ESCAPE_TOKEN: &str = "Escape";
+
 fn is_function_key(token: &str) -> bool {
     let Some(digits) = token.strip_prefix('F') else {
         return false;
@@ -155,7 +159,7 @@ pub fn parse_hotkey_string(raw: &str) -> Result<HotkeyConfig, String> {
         if token.is_empty() {
             return Err("Hotkey contains empty key component".to_string());
         }
-        if token == "Escape" {
+        if token == ESCAPE_TOKEN {
             return Err("Escape cannot be used as a hotkey".to_string());
         }
         if !is_valid_hotkey_token(token) {
