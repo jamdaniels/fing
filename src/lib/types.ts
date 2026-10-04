@@ -180,3 +180,27 @@ export interface PermissionStatus {
   accessibility: "unknown" | "granted" | "denied" | "not-applicable";
   microphone: "unknown" | "prompt" | "granted" | "denied";
 }
+
+/** Base state of the recording indicator ("indicator-state-changed"). */
+export type IndicatorState = "recording" | "processing" | "hidden";
+
+export interface IndicatorStatePayload {
+  state: IndicatorState;
+}
+
+/**
+ * "indicator-levels": BAND_COUNT (3) perceptual band levels in 0..1,
+ * index 0 = low, 1 = mid, 2 = high. Unsmoothed; emitted ~30 Hz while recording.
+ */
+export interface IndicatorLevelsPayload {
+  levels: number[];
+}
+
+export type IndicatorNoticeKind = "info" | "error";
+
+/** "indicator-notice": a short, already localized single-line message. */
+export interface IndicatorNoticePayload {
+  durationMs: number;
+  kind: IndicatorNoticeKind;
+  message: string;
+}

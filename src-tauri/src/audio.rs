@@ -5,7 +5,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream, StreamConfig};
 use rubato::{Fft, FixedSync, Resampler};
 use serde::Serialize;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 static OVERFLOW_LOGGED: AtomicBool = AtomicBool::new(false);
@@ -78,7 +78,7 @@ fn device_candidate(device: Device) -> DeviceCandidate {
         .unwrap_or_else(|| "Unknown".to_string());
     let name = description
         .as_ref()
-        .map(|description| display_name(description))
+        .map(display_name)
         .unwrap_or_else(|| legacy_id.clone());
     let id = device
         .id()
@@ -139,6 +139,9 @@ pub struct AudioCapture {
     buffer: Arc<Mutex<Vec<f32>>>,
     native_sample_rate: u32,
     is_recording: bool,
+    /// Current recording session for [`AudioTap::is_live`]; 0 while not recording.
+    live_session: Arc<AtomicU64>,
+    last_session: u64,
 }
 
 impl Default for AudioCapture {
@@ -155,6 +158,8 @@ impl AudioCapture {
             buffer: Arc::new(Mutex::new(Vec::with_capacity(INITIAL_BUFFER_CAPACITY))),
             native_sample_rate: WHISPER_SAMPLE_RATE,
             is_recording: false,
+            live_session: Arc::new(AtomicU64::new(0)),
+            last_session: 0,
         }
     }
 
@@ -388,6 +393,17 @@ impl AudioCapture {
         Ok(match_result)
     }
 
+    /// Cheap handle for reading recent samples while recording (level meter).
+    /// It goes stale once the current recording ends.
+    pub fn tap(&self) -> AudioTap {
+        AudioTap {
+            buffer: Arc::clone(&self.buffer),
+            sample_rate: self.native_sample_rate,
+            live_session: Arc::clone(&self.live_session),
+            session: self.live_session.load(Ordering::SeqCst),
+        }
+    }
+
     pub fn begin_recording(&mut self) {
         // Reset overflow flag for new session
         OVERFLOW_LOGGED.store(false, Ordering::Relaxed);
@@ -402,6 +418,8 @@ impl AudioCapture {
             let _ = stream.play();
         }
         self.is_recording = true;
+        self.last_session = self.last_session.wrapping_add(1).max(1);
+        self.live_session.store(self.last_session, Ordering::SeqCst);
     }
 
     pub fn end_recording(&mut self) -> Vec<f32> {
@@ -410,6 +428,7 @@ impl AudioCapture {
             let _ = stream.pause();
         }
         self.is_recording = false;
+        self.live_session.store(0, Ordering::SeqCst);
         if OVERFLOW_LOGGED.swap(false, Ordering::Relaxed) {
             tracing::warn!("Audio buffer full (120s max), samples dropped");
         }
@@ -432,6 +451,7 @@ impl AudioCapture {
         }
         self.stream = None;
         self.is_recording = false;
+        self.live_session.store(0, Ordering::SeqCst);
         tracing::debug!("Audio capture closed");
     }
 
@@ -592,6 +612,156 @@ impl AudioCapture {
     }
 }
 
+/// Read-only view of the capture buffer (mono samples at the native rate).
+/// Holds no reference to the input stream, so it never keeps the mic alive.
+#[derive(Clone)]
+pub struct AudioTap {
+    buffer: Arc<Mutex<Vec<f32>>>,
+    sample_rate: u32,
+    live_session: Arc<AtomicU64>,
+    session: u64,
+}
+
+impl AudioTap {
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    /// Whether the recording this tap was taken for is still running.
+    pub fn is_live(&self) -> bool {
+        self.session != 0 && self.live_session.load(Ordering::SeqCst) == self.session
+    }
+
+    /// Replace `out` with (at most) the `count` most recent samples. The lock
+    /// is held only for the copy.
+    pub fn copy_tail(&self, count: usize, out: &mut Vec<f32>) {
+        let buf = match self.buffer.lock() {
+            Ok(buf) => buf,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        out.clear();
+        out.extend_from_slice(&buf[buf.len().saturating_sub(count)..]);
+    }
+}
+
+/// Number of frequency bands reported to the recording indicator.
+pub const LEVEL_BAND_COUNT: usize = 3;
+/// Band edges in Hz: voice fundamentals, formants, upper formants/consonants.
+const LEVEL_BANDS_HZ: [(f32, f32); LEVEL_BAND_COUNT] =
+    [(85.0, 300.0), (300.0, 1500.0), (1500.0, 4500.0)];
+/// Per-band gain compensating for speech's spectral tilt (~6 dB/octave), so
+/// the mid/high bands move visibly for normal speech.
+const LEVEL_TILT_DB: [f32; LEVEL_BAND_COUNT] = [0.0, 4.0, 10.0];
+/// Tilt-compensated band power (dBFS) mapped to 0; room noise stays below it.
+const LEVEL_NOISE_FLOOR_DB: f32 = -58.0;
+/// dB above the noise floor that maps to a full level of 1. Wide enough that
+/// loud speech keeps headroom; the indicator rescales to recent peaks itself.
+const LEVEL_RANGE_DB: f32 = 48.0;
+/// Analysis window length; the FFT size is the next power of two.
+const LEVEL_WINDOW_SECS: f32 = 0.040;
+
+/// Computes perceptual 0..1 voice levels for [`LEVEL_BAND_COUNT`] bands.
+/// Owns the FFT plan and buffers so per-frame analysis does not allocate.
+pub struct LevelAnalyzer {
+    fft: Arc<dyn realfft::RealToComplex<f32>>,
+    window: Vec<f32>,
+    input: Vec<f32>,
+    spectrum: Vec<realfft::num_complex::Complex<f32>>,
+    scratch: Vec<realfft::num_complex::Complex<f32>>,
+    band_bins: [(usize, usize); LEVEL_BAND_COUNT],
+}
+
+/// Callers guarantee `len >= 2`.
+fn hann(index: usize, len: usize) -> f32 {
+    0.5 - 0.5 * (2.0 * std::f32::consts::PI * index as f32 / (len - 1) as f32).cos()
+}
+
+impl LevelAnalyzer {
+    pub fn new(sample_rate: u32) -> Self {
+        let sample_rate = sample_rate.max(1);
+        let fft_len = ((sample_rate as f32 * LEVEL_WINDOW_SECS) as usize)
+            .max(2)
+            .next_power_of_two();
+        let fft = realfft::RealFftPlanner::<f32>::new().plan_fft_forward(fft_len);
+        let bin_hz = sample_rate as f32 / fft_len as f32;
+        let bin_count = fft_len / 2 + 1;
+        let band_bins = LEVEL_BANDS_HZ.map(|(low, high)| {
+            let start = ((low / bin_hz).ceil() as usize).min(bin_count);
+            let end = ((high / bin_hz).ceil() as usize).min(bin_count);
+            (start, end)
+        });
+
+        Self {
+            window: (0..fft_len).map(|i| hann(i, fft_len)).collect(),
+            input: fft.make_input_vec(),
+            spectrum: fft.make_output_vec(),
+            scratch: fft.make_scratch_vec(),
+            fft,
+            band_bins,
+        }
+    }
+
+    /// Number of most recent samples [`Self::analyze`] looks at.
+    pub fn window_len(&self) -> usize {
+        self.window.len()
+    }
+
+    /// Band levels in 0..1 for the most recent samples (silence -> 0).
+    pub fn analyze(&mut self, samples: &[f32]) -> [f32; LEVEL_BAND_COUNT] {
+        let fft_len = self.window.len();
+        let samples = &samples[samples.len().saturating_sub(fft_len)..];
+        let used = samples.len();
+        if used < 2 {
+            return [0.0; LEVEL_BAND_COUNT];
+        }
+
+        // Short input (recording just started): Hann over what we have, zero-padded.
+        let mut window_energy = 0.0f32;
+        for (i, slot) in self.input.iter_mut().enumerate() {
+            *slot = match samples.get(i) {
+                Some(&sample) if sample.is_finite() => {
+                    let weight = if used == fft_len {
+                        self.window[i]
+                    } else {
+                        hann(i, used)
+                    };
+                    window_energy += weight * weight;
+                    sample * weight
+                }
+                _ => 0.0,
+            };
+        }
+        if window_energy <= f32::EPSILON
+            || self
+                .fft
+                .process_with_scratch(&mut self.input, &mut self.spectrum, &mut self.scratch)
+                .is_err()
+        {
+            return [0.0; LEVEL_BAND_COUNT];
+        }
+
+        // One-sided power normalized to the signal's mean square (sine amplitude A -> A^2/2).
+        let scale = 2.0 / (fft_len as f32 * window_energy);
+        let mut levels = [0.0; LEVEL_BAND_COUNT];
+        for (band, level) in levels.iter_mut().enumerate() {
+            let (start, end) = self.band_bins[band];
+            let power: f32 = self.spectrum[start..end]
+                .iter()
+                .map(|bin| bin.norm_sqr())
+                .sum::<f32>()
+                * scale;
+            let db = 10.0 * (power + 1e-12).log10() + LEVEL_TILT_DB[band];
+            let value = (db - LEVEL_NOISE_FLOOR_DB) / LEVEL_RANGE_DB;
+            *level = if value.is_finite() {
+                value.clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+        }
+        levels
+    }
+}
+
 impl Drop for AudioCapture {
     fn drop(&mut self) {
         // Ensure stream is properly stopped when AudioCapture is dropped
@@ -621,6 +791,141 @@ mod tests {
             actual.abs_diff(expected) <= tolerance,
             "expected output length near {expected}, got {actual}"
         );
+    }
+
+    fn scaled_sine(sample_rate: u32, frequency: f32, amplitude: f32) -> Vec<f32> {
+        sine_wave(sample_rate, sample_rate as usize / 10, frequency)
+            .into_iter()
+            .map(|sample| sample * amplitude)
+            .collect()
+    }
+
+    fn assert_levels_valid(levels: &[f32; LEVEL_BAND_COUNT]) {
+        assert!(
+            levels
+                .iter()
+                .all(|level| level.is_finite() && (0.0..=1.0).contains(level)),
+            "levels out of range: {levels:?}"
+        );
+    }
+
+    const LEVEL_TEST_RATES: [u32; 3] = [16_000, 44_100, 48_000];
+
+    #[test]
+    fn level_window_is_about_40ms_power_of_two() {
+        for (rate, expected) in [(16_000, 1024), (44_100, 2048), (48_000, 2048)] {
+            assert_eq!(LevelAnalyzer::new(rate).window_len(), expected);
+        }
+    }
+
+    #[test]
+    fn levels_are_zero_for_silence_and_empty_input() {
+        for rate in LEVEL_TEST_RATES {
+            let mut analyzer = LevelAnalyzer::new(rate);
+            assert_eq!(analyzer.analyze(&[]), [0.0; LEVEL_BAND_COUNT]);
+            assert_eq!(analyzer.analyze(&[0.5]), [0.0; LEVEL_BAND_COUNT]);
+            assert_eq!(
+                analyzer.analyze(&vec![0.0; rate as usize / 10]),
+                [0.0; LEVEL_BAND_COUNT]
+            );
+        }
+    }
+
+    #[test]
+    fn levels_gate_quiet_room_noise() {
+        // Deterministic white noise at roughly -66 dBFS RMS.
+        let mut seed = 0x1234_5678u32;
+        let noise: Vec<f32> = (0..48_000)
+            .map(|_| {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                ((seed >> 8) as f32 / (1u32 << 24) as f32 - 0.5) * 0.0017
+            })
+            .collect();
+        for rate in LEVEL_TEST_RATES {
+            let levels = LevelAnalyzer::new(rate).analyze(&noise);
+            assert!(
+                levels.iter().all(|level| *level < 0.05),
+                "noise should be gated at {rate} Hz: {levels:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn sine_lands_in_matching_band() {
+        for rate in LEVEL_TEST_RATES {
+            let mut analyzer = LevelAnalyzer::new(rate);
+            for (frequency, band) in [(150.0, 0), (800.0, 1), (2_500.0, 2)] {
+                let levels = analyzer.analyze(&scaled_sine(rate, frequency, 0.05));
+                assert_levels_valid(&levels);
+                assert!(
+                    levels[band] > 0.5,
+                    "{frequency} Hz at {rate} Hz should drive band {band}: {levels:?}"
+                );
+                for (other, level) in levels.iter().enumerate() {
+                    if other != band {
+                        assert!(
+                            *level < 0.1,
+                            "{frequency} Hz at {rate} Hz leaked into band {other}: {levels:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn levels_stay_bounded_for_loud_short_and_invalid_input() {
+        for rate in LEVEL_TEST_RATES {
+            let mut analyzer = LevelAnalyzer::new(rate);
+            let loud = scaled_sine(rate, 300.0, 1.0);
+            assert_levels_valid(&analyzer.analyze(&loud));
+            assert_levels_valid(&analyzer.analyze(&loud[..64]));
+            assert_levels_valid(&analyzer.analyze(&[f32::NAN, f32::INFINITY, 1.0, -1.0]));
+        }
+    }
+
+    #[test]
+    fn short_input_still_reports_level() {
+        let rate = 48_000;
+        let sine = scaled_sine(rate, 800.0, 0.05);
+        let levels = LevelAnalyzer::new(rate).analyze(&sine[..rate as usize / 100]);
+        assert!(levels[1] > 0.5, "10 ms of 800 Hz: {levels:?}");
+    }
+
+    #[test]
+    fn tap_copies_only_recent_samples() {
+        let capture = AudioCapture::new();
+        capture
+            .buffer
+            .lock()
+            .expect("buffer lock")
+            .extend([1.0, 2.0, 3.0, 4.0]);
+        let tap = capture.tap();
+        let mut out = vec![9.0; 8];
+
+        tap.copy_tail(2, &mut out);
+        assert_eq!(out, vec![3.0, 4.0]);
+        tap.copy_tail(10, &mut out);
+        assert_eq!(out, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(tap.sample_rate(), WHISPER_SAMPLE_RATE);
+    }
+
+    #[test]
+    fn tap_is_live_only_for_its_own_recording() {
+        let mut capture = AudioCapture::new();
+        assert!(!capture.tap().is_live());
+
+        capture.begin_recording();
+        let first = capture.tap();
+        assert!(first.is_live());
+        drop(capture.end_recording());
+        assert!(!first.is_live());
+
+        capture.begin_recording();
+        assert!(!first.is_live());
+        assert!(capture.tap().is_live());
+        capture.close_capture();
+        assert!(!capture.tap().is_live());
     }
 
     #[test]

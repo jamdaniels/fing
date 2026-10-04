@@ -13,8 +13,8 @@ mod hotkey_listener;
 mod i18n;
 mod indicator;
 mod inference;
+mod level_meter;
 mod model;
-mod notifications;
 mod paste;
 mod paths;
 mod platform;
@@ -958,7 +958,6 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -1133,7 +1132,6 @@ pub fn run() {
             indicator::indicator_show_recording,
             indicator::indicator_show_processing,
             indicator::indicator_hide,
-            // Notifications
             // Window management
             quit_app,
             present_main_window,

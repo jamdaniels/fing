@@ -19,12 +19,12 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-shell = "2"
 tauri-plugin-autostart = "2"
-tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 whisper-rs = "=0.16.0"
 cpal = "0.17"
 rubato = "1.0"
+realfft = "3"
 audioadapter-buffers = "2"
 rusqlite = { version = "0.38", features = ["bundled"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "fs"] }

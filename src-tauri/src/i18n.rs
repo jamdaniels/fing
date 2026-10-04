@@ -15,21 +15,17 @@ pub struct TrayTranslations {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NotificationTranslations {
-    pub recording_stopped_title: String,
-    pub maximum_recording_duration: String,
-    pub microphone_error_title: String,
-    pub microphone_start_failed: String,
-    pub model_error_title: String,
+pub struct IndicatorTranslations {
+    pub recording_limit_reached: String,
+    pub microphone_unavailable: String,
     pub model_load_failed: String,
-    pub transcription_error_title: String,
     pub transcription_failed: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct NativeTranslations {
     pub tray: TrayTranslations,
-    pub notifications: NotificationTranslations,
+    pub indicator: IndicatorTranslations,
 }
 
 static EN: LazyLock<NativeTranslations> = LazyLock::new(|| {
@@ -52,14 +48,6 @@ pub fn current() -> &'static NativeTranslations {
     for_language(crate::settings::load_settings_sync().ui_language)
 }
 
-pub fn interpolate(template: &str, values: &[(&str, &str)]) -> String {
-    values
-        .iter()
-        .fold(template.to_string(), |message, (key, value)| {
-            message.replace(&format!("{{{key}}}"), value)
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,29 +61,24 @@ mod tests {
             assert!(!catalog.tray.history.is_empty());
             assert!(!catalog.tray.settings.is_empty());
             assert!(!catalog.tray.update_available.is_empty());
-            assert!(!catalog.notifications.recording_stopped_title.is_empty());
-            assert!(!catalog.notifications.maximum_recording_duration.is_empty());
-            assert!(!catalog.notifications.microphone_error_title.is_empty());
-            assert!(catalog
-                .notifications
-                .microphone_start_failed
-                .contains("{error}"));
-            assert!(!catalog.notifications.model_error_title.is_empty());
-            assert!(catalog.notifications.model_load_failed.contains("{error}"));
-            assert!(!catalog.notifications.transcription_error_title.is_empty());
-            assert!(catalog
-                .notifications
-                .transcription_failed
-                .contains("{error}"));
         }
     }
 
     #[test]
-    fn interpolation_replaces_named_values() {
-        assert_eq!(
-            interpolate("Failed: {error}", &[("error", "offline")]),
-            "Failed: offline"
-        );
+    fn indicator_messages_are_short_single_lines() {
+        for catalog in [&*EN, &*DE] {
+            let indicator = &catalog.indicator;
+            for message in [
+                &indicator.recording_limit_reached,
+                &indicator.microphone_unavailable,
+                &indicator.model_load_failed,
+                &indicator.transcription_failed,
+            ] {
+                assert!(!message.is_empty());
+                assert!(message.chars().count() <= 32, "too long: {message}");
+                assert!(!message.contains('\n') && !message.contains('{'));
+            }
+        }
     }
 
     #[test]

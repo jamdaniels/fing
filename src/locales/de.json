@@ -292,7 +292,8 @@
     "setupFailed": "Die Einrichtung wurde nicht abgeschlossen. Überprüfe den Modell-Download und versuche es erneut."
   },
   "indicator": {
-    "processing": "Verarbeitung"
+    "processing": "Verarbeitung",
+    "recording": "Aufnahme"
   },
   "errors": {
     "unknown": "Unbekannter Fehler"

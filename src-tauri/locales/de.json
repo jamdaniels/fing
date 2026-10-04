@@ -7,14 +7,10 @@
     "settings": "Einstellungen",
     "updateAvailable": "Update verfügbar"
   },
-  "notifications": {
-    "recordingStoppedTitle": "Aufnahme beendet",
-    "maximumRecordingDuration": "Maximale Aufnahmedauer (2 Min.) erreicht",
-    "microphoneErrorTitle": "Mikrofonfehler",
-    "microphoneStartFailed": "Aufnahme konnte nicht gestartet werden: {error}",
-    "modelErrorTitle": "Modellfehler",
-    "modelLoadFailed": "Modell konnte nicht geladen werden: {error}",
-    "transcriptionErrorTitle": "Transkriptionsfehler",
-    "transcriptionFailed": "Transkription fehlgeschlagen: {error}"
+  "indicator": {
+    "recordingLimitReached": "Aufnahmelimit erreicht (2 Min.)",
+    "microphoneUnavailable": "Mikrofon nicht verfügbar",
+    "modelLoadFailed": "Modell ließ sich nicht laden",
+    "transcriptionFailed": "Transkription fehlgeschlagen"
   }
 }

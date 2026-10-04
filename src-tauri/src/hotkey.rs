@@ -4,8 +4,9 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
-use crate::audio::AudioCapture;
+use crate::audio::{AudioCapture, AudioTap};
 use crate::db::{save_transcript, NewTranscript};
+use crate::indicator::NoticeKind;
 use crate::model::{ensure_variant_available, model_path_for_variant, ModelVariant};
 use crate::paste::paste_text;
 use crate::settings::{load_settings, load_settings_sync};
@@ -54,7 +55,7 @@ fn is_blank_audio(text: &str) -> bool {
 enum AudioCommand {
     StartRecording {
         device_id: Option<String>,
-        reply_tx: Sender<Result<(), String>>,
+        reply_tx: Sender<Result<AudioTap, String>>,
     },
     StopRecording {
         reply_tx: Sender<Result<Vec<f32>, String>>,
@@ -123,7 +124,7 @@ fn ensure_audio_thread() {
 
                     capture.begin_recording();
                     tracing::info!("Audio recording started");
-                    let _ = reply_tx.send(Ok(()));
+                    let _ = reply_tx.send(Ok(capture.tap()));
 
                     if !match_result.matched {
                         tracing::warn!(
@@ -218,7 +219,7 @@ fn audio_cmd_tx(context: &str) -> Option<Sender<AudioCommand>> {
 fn send_start_recording_command(
     cmd_tx: &Sender<AudioCommand>,
     device_id: Option<String>,
-) -> Result<(), String> {
+) -> Result<AudioTap, String> {
     let (reply_tx, reply_rx) = mpsc::channel();
     cmd_tx
         .send(AudioCommand::StartRecording {
@@ -427,15 +428,19 @@ pub fn on_key_down(app: &AppHandle) {
         let current_session = RECORDING_SESSION_ID.load(Ordering::SeqCst);
         if current_session == session_id && KEY_HELD.load(Ordering::SeqCst) {
             tracing::info!("Auto-stopping recording after 2 minutes");
-            let translations = crate::i18n::current();
-            crate::notifications::show_info(
+            notify(
                 &app_for_timer,
-                &translations.notifications.recording_stopped_title,
-                &translations.notifications.maximum_recording_duration,
+                NoticeKind::Info,
+                &crate::i18n::current().indicator.recording_limit_reached,
             );
             on_key_up(&app_for_timer);
         }
     });
+
+    // Open the sound output while the mic starts; the cue plays once it is live.
+    let start_cue = settings_snapshot
+        .sound_enabled
+        .then(sounds::prepare_start);
 
     // Ensure audio thread is running and start recording
     ensure_audio_thread();
@@ -449,8 +454,12 @@ pub fn on_key_down(app: &AppHandle) {
     };
 
     match start_result {
-        Ok(()) => {
+        Ok(tap) => {
             set_recording_start_status(RecordingStartStatus::Started { session_id });
+            crate::level_meter::start(app, tap);
+            if let Some(cue) = start_cue {
+                cue.play();
+            }
         }
         Err(message) => {
             tracing::error!(
@@ -462,17 +471,8 @@ pub fn on_key_down(app: &AppHandle) {
                 session_id,
                 message,
             });
-            return;
         }
     }
-
-    // Play start sound if enabled
-    tauri::async_runtime::spawn(async move {
-        let settings = load_settings().await;
-        if settings.sound_enabled {
-            sounds::play_start();
-        }
-    });
 }
 
 /// Called when F8 is released
@@ -515,15 +515,11 @@ pub fn on_key_up(app: &AppHandle) {
         let test_mode = is_test_mode;
         let duration_ms = duration_ms as i64;
         tauri::async_runtime::spawn(async move {
-            let translations = crate::i18n::current();
-            let localized_message = crate::i18n::interpolate(
-                &translations.notifications.microphone_start_failed,
-                &[("error", &message)],
-            );
-            crate::notifications::show_error(
+            tracing::warn!("Recording did not start: {}", message);
+            notify(
                 &app_handle,
-                &translations.notifications.microphone_error_title,
-                &localized_message,
+                NoticeKind::Error,
+                &crate::i18n::current().indicator.microphone_unavailable,
             );
             finish_transcription(&app_handle, None, duration_ms, test_mode).await;
         });
@@ -599,15 +595,10 @@ pub fn on_key_up(app: &AppHandle) {
             if let Err(e) = init_transcriber_for_variant_async(settings.active_model_variant).await
             {
                 tracing::error!("Failed to initialize transcriber: {}", e);
-                let translations = crate::i18n::current();
-                let message = crate::i18n::interpolate(
-                    &translations.notifications.model_load_failed,
-                    &[("error", &e.to_string())],
-                );
-                crate::notifications::show_error(
+                notify(
                     &app_handle,
-                    &translations.notifications.model_error_title,
-                    &message,
+                    NoticeKind::Error,
+                    &crate::i18n::current().indicator.model_load_failed,
                 );
                 finish_transcription(&app_handle, None, duration_ms, test_mode).await;
                 return;
@@ -627,15 +618,10 @@ pub fn on_key_up(app: &AppHandle) {
             Ok(t) => t,
             Err(e) => {
                 tracing::error!("Transcription failed: {}", e);
-                let translations = crate::i18n::current();
-                let message = crate::i18n::interpolate(
-                    &translations.notifications.transcription_failed,
-                    &[("error", &e.to_string())],
-                );
-                crate::notifications::show_error(
+                notify(
                     &app_handle,
-                    &translations.notifications.transcription_error_title,
-                    &message,
+                    NoticeKind::Error,
+                    &crate::i18n::current().indicator.transcription_failed,
                 );
                 finish_transcription(&app_handle, None, duration_ms, test_mode).await;
                 return;
@@ -750,6 +736,13 @@ pub fn on_key_cancel(app: &AppHandle) {
     tauri::async_runtime::spawn(async move {
         finish_transcription(&app_handle, None, 0, is_test_mode).await;
     });
+}
+
+/// Show a notice in the indicator; error details stay in the logs.
+fn notify(app: &AppHandle, kind: NoticeKind, message: &str) {
+    if let Err(e) = crate::indicator::notify(app, kind, message) {
+        tracing::warn!("Failed to show indicator notice: {}", e);
+    }
 }
 
 async fn finish_transcription(
@@ -897,7 +890,7 @@ mod tests {
 
             match cmd_rx.recv().expect("second command should arrive") {
                 AudioCommand::StartRecording { reply_tx, .. } => {
-                    let _ = reply_tx.send(Ok(()));
+                    let _ = reply_tx.send(Ok(AudioCapture::new().tap()));
                 }
                 AudioCommand::StopRecording { .. } | AudioCommand::Discard => {
                     panic!("second command should be StartRecording");
@@ -915,13 +908,10 @@ mod tests {
         });
 
         assert_eq!(
-            send_start_recording_command(&cmd_tx, Some("Broken Mic".to_string())),
-            Err("mic init failed".to_string())
+            send_start_recording_command(&cmd_tx, Some("Broken Mic".to_string())).err(),
+            Some("mic init failed".to_string())
         );
-        assert_eq!(
-            send_start_recording_command(&cmd_tx, Some("Working Mic".to_string())),
-            Ok(())
-        );
+        assert!(send_start_recording_command(&cmd_tx, Some("Working Mic".to_string())).is_ok());
         assert_eq!(send_stop_recording_command(&cmd_tx), Ok(vec![0.25, 0.5]));
 
         worker.join().expect("worker thread should complete");

@@ -180,6 +180,16 @@ pub fn type_text(text: &str) -> Result<(), String> {
         .text(&filtered)
         .map_err(|e| format!("Failed to type text: {e:?}"))?;
 
+    // Dropping Enigo sleeps ~20 ms per posted 20-char chunk so the OS can drain
+    // the events (~2 s for long dictations). The text is already on screen, so
+    // drain off this path and let the indicator hide right away.
+    let drained = std::thread::Builder::new()
+        .name("enigo-drain".to_string())
+        .spawn(move || drop(enigo));
+    if let Err(e) = drained {
+        tracing::warn!("Failed to drain typed text off-thread: {}", e);
+    }
+
     Ok(())
 }
 

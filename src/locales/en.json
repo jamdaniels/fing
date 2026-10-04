@@ -292,7 +292,8 @@
     "setupFailed": "Setup did not finish. Please confirm the model download and try again."
   },
   "indicator": {
-    "processing": "Processing"
+    "processing": "Processing",
+    "recording": "Recording"
   },
   "errors": {
     "unknown": "Unknown error"
