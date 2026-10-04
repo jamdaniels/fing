@@ -24,7 +24,7 @@ const RC_SUFFIX_PATTERN = /-rc(\d+)$/;
 const SKIPPED_COMMIT_PATTERNS = [
   /^(?:chore|docs|ci|test|build|style|refactor)(?:\(.*\))?:/i,
   /^(?:prepare|release) v\d/i,
-  /^update (?:readme|changelog|agents|claude)/i,
+  /^update (?:readme|changelog|agents|claude|privacy)/i,
   /^merge /i,
 ];
 
