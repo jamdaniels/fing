@@ -28,7 +28,7 @@ Fing types the text into the active app without using your clipboard. If transcr
 
 ### Settings and Logs
 
-Your settings (such as hotkey, language, model, and appearance) and custom dictionary terms are stored only on your device. Fing may also keep a small diagnostic log there, which never contains audio or transcripts.
+Your settings (such as hotkey, language, model, and appearance) and custom dictionary terms are stored only on your device. Fing keeps no logs.
 
 ## Network Connections
 
