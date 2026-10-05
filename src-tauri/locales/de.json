@@ -10,6 +10,7 @@
   "indicator": {
     "recordingLimitReached": "Aufnahmelimit erreicht (2 Min.)",
     "microphoneUnavailable": "Mikrofon nicht verfügbar",
+    "usingMicrophone": "Verwende {name}",
     "modelLoadFailed": "Modell ließ sich nicht laden",
     "transcriptionFailed": "Transkription fehlgeschlagen"
   }

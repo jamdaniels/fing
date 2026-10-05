@@ -31,11 +31,10 @@ pub struct AudioDevice {
     pub legacy_id: String,
 }
 
-struct DeviceCandidate {
+/// An input device together with the handle needed to open it.
+pub struct InputDevice {
+    pub info: AudioDevice,
     device: Device,
-    id: String,
-    name: String,
-    legacy_id: String,
 }
 
 /// Result of a microphone test (audio level check).
@@ -45,16 +44,6 @@ pub struct MicrophoneTest {
     pub device_name: String,
     pub peak_level: f32,
     pub is_receiving_audio: bool,
-}
-
-/// Result of device lookup (whether requested device was found).
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeviceMatchResult {
-    pub requested: Option<String>,
-    pub actual_id: String,
-    pub actual_name: String,
-    pub matched: bool,
 }
 
 fn display_name(description: &cpal::DeviceDescription) -> String {
@@ -70,7 +59,7 @@ fn display_name(description: &cpal::DeviceDescription) -> String {
     description.name().to_string()
 }
 
-fn device_candidate(device: Device) -> DeviceCandidate {
+fn input_device(device: Device, default_id: Option<&str>) -> InputDevice {
     let description = device.description().ok();
     let legacy_id = description
         .as_ref()
@@ -85,28 +74,15 @@ fn device_candidate(device: Device) -> DeviceCandidate {
         .map(|id| id.to_string())
         .unwrap_or_else(|_| legacy_id.clone());
 
-    DeviceCandidate {
-        device,
-        id,
-        name,
-        legacy_id,
-    }
-}
-
-fn matched_device(
-    candidate: DeviceCandidate,
-    requested: Option<String>,
-    matched: bool,
-) -> (Device, DeviceMatchResult) {
-    (
-        candidate.device,
-        DeviceMatchResult {
-            requested,
-            actual_id: candidate.id,
-            actual_name: candidate.name,
-            matched,
+    InputDevice {
+        info: AudioDevice {
+            is_default: default_id == Some(id.as_str()),
+            id,
+            name,
+            legacy_id,
         },
-    )
+        device,
+    }
 }
 
 /// Errors that can occur during audio capture.
@@ -134,7 +110,6 @@ impl std::error::Error for AudioError {}
 
 /// Manages microphone capture, buffering, and resampling to 16kHz.
 pub struct AudioCapture {
-    selected_device_id: Option<String>,
     stream: Option<Stream>,
     buffer: Arc<Mutex<Vec<f32>>>,
     native_sample_rate: u32,
@@ -153,7 +128,6 @@ impl Default for AudioCapture {
 impl AudioCapture {
     pub fn new() -> Self {
         Self {
-            selected_device_id: None,
             stream: None,
             buffer: Arc::new(Mutex::new(Vec::with_capacity(INITIAL_BUFFER_CAPACITY))),
             native_sample_rate: WHISPER_SAMPLE_RATE,
@@ -163,103 +137,43 @@ impl AudioCapture {
         }
     }
 
-    pub fn list_devices() -> Vec<AudioDevice> {
+    /// All input devices, with the system default flagged. Enumerating does
+    /// not open any device.
+    pub fn input_devices() -> Vec<InputDevice> {
         let host = cpal::default_host();
         let default_id = host
             .default_input_device()
             .and_then(|device| device.id().ok())
             .map(|id| id.to_string());
 
-        let mut devices = Vec::new();
-
-        if let Ok(input_devices) = host.input_devices() {
-            for device in input_devices {
-                let candidate = device_candidate(device);
-                let is_default = default_id.as_ref() == Some(&candidate.id);
-                devices.push(AudioDevice {
-                    id: candidate.id,
-                    name: candidate.name,
-                    is_default,
-                    legacy_id: candidate.legacy_id,
-                });
-            }
-        }
-
-        devices
-    }
-
-    pub fn set_device(&mut self, device_id: Option<String>) {
-        self.selected_device_id = device_id;
-    }
-
-    fn get_device(&self) -> Result<(Device, DeviceMatchResult), AudioError> {
-        let host = cpal::default_host();
-
-        match &self.selected_device_id {
-            Some(id) => {
-                let mut devices: Vec<_> = host
-                    .input_devices()
-                    .map_err(|_| AudioError::NoDevicesFound)?
-                    .map(device_candidate)
-                    .collect();
-
-                let device_names: Vec<_> =
-                    devices.iter().map(|device| device.name.clone()).collect();
-                tracing::info!("Available input devices: {:?}", device_names);
-                tracing::info!("Looking for selected input device");
-
-                if let Some(idx) = devices.iter().position(|device| device.id == *id) {
-                    tracing::info!("Exact device ID match found");
-                    return Ok(matched_device(devices.remove(idx), Some(id.clone()), true));
-                }
-
-                let id_normalized = id.trim().to_lowercase();
-                if let Some(idx) = devices.iter().position(|device| {
-                    device.legacy_id.trim().to_lowercase() == id_normalized
-                        || device.name.trim().to_lowercase() == id_normalized
-                }) {
-                    tracing::info!("Legacy device name match found");
-                    return Ok(matched_device(devices.remove(idx), Some(id.clone()), true));
-                }
-
-                if let Some(idx) = devices.iter().position(|device| {
-                    [&device.legacy_id, &device.name].iter().any(|name| {
-                        let name_normalized = name.trim().to_lowercase();
-                        name_normalized.contains(&id_normalized)
-                            || id_normalized.contains(&name_normalized)
-                    })
-                }) {
-                    tracing::info!("Partial legacy device name match found");
-                    return Ok(matched_device(devices.remove(idx), Some(id.clone()), true));
-                }
-
-                // Fall back to default device
-                tracing::warn!(
-                    "Device '{}' not found among {:?}, falling back to default",
-                    id,
-                    device_names
-                );
-                let default_device = host
-                    .default_input_device()
-                    .ok_or(AudioError::NoDevicesFound)?;
-                Ok(matched_device(
-                    device_candidate(default_device),
-                    Some(id.clone()),
-                    false,
-                ))
-            }
-            None => {
-                let device = host
-                    .default_input_device()
-                    .ok_or(AudioError::NoDevicesFound)?;
-                Ok(matched_device(device_candidate(device), None, true))
+        match host.input_devices() {
+            Ok(devices) => devices
+                .map(|device| input_device(device, default_id.as_deref()))
+                .collect(),
+            Err(error) => {
+                tracing::warn!("Failed to enumerate input devices: {}", error);
+                Vec::new()
             }
         }
     }
 
-    pub fn init_capture(&mut self) -> Result<DeviceMatchResult, AudioError> {
-        let (device, match_result) = self.get_device()?;
-        let device_name = match_result.actual_name.clone();
+    pub fn list_devices() -> Vec<AudioDevice> {
+        Self::input_devices()
+            .into_iter()
+            .map(|device| device.info)
+            .collect()
+    }
+
+    /// The input device the OS currently uses by default.
+    pub fn default_input_device() -> Option<InputDevice> {
+        let device = cpal::default_host().default_input_device()?;
+        let id = device.id().ok().map(|id| id.to_string());
+        Some(input_device(device, id.as_deref()))
+    }
+
+    pub fn init_capture(&mut self, input: &InputDevice) -> Result<(), AudioError> {
+        let device = &input.device;
+        let device_name = &input.info.name;
 
         let config = device
             .default_input_config()
@@ -390,7 +304,7 @@ impl AudioCapture {
         .map_err(|e| AudioError::StreamError(e.to_string()))?;
 
         self.stream = Some(stream);
-        Ok(match_result)
+        Ok(())
     }
 
     /// Cheap handle for reading recent samples while recording (level meter).
@@ -559,22 +473,6 @@ impl AudioCapture {
         output
     }
 
-    /// Start continuous mic test - keeps stream open
-    pub fn start_mic_test(&mut self) -> Result<DeviceMatchResult, AudioError> {
-        let match_result = self.init_capture()?;
-
-        if let Ok(mut buf) = self.buffer.lock() {
-            buf.clear();
-        }
-
-        if let Some(ref stream) = self.stream {
-            let _ = stream.play();
-        }
-
-        self.is_recording = true;
-        Ok(match_result)
-    }
-
     /// Get current audio level during mic test and clear old samples
     pub fn get_mic_level(&mut self) -> MicrophoneTest {
         let mut buf = match self.buffer.lock() {
@@ -600,15 +498,6 @@ impl AudioCapture {
             peak_level,
             is_receiving_audio,
         }
-    }
-
-    /// Stop continuous mic test
-    pub fn stop_mic_test(&mut self) {
-        if let Some(ref stream) = self.stream {
-            let _ = stream.pause();
-        }
-        self.close_capture();
-        self.is_recording = false;
     }
 }
 

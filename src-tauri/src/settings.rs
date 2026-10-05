@@ -120,7 +120,17 @@ fn cache_outcome(outcome: &SettingsLoadOutcome) {
 pub struct Settings {
     pub hotkey: String,
     pub model_path: String,
+    /// Microphone picked in the dropdown; `None` follows the system default.
     pub selected_microphone_id: Option<String>,
+    /// Display name of the selected microphone, used to find it again when its
+    /// ID changes (e.g. a USB mic on another port) and to show it while unplugged.
+    #[serde(default)]
+    pub selected_microphone_name: Option<String>,
+    /// Hearted microphone that takes over again whenever it is plugged back in.
+    #[serde(default)]
+    pub preferred_microphone_id: Option<String>,
+    #[serde(default)]
+    pub preferred_microphone_name: Option<String>,
     pub auto_start: bool,
     pub sound_enabled: bool,
     pub paste_enabled: bool,
@@ -151,6 +161,13 @@ fn merge_settings_update(latest: Settings, incoming: Settings) -> Settings {
     let incoming_completed = incoming.onboarding_completed;
     let mut merged = sanitize_settings(incoming);
     merged.onboarding_completed = latest.onboarding_completed || incoming_completed;
+    // Microphone fields are owned by `crate::microphone` (the backend switches
+    // back to the preferred mic on its own), so a stale full-settings snapshot
+    // from the UI must not overwrite them.
+    merged.selected_microphone_id = latest.selected_microphone_id;
+    merged.selected_microphone_name = latest.selected_microphone_name;
+    merged.preferred_microphone_id = latest.preferred_microphone_id;
+    merged.preferred_microphone_name = latest.preferred_microphone_name;
     merged
 }
 
@@ -160,6 +177,9 @@ impl Default for Settings {
             hotkey: "F9".to_string(),
             model_path: String::new(),
             selected_microphone_id: None,
+            selected_microphone_name: None,
+            preferred_microphone_id: None,
+            preferred_microphone_name: None,
             auto_start: false,
             sound_enabled: true,
             paste_enabled: true,
@@ -745,23 +765,20 @@ mod tests {
 
             let stale = Settings {
                 onboarding_completed: false,
-                selected_microphone_id: Some(format!("mic-{}", unique_suffix())),
+                model_path: format!("model-{}", unique_suffix()),
                 ..Settings::default()
             };
 
-            let updated = update_settings(stale)
+            let updated = update_settings(stale.clone())
                 .await
                 .expect("stale settings update should succeed");
 
             assert!(updated.onboarding_completed);
-            assert!(updated.selected_microphone_id.is_some());
+            assert_eq!(updated.model_path, stale.model_path);
 
             let reloaded = load_from_disk_for_test().await;
             assert!(reloaded.onboarding_completed);
-            assert_eq!(
-                reloaded.selected_microphone_id,
-                updated.selected_microphone_id
-            );
+            assert_eq!(reloaded.model_path, updated.model_path);
         });
     }
 
@@ -832,23 +849,52 @@ mod tests {
                 .expect("default settings should save");
 
             let incoming = Settings {
-                selected_microphone_id: Some(format!("mic-{}", unique_suffix())),
+                model_path: format!("model-{}", unique_suffix()),
                 ..Settings::default()
             };
 
-            let updated = update_settings(incoming)
+            let updated = update_settings(incoming.clone())
                 .await
                 .expect("settings update should succeed");
 
             assert!(!updated.onboarding_completed);
-            assert!(updated.selected_microphone_id.is_some());
+            assert_eq!(updated.model_path, incoming.model_path);
 
             let reloaded = load_from_disk_for_test().await;
             assert!(!reloaded.onboarding_completed);
-            assert_eq!(
-                reloaded.selected_microphone_id,
-                updated.selected_microphone_id
-            );
+            assert_eq!(reloaded.model_path, updated.model_path);
+        });
+    }
+
+    #[test]
+    fn update_settings_keeps_microphone_fields_from_disk() {
+        run_async_test(async {
+            let _guard = SETTINGS_TEST_MUTEX.lock().await;
+            reset_test_settings().await;
+
+            let persisted = Settings {
+                selected_microphone_id: Some("mic-a".to_string()),
+                selected_microphone_name: Some("Mic A".to_string()),
+                preferred_microphone_id: Some("mic-a".to_string()),
+                preferred_microphone_name: Some("Mic A".to_string()),
+                ..Settings::default()
+            };
+            save_settings(&persisted)
+                .await
+                .expect("settings should save");
+
+            let stale_snapshot = Settings {
+                theme: Theme::Dark,
+                selected_microphone_id: Some("mic-b".to_string()),
+                ..Settings::default()
+            };
+            let updated = update_settings(stale_snapshot)
+                .await
+                .expect("settings update should succeed");
+
+            assert_eq!(updated.theme, Theme::Dark);
+            assert_eq!(updated.selected_microphone_id.as_deref(), Some("mic-a"));
+            assert_eq!(updated.preferred_microphone_name.as_deref(), Some("Mic A"));
         });
     }
 

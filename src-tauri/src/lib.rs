@@ -14,6 +14,7 @@ mod i18n;
 mod indicator;
 mod inference;
 mod level_meter;
+mod microphone;
 mod model;
 mod paste;
 mod paths;
@@ -264,14 +265,32 @@ async fn get_bootstrap_status() -> Result<BootstrapStatus, String> {
 }
 
 #[tauri::command]
-fn get_audio_devices() -> Vec<AudioDevice> {
-    AudioCapture::list_devices()
+async fn get_audio_devices(app: tauri::AppHandle) -> Vec<AudioDevice> {
+    microphone::list_devices(&app).await
 }
 
 #[tauri::command]
-fn refresh_audio_devices() -> Vec<AudioDevice> {
+async fn refresh_audio_devices(app: tauri::AppHandle) -> Vec<AudioDevice> {
     tracing::debug!("Refreshing audio device list");
-    AudioCapture::list_devices()
+    microphone::list_devices(&app).await
+}
+
+/// Saves the dropdown microphone; no ID follows the system default.
+#[tauri::command]
+async fn set_microphone(
+    device_id: Option<String>,
+    device_name: Option<String>,
+) -> Result<settings::Settings, String> {
+    microphone::set_selected(microphone::MicRef::new(device_id, device_name)).await
+}
+
+/// Hearts a microphone as preferred; no ID clears the preference.
+#[tauri::command]
+async fn set_preferred_microphone(
+    device_id: Option<String>,
+    device_name: Option<String>,
+) -> Result<settings::Settings, String> {
+    microphone::set_preferred(microphone::MicRef::new(device_id, device_name)).await
 }
 
 #[tauri::command]
@@ -290,22 +309,22 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
     }
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
+    // A mic test only names the device to test; it never touches the
+    // preferred-mic bookkeeping.
+    let choice = microphone::MicChoice {
+        selected: microphone::MicRef::new(device_id.clone(), None),
+        preferred: None,
+    };
+
     // Get device match info
     let mut capture = AudioCapture::new();
-    if let Some(ref id) = device_id {
-        capture.set_device(Some(id.clone()));
-    }
-
-    let match_result = match capture.start_mic_test() {
-        Ok(result) => result,
-        Err(e) => return Err(e.to_string()),
-    };
-    capture.stop_mic_test();
+    let opened = microphone::open(&mut capture, &choice).map_err(|e| e.to_string())?;
+    capture.close_capture();
 
     let result = MicTestStartResult {
-        requested_device: match_result.requested.clone(),
-        actual_device: match_result.actual_name.clone(),
-        device_matched: match_result.matched,
+        requested_device: device_id.clone(),
+        actual_device: opened.name,
+        device_matched: !opened.fell_back,
     };
 
     // Log result for debugging
@@ -315,7 +334,7 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
         result.actual_device,
         result.device_matched
     );
-    if !match_result.matched {
+    if opened.fell_back {
         tracing::warn!("Device mismatch! Requested device not found, using fallback.");
     }
 
@@ -330,12 +349,8 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
     };
 
     // Start mic test thread (uses std::thread for blocking audio I/O)
-    let device_id_clone = device_id.clone();
     std::thread::spawn(move || {
         let mut capture = AudioCapture::new();
-        if let Some(id) = device_id_clone {
-            capture.set_device(Some(id));
-        }
 
         // Check if we should still run (stop or new test might have been started)
         let should_run = MIC_TEST_STATE
@@ -347,7 +362,7 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
             return;
         }
 
-        if let Err(e) = capture.init_capture() {
+        if let Err(e) = microphone::open(&mut capture, &choice) {
             tracing::error!("Failed to init mic test capture: {}", e);
             if let Ok(mut state) = MIC_TEST_STATE.lock() {
                 state.running = false;
@@ -1121,6 +1136,8 @@ pub fn run() {
             // Audio
             get_audio_devices,
             refresh_audio_devices,
+            set_microphone,
+            set_preferred_microphone,
             start_mic_test,
             get_mic_test_level,
             stop_mic_test,

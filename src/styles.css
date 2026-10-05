@@ -197,6 +197,15 @@ body {
   font-size: 14px;
   color: var(--text-primary);
   background-color: var(--bg-primary);
+  /* Native feel: the arrow everywhere, not the web's text cursor over text. */
+  cursor: default;
+}
+
+/* Fields you can type in keep the text cursor, as in native apps. */
+input:not([type="checkbox"], [type="radio"], [type="range"], :disabled),
+textarea:not(:disabled),
+[contenteditable="true"] {
+  cursor: text;
 }
 
 ::-webkit-scrollbar {
@@ -917,7 +926,6 @@ body[data-platform="windows"] .titlebar {
 }
 
 .dictionary-input:disabled {
-  cursor: not-allowed;
   opacity: 0.6;
 }
 
@@ -1803,6 +1811,39 @@ body[data-platform="windows"] .titlebar {
   height: 14px;
 }
 
+/* Preferred-mic heart: a bare icon until hovered; filled when active. */
+.mic-preferred-btn {
+  background-color: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.mic-preferred-btn:hover,
+.mic-preferred-btn:active {
+  background-color: var(--bg-secondary);
+  box-shadow: none;
+}
+
+.mic-preferred-btn[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.mic-preferred-btn[aria-pressed="true"] svg {
+  fill: currentColor;
+}
+
+/* Not `disabled`: it keeps its tooltip explaining why it is inactive. */
+.mic-preferred-btn[aria-disabled="true"] {
+  opacity: 0.4;
+}
+
+.mic-preferred-btn[aria-disabled="true"]:hover,
+.mic-preferred-btn[aria-disabled="true"]:active {
+  color: var(--text-secondary);
+  background-color: transparent;
+  box-shadow: none;
+}
+
 .btn-icon.spinning svg {
   animation: spin 1s linear infinite;
 }
@@ -2373,7 +2414,11 @@ body[data-platform="windows"] .titlebar {
 
 .lang-chip.removable.last .langsel-chip-x {
   opacity: 0.35;
-  cursor: not-allowed;
+}
+
+.lang-chip.removable.last .langsel-chip-x:hover {
+  color: var(--text-tertiary);
+  background: none;
 }
 
 .lang-chip.add-chip {

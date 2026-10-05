@@ -18,6 +18,8 @@ pub struct TrayTranslations {
 pub struct IndicatorTranslations {
     pub recording_limit_reached: String,
     pub microphone_unavailable: String,
+    /// Shown while recording when the mic changed; `{name}` is the device.
+    pub using_microphone: String,
     pub model_load_failed: String,
     pub transcription_failed: String,
 }
@@ -78,6 +80,8 @@ mod tests {
                 assert!(message.chars().count() <= 32, "too long: {message}");
                 assert!(!message.contains('\n') && !message.contains('{'));
             }
+            assert!(indicator.using_microphone.contains("{name}"));
+            assert!(!indicator.using_microphone.contains('\n'));
         }
     }
 }

@@ -38,9 +38,14 @@ import {
   requestAccessibilityPermission,
   requestMicrophonePermission,
   requestPermissions,
+  setMicrophone,
   updateHotkey,
   updateSettings,
 } from "../lib/ipc";
+import {
+  findAudioDevice,
+  systemDefaultMicrophoneLabel,
+} from "../lib/microphone";
 import type {
   AudioDevice,
   BootstrapReason,
@@ -183,10 +188,8 @@ async function persistSelectedDevice(deviceId: string | null): Promise<void> {
   if (currentSettings.selectedMicrophoneId === deviceId) {
     return;
   }
-  await updateSettings({
-    ...currentSettings,
-    selectedMicrophoneId: deviceId,
-  });
+  const device = state.audioDevices.find((d) => d.id === deviceId);
+  await setMicrophone(device ?? null);
 }
 
 function formatMb(bytes: number): string {
@@ -1047,10 +1050,13 @@ function renderMicSelection(): void {
             : ""
         }
         <select id="mic-select" class="settings-select mic-select-full">
+          <option value="" ${state.selectedDeviceId === null ? "selected" : ""}>
+            ${escapeHtml(systemDefaultMicrophoneLabel(state.audioDevices))}
+          </option>
           ${state.audioDevices
             .map(
               (d) => `
-            <option value="${escapeHtml(d.id)}" ${d.id === state.selectedDeviceId || (state.selectedDeviceId === null && d.isDefault) ? "selected" : ""}>
+            <option value="${escapeHtml(d.id)}" ${d.id === state.selectedDeviceId ? "selected" : ""}>
               ${escapeHtml(d.name)}
             </option>
           `
@@ -1355,17 +1361,15 @@ async function loadAudioDevices(): Promise<void> {
   ]);
   state.audioDevices = devices;
 
+  // No saved choice follows the system default, which stays correct when the
+  // OS switches mics (e.g. a headset is plugged in).
   if (currentSettings?.selectedMicrophoneId) {
-    const selectedDevice = state.audioDevices.find(
-      (device) =>
-        device.id === currentSettings.selectedMicrophoneId ||
-        device.legacyId === currentSettings.selectedMicrophoneId
-    );
     state.selectedDeviceId =
-      selectedDevice?.id ?? currentSettings.selectedMicrophoneId;
-  } else if (!state.selectedDeviceId) {
-    const defaultDevice = state.audioDevices.find((d) => d.isDefault);
-    state.selectedDeviceId = defaultDevice?.id ?? null;
+      findAudioDevice(
+        devices,
+        currentSettings.selectedMicrophoneId,
+        currentSettings.selectedMicrophoneName
+      )?.id ?? null;
   }
   render();
 }

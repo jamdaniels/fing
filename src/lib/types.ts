@@ -37,6 +37,12 @@ export interface AudioDevice {
   name: string;
 }
 
+/** A remembered microphone; the name finds it again if its ID changes. */
+export interface MicrophoneRef {
+  id: string;
+  name: string | null;
+}
+
 export type HistoryMode = "off" | "30d";
 
 export type InferenceDevicePreference =
@@ -84,7 +90,10 @@ export interface Settings {
   modelPath: string;
   onboardingCompleted: boolean;
   pasteEnabled: boolean;
+  preferredMicrophoneId: string | null;
+  preferredMicrophoneName: string | null;
   selectedMicrophoneId: string | null;
+  selectedMicrophoneName: string | null;
   soundEnabled: boolean;
   theme: Theme;
   uiLanguage: UiLanguage;

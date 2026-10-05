@@ -9,6 +9,7 @@ import {
   CheckCircle,
   ChevronDown,
   Copy,
+  Heart,
   History,
   Home,
   type IconNode,
@@ -71,10 +72,18 @@ import {
   setActiveModel,
   setAutoStart,
   setHotkeySuppressed,
+  setMicrophone,
+  setPreferredMicrophone,
   startMicTest,
   stopMicTest,
   updateSettings,
 } from "./lib/ipc";
+import {
+  activeMicrophone,
+  type MicrophonePicker,
+  microphonePicker,
+  systemDefaultMicrophoneLabel,
+} from "./lib/microphone";
 import type {
   AppInfo,
   AppState,
@@ -1379,10 +1388,7 @@ async function showMicTestModal(): Promise<void> {
   let micTestInterval: number | null = null;
   let currentMicTest: MicrophoneTest | null = null;
   let audioDetected = false;
-  let selectedDeviceId = resolveAudioDeviceId(
-    audioDevices,
-    settings?.selectedMicrophoneId
-  );
+  let selectedDeviceId = activeMicrophone(audioDevices, settings)?.id ?? null;
   let deviceMatchResult: MicTestStartResult | null = null;
   let localDevices = [...audioDevices];
 
@@ -1393,7 +1399,7 @@ async function showMicTestModal(): Promise<void> {
     localDevices
       .map(
         (d) =>
-          `<option value="${escapeHtml(d.id)}" ${selectedDeviceId === d.id || (selectedDeviceId === null && d.isDefault) ? "selected" : ""}>${escapeHtml(d.name)}</option>`
+          `<option value="${escapeHtml(d.id)}" ${selectedDeviceId === d.id ? "selected" : ""}>${escapeHtml(d.name)}</option>`
       )
       .join("");
 
@@ -2096,6 +2102,20 @@ function handleSettingsClick(e: MouseEvent): void {
     return;
   }
 
+  // Handle preferred (heart) microphone button
+  if (target.closest(".mic-preferred-btn")) {
+    const picker = microphonePicker(audioDevices, settings);
+    const current = picker.device ?? picker.missing;
+    if (!current) {
+      return;
+    }
+    saveMicrophoneSettings(
+      setPreferredMicrophone(picker.isPreferred ? null : current),
+      "preferred microphone"
+    );
+    return;
+  }
+
   // Handle mic refresh button in settings
   const refreshBtn = target.closest(".mic-refresh-btn") as HTMLButtonElement;
   if (refreshBtn && !refreshBtn.closest(".mic-test-modal")) {
@@ -2229,9 +2249,25 @@ function handleSettingsChange(e: Event): void {
   // Handle mic select change
   if (target.classList.contains("mic-select")) {
     const select = target as HTMLSelectElement;
-    const value = select.value || null;
-    handleSettingChange("selectedMicrophoneId", value);
+    const picker = microphonePicker(audioDevices, settings);
+    if (picker.missing && select.value === picker.missing.id) {
+      return;
+    }
+    const device = audioDevices.find((d) => d.id === select.value);
+    saveMicrophoneSettings(setMicrophone(device ?? null), "microphone");
   }
+}
+
+function saveMicrophoneSettings(
+  save: Promise<SettingsType>,
+  what: string
+): void {
+  save
+    .then((saved) => {
+      settings = saved;
+    })
+    .catch((error) => console.error(`Failed to save ${what}:`, error))
+    .finally(() => renderContent());
 }
 
 function inferencePreferenceValue(
@@ -2467,20 +2503,41 @@ function renderDictionary(el: HTMLElement): void {
   `;
 }
 
-function resolveAudioDeviceId(
-  devices: AudioDevice[],
-  selectedDeviceId: string | null | undefined
-): string | null {
-  if (!selectedDeviceId) {
-    return null;
+function renderMicrophoneOptions(picker: MicrophonePicker): string {
+  const systemDefault = systemDefaultMicrophoneLabel(audioDevices);
+  const options = [
+    `<option value="" ${picker.device || picker.missing ? "" : "selected"}>${escapeHtml(systemDefault)}</option>`,
+    ...audioDevices.map(
+      (d) =>
+        `<option value="${escapeHtml(d.id)}" ${picker.device === d ? "selected" : ""}>${escapeHtml(d.name)}</option>`
+    ),
+  ];
+  if (picker.missing) {
+    const name = t("settings.microphoneNotConnected", {
+      device: picker.missing.name ?? picker.missing.id,
+    });
+    options.push(
+      `<option value="${escapeHtml(picker.missing.id)}" selected>${escapeHtml(name)}</option>`
+    );
   }
+  return options.join("");
+}
 
-  return (
-    devices.find(
-      (device) =>
-        device.id === selectedDeviceId || device.legacyId === selectedDeviceId
-    )?.id ?? selectedDeviceId
-  );
+function renderPreferredMicrophoneButton(picker: MicrophonePicker): string {
+  const hasDevice = picker.device !== null || picker.missing !== null;
+  let title: string;
+  if (!hasDevice) {
+    title = t("settings.preferredMicrophoneNeedsDevice");
+  } else if (picker.isPreferred) {
+    title = t("settings.preferredMicrophone");
+  } else if (picker.preferredName) {
+    title = t("settings.replacePreferredMicrophone", {
+      device: picker.preferredName,
+    });
+  } else {
+    title = t("settings.setPreferredMicrophone");
+  }
+  return `<button class="btn btn-icon mic-preferred-btn" aria-pressed="${picker.isPreferred}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}" aria-disabled="${!hasDevice}">${createIcon(Heart)}</button>`;
 }
 
 function renderSystemSettings(): string {
@@ -2522,16 +2579,7 @@ function renderSystemSettings(): string {
 
 function renderSettingsUI(el: HTMLElement): void {
   const isMac = document.body.dataset.platform === "darwin";
-  const selectedMicrophoneId = resolveAudioDeviceId(
-    audioDevices,
-    settings?.selectedMicrophoneId
-  );
-  const micOptions = audioDevices
-    .map(
-      (d) =>
-        `<option value="${escapeHtml(d.id)}" ${selectedMicrophoneId === d.id || (selectedMicrophoneId == null && d.isDefault) ? "selected" : ""}>${escapeHtml(d.name)}</option>`
-    )
-    .join("");
+  const micPicker = microphonePicker(audioDevices, settings);
 
   const currentTheme = settings?.theme ?? "system";
   const currentUiLanguage = settings?.uiLanguage ?? "en";
@@ -2600,8 +2648,9 @@ function renderSettingsUI(el: HTMLElement): void {
             <div class="settings-row-desc">${t("settings.microphoneDescription")}</div>
           </div>
           <div class="mic-select-wrapper">
+            ${renderPreferredMicrophoneButton(micPicker)}
             <select class="settings-select mic-select">
-              ${micOptions}
+              ${renderMicrophoneOptions(micPicker)}
             </select>
             <button class="btn btn-icon mic-refresh-btn" title="${t("settings.refreshDevices")}">${createIcon(RefreshCw)}</button>
           </div>
@@ -3202,6 +3251,29 @@ async function init(): Promise<void> {
       }
     }
     currentAppState = newState;
+  });
+
+  // The backend switched back to the preferred mic or refreshed its ID.
+  await listen<SettingsType>("microphone-settings-changed", (event) => {
+    if (!settings) {
+      return;
+    }
+    const {
+      preferredMicrophoneId,
+      preferredMicrophoneName,
+      selectedMicrophoneId,
+      selectedMicrophoneName,
+    } = event.payload;
+    settings = {
+      ...settings,
+      preferredMicrophoneId,
+      preferredMicrophoneName,
+      selectedMicrophoneId,
+      selectedMicrophoneName,
+    };
+    if (currentView === "settings") {
+      renderContent();
+    }
   });
 
   await listen<{ language: UiLanguage }>("ui-language-changed", (event) => {

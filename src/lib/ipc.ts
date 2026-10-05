@@ -6,6 +6,7 @@ import type {
   BootstrapStatus,
   DownloadProgress,
   InferenceRuntimeInfo,
+  MicrophoneRef,
   MicrophoneTest,
   MicTestStartResult,
   ModelInfo,
@@ -93,6 +94,27 @@ export async function getAudioDevices(): Promise<AudioDevice[]> {
 
 export async function refreshAudioDevices(): Promise<AudioDevice[]> {
   return await invoke<AudioDevice[]>("refresh_audio_devices");
+}
+
+function microphoneArgs(device: MicrophoneRef | null) {
+  return { deviceId: device?.id ?? null, deviceName: device?.name ?? null };
+}
+
+/** Saves the dropdown microphone; null follows the system default. */
+export async function setMicrophone(
+  device: MicrophoneRef | null
+): Promise<Settings> {
+  return await invoke<Settings>("set_microphone", microphoneArgs(device));
+}
+
+/** Hearts a microphone as preferred; null clears the preference. */
+export async function setPreferredMicrophone(
+  device: MicrophoneRef | null
+): Promise<Settings> {
+  return await invoke<Settings>(
+    "set_preferred_microphone",
+    microphoneArgs(device)
+  );
 }
 
 export async function downloadModel(variant: ModelVariant): Promise<string> {

@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter};
 use crate::audio::{AudioCapture, AudioTap};
 use crate::db::{save_transcript, NewTranscript};
 use crate::indicator::NoticeKind;
+use crate::microphone::{self, MicChoice, OpenedMic};
 use crate::model::{ensure_variant_available, model_path_for_variant, ModelVariant};
 use crate::paste::paste_text;
 use crate::settings::{load_settings, load_settings_sync};
@@ -54,8 +55,8 @@ fn is_blank_audio(text: &str) -> bool {
 // Commands sent to the audio thread
 enum AudioCommand {
     StartRecording {
-        device_id: Option<String>,
-        reply_tx: Sender<Result<AudioTap, String>>,
+        choice: MicChoice,
+        reply_tx: Sender<Result<(AudioTap, OpenedMic), String>>,
     },
     StopRecording {
         reply_tx: Sender<Result<Vec<f32>, String>>,
@@ -107,14 +108,9 @@ fn ensure_audio_thread() {
 
         loop {
             match cmd_rx.recv() {
-                Ok(AudioCommand::StartRecording {
-                    device_id,
-                    reply_tx,
-                }) => {
-                    capture.set_device(device_id.clone());
-                    // Initialize capture if not already
-                    let match_result = match capture.init_capture() {
-                        Ok(result) => result,
+                Ok(AudioCommand::StartRecording { choice, reply_tx }) => {
+                    let opened = match microphone::open(&mut capture, &choice) {
+                        Ok(opened) => opened,
                         Err(e) => {
                             tracing::error!("Failed to init audio capture: {}", e);
                             let _ = reply_tx.send(Err(format!("Unable to start recording: {e}")));
@@ -124,23 +120,13 @@ fn ensure_audio_thread() {
 
                     capture.begin_recording();
                     tracing::info!("Audio recording started");
-                    let _ = reply_tx.send(Ok(capture.tap()));
-
-                    if !match_result.matched {
+                    if opened.fell_back {
                         tracing::warn!(
-                            "Requested microphone {:?} unavailable, recording with '{}'",
-                            match_result.requested,
-                            match_result.actual_name
+                            "Selected microphone unavailable, recording with '{}'",
+                            opened.name
                         );
                     }
-
-                    if match_result
-                        .requested
-                        .as_ref()
-                        .is_some_and(|requested| requested != &match_result.actual_id)
-                    {
-                        persist_fallback_microphone_selection(device_id, match_result.actual_id);
-                    }
+                    let _ = reply_tx.send(Ok((capture.tap(), opened)));
                 }
                 Ok(AudioCommand::StopRecording { reply_tx }) => {
                     let buffer = capture.end_recording();
@@ -218,14 +204,11 @@ fn audio_cmd_tx(context: &str) -> Option<Sender<AudioCommand>> {
 
 fn send_start_recording_command(
     cmd_tx: &Sender<AudioCommand>,
-    device_id: Option<String>,
-) -> Result<AudioTap, String> {
+    choice: MicChoice,
+) -> Result<(AudioTap, OpenedMic), String> {
     let (reply_tx, reply_rx) = mpsc::channel();
     cmd_tx
-        .send(AudioCommand::StartRecording {
-            device_id,
-            reply_tx,
-        })
+        .send(AudioCommand::StartRecording { choice, reply_tx })
         .map_err(|_| "Failed to send StartRecording command".to_string())?;
 
     reply_rx
@@ -242,47 +225,6 @@ fn send_stop_recording_command(cmd_tx: &Sender<AudioCommand>) -> Result<Vec<f32>
     reply_rx
         .recv()
         .map_err(|_| "Audio thread dropped StopRecording response".to_string())?
-}
-
-fn persist_fallback_microphone_selection(requested_device: Option<String>, actual_device: String) {
-    tauri::async_runtime::spawn(async move {
-        let mut previous_selected = None;
-        let update_result = crate::settings::update_settings_atomic(|current_settings| {
-            if current_settings.selected_microphone_id.as_ref() != requested_device.as_ref() {
-                tracing::debug!(
-                    "Skipping microphone auto-update; selection changed from {:?} to {:?}",
-                    requested_device,
-                    current_settings.selected_microphone_id
-                );
-                return;
-            }
-
-            if current_settings.selected_microphone_id.as_ref() == Some(&actual_device) {
-                return;
-            }
-
-            previous_selected = current_settings.selected_microphone_id.clone();
-            current_settings.selected_microphone_id = Some(actual_device.clone());
-        })
-        .await;
-
-        match update_result {
-            Ok(updated_settings) => {
-                if updated_settings.selected_microphone_id.as_ref() != Some(&actual_device) {
-                    return;
-                }
-
-                tracing::info!(
-                    "Auto-updated microphone selection from {:?} to '{}'",
-                    previous_selected,
-                    actual_device
-                );
-            }
-            Err(e) => {
-                tracing::error!("Failed to persist fallback microphone selection: {}", e);
-            }
-        }
-    });
 }
 
 fn mark_lazy_activity() -> u64 {
@@ -438,28 +380,28 @@ pub fn on_key_down(app: &AppHandle) {
     });
 
     // Open the sound output while the mic starts; the cue plays once it is live.
-    let start_cue = settings_snapshot
-        .sound_enabled
-        .then(sounds::prepare_start);
+    let start_cue = settings_snapshot.sound_enabled.then(sounds::prepare_start);
 
     // Ensure audio thread is running and start recording
     ensure_audio_thread();
 
     let cmd_tx = audio_cmd_tx("key down");
 
+    let mic_choice = MicChoice::from_settings(&settings_snapshot);
     let start_result = if let Some(cmd_tx) = cmd_tx {
-        send_start_recording_command(&cmd_tx, settings_snapshot.selected_microphone_id)
+        send_start_recording_command(&cmd_tx, mic_choice.clone())
     } else {
         Err("Audio thread unavailable".to_string())
     };
 
     match start_result {
-        Ok(tap) => {
+        Ok((tap, opened)) => {
             set_recording_start_status(RecordingStartStatus::Started { session_id });
             crate::level_meter::start(app, tap);
             if let Some(cue) = start_cue {
                 cue.play();
             }
+            after_microphone_opened(app, mic_choice, opened);
         }
         Err(message) => {
             tracing::error!(
@@ -472,6 +414,24 @@ pub fn on_key_down(app: &AppHandle) {
                 message,
             });
         }
+    }
+}
+
+/// Announces a mic change in the pill (recording keeps going) and saves any
+/// automatic microphone settings change, off the hotkey path.
+fn after_microphone_opened(app: &AppHandle, choice: MicChoice, opened: OpenedMic) {
+    if microphone::note_recording_mic(&opened) {
+        let message = crate::i18n::current()
+            .indicator
+            .using_microphone
+            .replace("{name}", &opened.name);
+        notify(app, NoticeKind::Info, &message);
+    }
+    if let Some(next) = opened.settings_update {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            microphone::persist_update(&app, choice, next).await;
+        });
     }
 }
 
@@ -860,7 +820,13 @@ mod tests {
 
             match cmd_rx.recv().expect("second command should arrive") {
                 AudioCommand::StartRecording { reply_tx, .. } => {
-                    let _ = reply_tx.send(Ok(AudioCapture::new().tap()));
+                    let opened = OpenedMic {
+                        id: "working".to_string(),
+                        name: "Working Mic".to_string(),
+                        fell_back: false,
+                        settings_update: None,
+                    };
+                    let _ = reply_tx.send(Ok((AudioCapture::new().tap(), opened)));
                 }
                 AudioCommand::StopRecording { .. } | AudioCommand::Discard => {
                     panic!("second command should be StartRecording");
@@ -878,10 +844,10 @@ mod tests {
         });
 
         assert_eq!(
-            send_start_recording_command(&cmd_tx, Some("Broken Mic".to_string())).err(),
+            send_start_recording_command(&cmd_tx, MicChoice::default()).err(),
             Some("mic init failed".to_string())
         );
-        assert!(send_start_recording_command(&cmd_tx, Some("Working Mic".to_string())).is_ok());
+        assert!(send_start_recording_command(&cmd_tx, MicChoice::default()).is_ok());
         assert_eq!(send_stop_recording_command(&cmd_tx), Ok(vec![0.25, 0.5]));
 
         worker.join().expect("worker thread should complete");
