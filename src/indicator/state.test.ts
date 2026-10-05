@@ -43,14 +43,30 @@ describe("reduceIndicator", () => {
 });
 
 describe("deriveView", () => {
-  it("shows the notice over any base state", () => {
+  it("shows error notices over any base state", () => {
     for (const base of ["recording", "processing", "hidden"] as const) {
-      expect(deriveView({ base, notice: notice(1) })).toEqual({
+      expect(deriveView({ base, notice: notice(1, "error") })).toEqual({
         visible: true,
         face: "notice",
         dotMode: "idle",
       });
     }
+  });
+
+  it("keeps the dots running beside info notices", () => {
+    expect(deriveView({ base: "recording", notice: notice(1) })).toEqual({
+      visible: true,
+      face: "dots-notice",
+      dotMode: "live",
+    });
+    expect(deriveView({ base: "processing", notice: notice(1) })).toEqual({
+      visible: true,
+      face: "dots-notice",
+      dotMode: "processing",
+    });
+    expect(deriveView({ base: "hidden", notice: notice(1) }).face).toBe(
+      "notice"
+    );
   });
 
   it("hides after a notice expires on a hidden base", () => {

@@ -25,8 +25,17 @@
   --ease-grow: cubic-bezier(0.34, 1.3, 0.64, 1);
   --ease-sink: cubic-bezier(0.55, 0, 0.8, 0.2);
   --ease-shrink: cubic-bezier(0.4, 0, 1, 1);
+  /* Face changes run in three steps: the old content fades out, the empty
+     pill resizes, and the new content fades in as the width settles. */
+  --fade-out-ms: 90ms;
+  --fade-in-ms: 160ms;
+  /* Growing to fit a notice. */
   --resize-ms: 260ms;
-  --fade-ms: 140ms;
+  /* Shrinking back to the dots. */
+  --settle-ms: 400ms;
+  /* Share of the resize after which the new content starts fading in; the
+     ease-out curve is within a few px of the final width by then. */
+  --fade-in-at: 0.7;
 }
 
 * {
@@ -68,10 +77,21 @@ body {
   animation:
     indicator-rise var(--appear-ms) var(--ease-out) both,
     indicator-grow var(--appear-ms) var(--ease-grow) both;
-  transition: width var(--resize-ms) var(--ease-out);
+  --width-ms: var(--resize-ms);
+  --face-in-delay: calc(
+    var(--fade-out-ms) +
+    var(--fade-in-at) *
+    var(--width-ms)
+  );
+  transition: width var(--width-ms) var(--ease-out) var(--fade-out-ms);
 }
 
-.pill[data-face="notice"] {
+.pill[data-face="dots"] {
+  --width-ms: var(--settle-ms);
+}
+
+.pill[data-face="notice"],
+.pill[data-face="dots-notice"] {
   width: calc(var(--notice-width, 0px) + 2 * var(--pill-inset-x));
 }
 
@@ -117,7 +137,8 @@ body {
   }
 }
 
-/* Faces: the dots and the notice are stacked in the center and cross-fade. */
+/* Faces: the dots and the notice are stacked in the center. A leaving face
+   fades out right away. */
 .face {
   position: absolute;
   top: 50%;
@@ -126,8 +147,8 @@ body {
   opacity: 0;
   transform: translate(-50%, -50%);
   transition:
-    opacity var(--fade-ms) ease,
-    visibility 0s linear var(--fade-ms);
+    opacity var(--fade-out-ms) ease,
+    visibility 0s linear var(--fade-out-ms);
 }
 
 /* Voice visualizer */
@@ -200,14 +221,32 @@ body {
   text-overflow: ellipsis;
 }
 
-/* The active face (data-face on the pill) fades in after the other leaves. */
-.pill[data-face="dots"] .dots,
-.pill[data-face="notice"] .notice {
+/* The active face fades in once the pill is (nearly) at its new width. */
+.pill[data-face="dots"] .face.dots,
+.pill[data-face="notice"] .notice,
+.pill[data-face="dots-notice"] .notice {
   visibility: visible;
   opacity: 1;
   transition:
-    opacity calc(var(--fade-ms) + 40ms) ease 60ms,
-    visibility 0s linear 0s;
+    opacity var(--fade-in-ms) ease var(--face-in-delay),
+    visibility 0s linear var(--face-in-delay);
+}
+
+/* While recording or processing, an info notice shows three live dots in
+   place of its icon. */
+.notice-dots {
+  display: none;
+  margin-inline-end: 2px;
+}
+
+/* Set on the notice itself (not read from the pill's face), so it keeps its
+   look while fading out after the face has already changed. */
+.notice[data-with-dots] .notice-dots {
+  display: flex;
+}
+
+.notice[data-with-dots] .notice-icon {
+  display: none;
 }
 
 /* Set by TS while re-appearing: snap width and faces without transitions. */

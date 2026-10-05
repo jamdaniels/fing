@@ -9,6 +9,10 @@ export const BAND_MAP: readonly number[] = [2, 1, 0, 0, 1, 2];
 /** Share of the full height each dot can reach: center dots swing the most. */
 export const DOT_REACH: readonly number[] = [0.7, 0.88, 1, 1, 0.88, 0.7];
 
+/** The three dots shown beside a notice: mid, low, mid. */
+export const NOTICE_BAND_MAP: readonly number[] = [1, 0, 1];
+export const NOTICE_DOT_REACH: readonly number[] = [0.88, 1, 0.88];
+
 // Adaptive gain: each band is shown relative to its own recent peak, so loud
 // speech keeps moving instead of pinning every dot at full height.
 /** How fast a band's remembered peak sinks, in level units per second. */

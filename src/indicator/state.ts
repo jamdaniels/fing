@@ -17,7 +17,8 @@ export type IndicatorAction =
   | { type: "noticeExpired"; id: number };
 
 export type DotMode = "live" | "processing" | "idle";
-export type IndicatorFace = "dots" | "notice";
+/** "dots-notice": an info notice beside a few dots, so recording stays visible. */
+export type IndicatorFace = "dots" | "dots-notice" | "notice";
 
 export interface IndicatorView {
   dotMode: DotMode;
@@ -52,6 +53,13 @@ export function reduceIndicator(
 
 export function deriveView(model: IndicatorModel): IndicatorView {
   if (model.notice) {
+    if (model.notice.kind === "info" && model.base !== "hidden") {
+      return {
+        visible: true,
+        face: "dots-notice",
+        dotMode: model.base === "recording" ? "live" : "processing",
+      };
+    }
     return { visible: true, face: "notice", dotMode: "idle" };
   }
   switch (model.base) {

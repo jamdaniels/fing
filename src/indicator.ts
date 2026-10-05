@@ -1,5 +1,10 @@
 import { listen } from "@tauri-apps/api/event";
-import { BAND_MAP, DOT_REACH } from "./indicator/levels";
+import {
+  BAND_MAP,
+  DOT_REACH,
+  NOTICE_BAND_MAP,
+  NOTICE_DOT_REACH,
+} from "./indicator/levels";
 import { NoticeView } from "./indicator/notice";
 import {
   deriveView,
@@ -26,22 +31,37 @@ const DOT_MAX_PX = 16;
 
 const pill = document.getElementById("indicator");
 const dotsElement = document.getElementById("dots");
+const noticeDotsElement = document.getElementById("notice-dots");
 const noticeElement = document.getElementById("notice");
 const noticeIcon = document.getElementById("notice-icon");
 const noticeText = document.getElementById("notice-text");
 
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
-const visualizer = dotsElement
-  ? new DotVisualizer({
-      container: dotsElement,
-      bandMap: BAND_MAP,
-      dotReach: DOT_REACH,
-      restSizePx: DOT_REST_PX,
-      maxSizePx: DOT_MAX_PX,
-      reducedMotion: () => reducedMotion.matches,
-    })
-  : null;
+function createVisualizer(
+  container: HTMLElement | null,
+  bandMap: readonly number[],
+  dotReach: readonly number[]
+): DotVisualizer | null {
+  return container
+    ? new DotVisualizer({
+        container,
+        bandMap,
+        dotReach,
+        restSizePx: DOT_REST_PX,
+        maxSizePx: DOT_MAX_PX,
+        reducedMotion: () => reducedMotion.matches,
+      })
+    : null;
+}
+
+const visualizer = createVisualizer(dotsElement, BAND_MAP, DOT_REACH);
+/** Three dots beside an info notice, so recording feedback stays visible. */
+const noticeVisualizer = createVisualizer(
+  noticeDotsElement,
+  NOTICE_BAND_MAP,
+  NOTICE_DOT_REACH
+);
 
 const noticeView =
   noticeElement && noticeIcon && noticeText
@@ -69,14 +89,16 @@ function updateLabels(view: IndicatorView): void {
 // Once the shrink-out animation has finished, the dots stop animating entirely.
 pill?.addEventListener("animationend", (event) => {
   if (event.target === pill && pill.classList.contains("is-out")) {
-    visualizer?.stop();
-    visualizer?.setMode("idle");
-    visualizer?.reset();
+    for (const dots of [visualizer, noticeVisualizer]) {
+      dots?.stop();
+      dots?.setMode("idle");
+      dots?.reset();
+    }
   }
 });
 
 function render(previous: IndicatorModel, next: IndicatorModel): void {
-  if (!(pill && visualizer && noticeView)) {
+  if (!(pill && visualizer && noticeVisualizer && noticeView)) {
     return;
   }
   const was = deriveView(previous);
@@ -94,16 +116,24 @@ function render(previous: IndicatorModel, next: IndicatorModel): void {
     // Snap width/faces while still hidden so only the appear motion animates.
     pill.classList.add("is-instant");
     visualizer.reset();
+    noticeVisualizer.reset();
   }
 
   pill.dataset.face = view.face;
-  if (view.face === "notice" && next.notice) {
+  if (view.face !== "dots" && next.notice) {
     noticeView.render(next.notice);
+    noticeElement?.toggleAttribute(
+      "data-with-dots",
+      view.face === "dots-notice"
+    );
     pill.style.setProperty("--notice-width", `${noticeView.measureWidth()}px`);
   }
 
-  visualizer.setMode(view.dotMode);
+  // Only the visible row animates; the other one settles and goes idle.
+  visualizer.setMode(view.face === "dots" ? view.dotMode : "idle");
+  noticeVisualizer.setMode(view.face === "dots-notice" ? view.dotMode : "idle");
   visualizer.start();
+  noticeVisualizer.start();
   updateLabels(view);
 
   if (appearing) {
@@ -142,6 +172,7 @@ listen<IndicatorStatePayload>("indicator-state-changed", (event) => {
 
 listen<IndicatorLevelsPayload>("indicator-levels", (event) => {
   visualizer?.setLevels(event.payload.levels);
+  noticeVisualizer?.setLevels(event.payload.levels);
 });
 
 listen<IndicatorNoticePayload>("indicator-notice", (event) => {
