@@ -38,6 +38,8 @@ export interface MicrophonePicker {
   device: AudioDevice | null;
   /** The chosen device is not connected (shown with its remembered name). */
   missing: MicrophoneRef | null;
+  /** The chosen microphone, connected or not; null for system default. */
+  current: MicrophoneRef | null;
   /** The dropdown shows the preferred (hearted) microphone. */
   isPreferred: boolean;
   /** Connected preferred (hearted) microphone. */
@@ -64,6 +66,7 @@ export function microphonePicker(
   return {
     device,
     missing,
+    current: device ?? missing,
     isPreferred:
       preferredId !== null &&
       (device
@@ -90,8 +93,9 @@ export function activeMicrophone(
 }
 
 /** Label of the "System default" dropdown entry, naming the current default. */
-export function systemDefaultMicrophoneLabel(devices: AudioDevice[]): string {
-  const systemDefault = devices.find((d) => d.isDefault);
+export function systemDefaultMicrophoneLabel(
+  systemDefault: AudioDevice | null | undefined
+): string {
   return systemDefault
     ? t("settings.systemDefaultMicrophone", { device: systemDefault.name })
     : t("settings.systemDefaultMicrophoneUnknown");

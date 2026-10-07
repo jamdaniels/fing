@@ -167,8 +167,9 @@ impl AudioCapture {
     /// The input device the OS currently uses by default.
     pub fn default_input_device() -> Option<InputDevice> {
         let device = cpal::default_host().default_input_device()?;
-        let id = device.id().ok().map(|id| id.to_string());
-        Some(input_device(device, id.as_deref()))
+        let mut input = input_device(device, None);
+        input.info.is_default = true;
+        Some(input)
     }
 
     pub fn init_capture(&mut self, input: &InputDevice) -> Result<(), AudioError> {

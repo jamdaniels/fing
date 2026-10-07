@@ -1051,7 +1051,11 @@ function renderMicSelection(): void {
         }
         <select id="mic-select" class="settings-select mic-select-full">
           <option value="" ${state.selectedDeviceId === null ? "selected" : ""}>
-            ${escapeHtml(systemDefaultMicrophoneLabel(state.audioDevices))}
+            ${escapeHtml(
+              systemDefaultMicrophoneLabel(
+                state.audioDevices.find((d) => d.isDefault)
+              )
+            )}
           </option>
           ${state.audioDevices
             .map(

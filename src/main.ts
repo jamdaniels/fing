@@ -2105,12 +2105,11 @@ function handleSettingsClick(e: MouseEvent): void {
   // Handle preferred (heart) microphone button
   if (target.closest(".mic-preferred-btn")) {
     const picker = microphonePicker(audioDevices, settings);
-    const current = picker.device ?? picker.missing;
-    if (!current) {
+    if (!picker.current) {
       return;
     }
     saveMicrophoneSettings(
-      setPreferredMicrophone(picker.isPreferred ? null : current),
+      setPreferredMicrophone(picker.isPreferred ? null : picker.current),
       "preferred microphone"
     );
     return;
@@ -2504,9 +2503,9 @@ function renderDictionary(el: HTMLElement): void {
 }
 
 function renderMicrophoneOptions(picker: MicrophonePicker): string {
-  const systemDefault = systemDefaultMicrophoneLabel(audioDevices);
+  const systemDefault = systemDefaultMicrophoneLabel(picker.systemDefault);
   const options = [
-    `<option value="" ${picker.device || picker.missing ? "" : "selected"}>${escapeHtml(systemDefault)}</option>`,
+    `<option value="" ${picker.current ? "" : "selected"}>${escapeHtml(systemDefault)}</option>`,
     ...audioDevices.map(
       (d) =>
         `<option value="${escapeHtml(d.id)}" ${picker.device === d ? "selected" : ""}>${escapeHtml(d.name)}</option>`
@@ -2524,7 +2523,7 @@ function renderMicrophoneOptions(picker: MicrophonePicker): string {
 }
 
 function renderPreferredMicrophoneButton(picker: MicrophonePicker): string {
-  const hasDevice = picker.device !== null || picker.missing !== null;
+  const hasDevice = picker.current !== null;
   let title: string;
   if (!hasDevice) {
     title = t("settings.preferredMicrophoneNeedsDevice");
