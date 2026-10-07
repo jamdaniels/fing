@@ -7,12 +7,15 @@ use windows::Security::Authorization::AppCapabilityAccess::{
     AppCapability, AppCapabilityAccessStatus,
 };
 use windows::System::Launcher;
-use windows_sys::Win32::Foundation::HWND;
+use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, WPARAM};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
     KEYEVENTF_UNICODE, VK_RETURN, VK_TAB,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, PostMessageW,
+    GUITHREADINFO, WM_CHAR, WM_KEYDOWN, WM_KEYUP,
+};
 
 // Windows does not require explicit accessibility permission for hotkeys
 
@@ -113,11 +116,10 @@ fn filter_printable(text: &str) -> String {
         .collect()
 }
 
-/// Delay between characters when typing into Notepad. Windows 11 Notepad
-/// resolves VK_PACKET characters late: when a whole batch arrives at once it
-/// substitutes the most recently injected character for the pending ones
-/// (repeated letters, trailing spaces). One character at a time avoids that.
-const NOTEPAD_CHAR_DELAY_MS: u64 = 4;
+/// Key message lParams for Enter: repeat count 1 and scan code 0x1C, plus the
+/// previous-state and transition bits on key up.
+const ENTER_DOWN_LPARAM: LPARAM = 0x001C_0001;
+const ENTER_UP_LPARAM: LPARAM = 0xC01C_0001_u32 as LPARAM;
 
 /// Type text directly using SendInput with Unicode (no clipboard)
 pub fn type_text(text: &str) -> Result<(), String> {
@@ -127,9 +129,9 @@ pub fn type_text(text: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    if let Some(notepad) = foreground_notepad() {
-        tracing::debug!("Foreground window is Notepad, typing with per-character pacing");
-        return type_text_paced(&filtered, notepad);
+    if let Some(edit) = foreground_notepad().and_then(focused_control) {
+        tracing::debug!("Foreground window is Notepad, posting text to its edit control");
+        return post_text(&filtered, edit);
     }
 
     // Build input array: for each character, we need key down + key up
@@ -141,25 +143,59 @@ pub fn type_text(text: &str) -> Result<(), String> {
     send_inputs(&inputs)
 }
 
-/// Type one character per SendInput call, stopping if focus leaves the target
-/// window so the remaining text never lands somewhere else.
-fn type_text_paced(text: &str, hwnd: HWND) -> Result<(), String> {
-    let mut inputs: Vec<INPUT> = Vec::with_capacity(4);
+/// Post the text straight to Notepad's edit control as character messages.
+/// Windows 11 Notepad resolves injected VK_PACKET keystrokes late: while it is
+/// busy (e.g. with a Markdown-formatted note) it substitutes the most recently
+/// injected character for all pending ones (repeated letters, trailing
+/// spaces). Posted messages carry their own character, stay in order and
+/// can't land in another window if focus changes.
+fn post_text(text: &str, hwnd: HWND) -> Result<(), String> {
+    let mut messages = Vec::with_capacity(text.len());
+    for c in text.chars() {
+        push_char_messages(&mut messages, c);
+    }
 
-    for (i, c) in text.chars().enumerate() {
-        if i > 0 {
-            std::thread::sleep(std::time::Duration::from_millis(NOTEPAD_CHAR_DELAY_MS));
+    for (message, wparam, lparam) in messages {
+        if unsafe { PostMessageW(hwnd, message, wparam, lparam) } == 0 {
+            return Err(format!("PostMessageW failed (error {})", unsafe {
+                GetLastError()
+            }));
         }
-        if unsafe { GetForegroundWindow() } != hwnd {
-            return Err("Foreground window changed while typing".to_string());
-        }
-
-        inputs.clear();
-        push_char_inputs(&mut inputs, c);
-        send_inputs(&inputs)?;
     }
 
     Ok(())
+}
+
+/// Append the messages typing one character produces: newline as a full
+/// Enter keystroke, everything else as WM_CHAR (one per UTF-16 unit, so
+/// surrogate pairs stay together).
+fn push_char_messages(messages: &mut Vec<(u32, WPARAM, LPARAM)>, c: char) {
+    if c == '\n' {
+        let enter = VK_RETURN as WPARAM;
+        messages.push((WM_KEYDOWN, enter, ENTER_DOWN_LPARAM));
+        messages.push((WM_CHAR, '\r' as WPARAM, ENTER_DOWN_LPARAM));
+        messages.push((WM_KEYUP, enter, ENTER_UP_LPARAM));
+        return;
+    }
+
+    let mut units = [0u16; 2];
+    for &unit in c.encode_utf16(&mut units).iter() {
+        messages.push((WM_CHAR, unit as WPARAM, 1));
+    }
+}
+
+/// The control with keyboard focus inside the given top-level window.
+fn focused_control(hwnd: HWND) -> Option<HWND> {
+    let mut info = GUITHREADINFO {
+        cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+        ..unsafe { std::mem::zeroed() }
+    };
+    let thread_id = unsafe { GetWindowThreadProcessId(hwnd, std::ptr::null_mut()) };
+    if thread_id == 0 || unsafe { GetGUIThreadInfo(thread_id, &mut info) } == 0 {
+        return None;
+    }
+
+    (!info.hwndFocus.is_null()).then_some(info.hwndFocus)
 }
 
 /// The foreground window if it is Notepad (classic and Windows 11 Notepad
@@ -348,5 +384,29 @@ mod tests {
 
         let units: Vec<u16> = events('😀').iter().map(|&(_, scan, _)| scan).collect();
         assert_eq!(units, vec![0xD83D, 0xD83D, 0xDE00, 0xDE00]);
+    }
+
+    #[test]
+    fn push_char_messages_types_enter_and_unicode_units() {
+        let messages = |c: char| {
+            let mut messages = Vec::new();
+            push_char_messages(&mut messages, c);
+            messages
+        };
+
+        let enter = VK_RETURN as WPARAM;
+        assert_eq!(
+            messages('\n'),
+            vec![
+                (WM_KEYDOWN, enter, ENTER_DOWN_LPARAM),
+                (WM_CHAR, '\r' as WPARAM, ENTER_DOWN_LPARAM),
+                (WM_KEYUP, enter, ENTER_UP_LPARAM),
+            ]
+        );
+        assert_eq!(messages('\t'), vec![(WM_CHAR, '\t' as WPARAM, 1)]);
+        assert_eq!(
+            messages('😀'),
+            vec![(WM_CHAR, 0xD83D, 1), (WM_CHAR, 0xDE00, 1)]
+        );
     }
 }
