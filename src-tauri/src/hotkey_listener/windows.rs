@@ -16,9 +16,7 @@ use windows_sys::Win32::System::Threading::{
     GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
 };
 use windows_sys::Win32::System::WindowsProgramming::QueryUnbiasedInterruptTime;
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, VK_ESCAPE, VK_PACKET, VK_RETURN,
-};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_PACKET, VK_RETURN};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetMessageW, KillTimer, SetTimer, SetWindowsHookExW, UnhookWindowsHookEx,
     HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP,
@@ -244,6 +242,7 @@ fn convert(message: u32, info: &KBDLLHOOKSTRUCT) -> Option<KeyEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
 
     #[test]
     fn keymap_tokens_are_valid_and_unique() {
