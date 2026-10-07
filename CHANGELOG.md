@@ -2,6 +2,13 @@
 
 All notable changes to Fing will be documented in this file.
 
+## 1.3.0 - 2026-10-07
+
+- Added preferred microphone setting
+- Redesigned recording indicator
+- Windows: Removed diagnostic log file
+- Improved hotkey activation reliability
+
 ## 1.2.5 - 2026-09-30
 
 - Windows: Fixed Notepad text pasting
