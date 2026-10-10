@@ -2,7 +2,7 @@
 
 All notable changes to Fing will be documented in this file.
 
-## 1.3.0 - 2026-10-07
+## 1.3.0 - 2026-10-10
 
 - Added preferred microphone setting
 - Redesigned recording indicator
