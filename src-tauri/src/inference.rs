@@ -1,9 +1,10 @@
 use crate::engine::TranscribeError;
 use crate::model::{get_definition, ModelVariant};
+use crate::whisper_cpp::{ContextParams, ParakeetContext, WhisperContext, WhisperState};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::sync::Mutex;
-use whisper_rs::{WhisperContext, WhisperContextParameters, WhisperState};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(tag = "mode", rename_all = "camelCase")]
@@ -222,9 +223,20 @@ pub fn prepare_context(
 
 #[cfg(not(target_os = "windows"))]
 fn prepare_default_context(model_path: &str) -> Result<PreparedContext, TranscribeError> {
-    let context = WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
+    install_log_filter();
+    let context = WhisperContext::new(Path::new(model_path), ContextParams::default())
         .map_err(|error| TranscribeError::ModelLoadFailed(error.to_string()))?;
-    let device = if cfg!(target_os = "macos") {
+    Ok(PreparedContext {
+        context,
+        device: default_device(),
+        selection_verified: true,
+        fallback_reason: None,
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn default_device() -> InferenceDevice {
+    if cfg!(target_os = "macos") {
         InferenceDevice {
             id: "metal:auto".to_string(),
             name: "Apple GPU".to_string(),
@@ -238,19 +250,115 @@ fn prepare_default_context(model_path: &str) -> Result<PreparedContext, Transcri
         }
     } else {
         InferenceDevice::cpu()
-    };
-    Ok(PreparedContext {
-        context,
-        device,
-        selection_verified: true,
-        fallback_reason: None,
-    })
+    }
 }
 
-pub fn create_state(
-    context: &WhisperContext,
+/// Load a Parakeet model on the default device (Metal on macOS) and record it
+/// as the loaded runtime, like `prepare_context` does for Whisper.
+pub fn prepare_parakeet(
+    model_path: &str,
+    preference: InferenceDevicePreference,
+) -> Result<(ParakeetContext, InferenceDevice), TranscribeError> {
+    invalidate_device_catalog();
+
+    #[cfg(not(target_os = "windows"))]
+    let (context, device) = {
+        install_log_filter();
+        let context = ParakeetContext::new(Path::new(model_path), ContextParams::default())
+            .map_err(|error| TranscribeError::ModelLoadFailed(error.to_string()))?;
+        (context, default_device())
+    };
+
+    // Unverified on Windows: try the resolved Vulkan device, then fall back to CPU.
+    #[cfg(target_os = "windows")]
+    let (context, device) = {
+        let devices = device_catalog(false);
+        let (device, _) = resolve_preference(&devices, &preference, 0);
+        let gpu = (device.backend != InferenceBackend::Cpu)
+            .then(|| {
+                ParakeetContext::new(
+                    Path::new(model_path),
+                    ContextParams {
+                        use_gpu: true,
+                        gpu_device: device.gpu_device_index.unwrap_or_default(),
+                    },
+                )
+                .ok()
+            })
+            .flatten();
+        match gpu {
+            Some(context) => (context, device),
+            None => (
+                ParakeetContext::new(
+                    Path::new(model_path),
+                    ContextParams {
+                        use_gpu: false,
+                        gpu_device: 0,
+                    },
+                )
+                .map_err(|error| TranscribeError::ModelLoadFailed(error.to_string()))?,
+                InferenceDevice::cpu(),
+            ),
+        }
+    };
+
+    let mut loaded = lock_loaded_runtime();
+    loaded.preference = Some(preference);
+    loaded.resolved_device = Some(device.clone());
+    loaded.selection_verified = true;
+    loaded.fallback_reason = None;
+    drop(loaded);
+
+    Ok((context, device))
+}
+
+/// Record a successful run on `device` (engines without a separate state step).
+pub fn mark_executed(device: &InferenceDevice) {
+    let mut loaded = lock_loaded_runtime();
+    apply_execution_status(&mut loaded, device, BackendVerification::Verified);
+}
+
+/// Send whisper.cpp / parakeet / ggml logs through `safe_whisper_diagnostic`
+/// (warnings and errors only) instead of stderr, so model paths never leak.
+#[cfg(not(target_os = "windows"))]
+fn install_log_filter() {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| unsafe {
+        crate::whisper_cpp::set_log_callback(Some(whisper_log_filter), std::ptr::null_mut());
+    });
+}
+
+#[cfg(not(target_os = "windows"))]
+unsafe extern "C" fn whisper_log_filter(
+    level: crate::whisper_cpp::ggml_log_level,
+    text: *const std::os::raw::c_char,
+    _user_data: *mut std::ffi::c_void,
+) {
+    use crate::whisper_cpp::{
+        ggml_log_level_GGML_LOG_LEVEL_ERROR, ggml_log_level_GGML_LOG_LEVEL_WARN,
+    };
+
+    if text.is_null()
+        || !(level == ggml_log_level_GGML_LOG_LEVEL_ERROR
+            || level == ggml_log_level_GGML_LOG_LEVEL_WARN)
+    {
+        return;
+    }
+    let message = unsafe { std::ffi::CStr::from_ptr(text) }.to_string_lossy();
+    let Some(message) = safe_whisper_diagnostic(&message) else {
+        return;
+    };
+    if level == ggml_log_level_GGML_LOG_LEVEL_ERROR {
+        tracing::error!(target: "whisper_cpp", message = %message);
+    } else {
+        tracing::warn!(target: "whisper_cpp", message = %message);
+    }
+}
+
+pub fn create_state<'ctx>(
+    context: &'ctx WhisperContext,
     device: &InferenceDevice,
-) -> Result<WhisperState, TranscribeError> {
+) -> Result<WhisperState<'ctx>, TranscribeError> {
     #[cfg(target_os = "windows")]
     let (state, verification) = create_state_observed(context, device)?;
 
@@ -473,9 +581,11 @@ fn prepare_windows_context(
             continue;
         }
 
-        let mut params = WhisperContextParameters::default();
-        params.gpu_device(device.gpu_device_index.unwrap_or_default());
-        let context = match WhisperContext::new_with_params(model_path, params) {
+        let params = ContextParams {
+            use_gpu: true,
+            gpu_device: device.gpu_device_index.unwrap_or_default(),
+        };
+        let context = match WhisperContext::new(Path::new(model_path), params) {
             Ok(context) => context,
             Err(error) => {
                 tracing::warn!(
@@ -509,7 +619,7 @@ fn prepare_windows_context(
                 tracing::warn!(
                     device = %device.name,
                     ordinal = device.gpu_device_index.unwrap_or_default(),
-                    whisper_cpp_version = whisper_rs::WHISPER_CPP_VERSION,
+                    whisper_cpp_version = crate::whisper_cpp::WHISPER_CPP_VERSION,
                     "Vulkan state initialized but backend verification markers were not observed; accepting device as unverified"
                 );
                 return Ok(PreparedContext {
@@ -540,9 +650,11 @@ fn prepare_windows_context(
         }
     }
 
-    let mut params = WhisperContextParameters::default();
-    params.use_gpu(false);
-    let context = match WhisperContext::new_with_params(model_path, params) {
+    let params = ContextParams {
+        use_gpu: false,
+        gpu_device: 0,
+    };
+    let context = match WhisperContext::new(Path::new(model_path), params) {
         Ok(context) => context,
         Err(error) => {
             tracing::error!(error = %error, "Failed to create CPU Whisper context");
@@ -611,13 +723,13 @@ fn discover_devices() -> Vec<InferenceDevice> {
 
 #[cfg(target_os = "windows")]
 fn discover_windows_devices() -> Vec<InferenceDevice> {
+    use fing_whisper_sys as sys;
     use std::ffi::CStr;
-    use whisper_rs::whisper_rs_sys as sys;
 
     let mut devices = Vec::new();
     let mut gpu_device_index = 0_i32;
     // ggml_backend_dev_count() initializes the built-in backend registry,
-    // including Vulkan. Calling whisper_rs::vulkan::list_devices() first would
+    // including Vulkan; enumerating Vulkan devices separately first would
     // enumerate every physical device a second time.
     let count = unsafe { sys::ggml_backend_dev_count() };
 
@@ -703,7 +815,7 @@ fn c_string(pointer: *const std::os::raw::c_char) -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn probe_device(device: &InferenceDevice) -> bool {
-    use whisper_rs::whisper_rs_sys as sys;
+    use fing_whisper_sys as sys;
 
     unsafe extern "C" {
         fn fing_probe_ggml_backend(device: *mut std::ffi::c_void) -> i32;
@@ -729,11 +841,11 @@ static INSTALL_LOG_OBSERVER: std::sync::Once = std::sync::Once::new();
 
 #[cfg(target_os = "windows")]
 unsafe extern "C" fn whisper_log_observer(
-    level: whisper_rs::whisper_rs_sys::ggml_log_level,
+    level: fing_whisper_sys::ggml_log_level,
     text: *const std::os::raw::c_char,
     _user_data: *mut std::ffi::c_void,
 ) {
-    use whisper_rs::whisper_rs_sys as sys;
+    use fing_whisper_sys as sys;
 
     if text.is_null() {
         return;
@@ -771,7 +883,6 @@ unsafe extern "C" fn whisper_log_observer(
     }
 }
 
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn safe_whisper_diagnostic(message: &str) -> Option<String> {
     let message = message.trim();
     if message.is_empty() {
@@ -810,10 +921,10 @@ fn safe_whisper_diagnostic(message: &str) -> Option<String> {
 }
 
 #[cfg(target_os = "windows")]
-fn create_state_observed(
-    context: &WhisperContext,
+fn create_state_observed<'ctx>(
+    context: &'ctx WhisperContext,
     device: &InferenceDevice,
-) -> Result<(WhisperState, BackendVerification), TranscribeError> {
+) -> Result<(WhisperState<'ctx>, BackendVerification), TranscribeError> {
     if device.backend == InferenceBackend::Cpu {
         return context
             .create_state()
@@ -822,7 +933,7 @@ fn create_state_observed(
     }
 
     INSTALL_LOG_OBSERVER.call_once(|| unsafe {
-        whisper_rs::set_log_callback(Some(whisper_log_observer), std::ptr::null_mut());
+        crate::whisper_cpp::set_log_callback(Some(whisper_log_observer), std::ptr::null_mut());
     });
     let _serial = match OBSERVATION_SERIAL.lock() {
         Ok(serial) => serial,
@@ -857,7 +968,7 @@ fn create_state_observed(
     if verification == BackendVerification::Unavailable {
         tracing::warn!(
             device = %device.name,
-            whisper_cpp_version = whisper_rs::WHISPER_CPP_VERSION,
+            whisper_cpp_version = crate::whisper_cpp::WHISPER_CPP_VERSION,
             "Whisper backend verification contract was not observed"
         );
     }
@@ -990,8 +1101,8 @@ mod tests {
     #[test]
     fn observer_contract_matches_pinned_whisper_cpp_markers() {
         assert_eq!(
-            whisper_rs::WHISPER_CPP_VERSION,
-            "1.8.3",
+            crate::whisper_cpp::WHISPER_CPP_VERSION,
+            "1.9.5",
             "review the backend log markers before upgrading whisper.cpp"
         );
         let mut verified = BackendObservation {

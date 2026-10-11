@@ -7,6 +7,8 @@ mod db;
 mod dictionary;
 mod distribution;
 mod engine;
+#[cfg(test)]
+mod engine_smoke;
 mod hotkey;
 mod hotkey_config;
 mod hotkey_listener;
@@ -25,6 +27,7 @@ mod state;
 mod stats;
 mod transcribe;
 mod update;
+mod whisper_cpp;
 
 use audio::{AudioCapture, AudioDevice, MicrophoneTest};
 use state::AppState;

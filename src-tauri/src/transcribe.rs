@@ -1,16 +1,23 @@
-// Whisper transcription wrapper
+// Transcription engines (Whisper and Parakeet on whisper.cpp) and the global
+// loaded-engine slot.
 
 use crate::engine::{TranscribeError, TranscriptionEngine};
 use crate::inference::{self, InferenceDevice};
+use crate::model::{self, ModelEngine};
+use crate::whisper_cpp::{self, FullParams, ParakeetContext, WhisperContext};
 use once_cell::sync::Lazy;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use whisper_rs::{get_lang_id, FullParams, SamplingStrategy, WhisperContext};
+use std::time::Instant;
 
 const DEFAULT_LANGUAGE: &str = "en";
 const MAX_PROMPT_TOKENS: usize = 256;
 const UNSUPPORTED_LANGUAGE: &str = "yue";
+const SAMPLE_RATE: f32 = 16_000.0;
 
+fn get_lang_id(language: &str) -> Option<i32> {
+    whisper_cpp::lang_id(language)
+}
 #[derive(Debug, PartialEq)]
 enum LanguagePlan<'a> {
     Explicit(&'a str),
@@ -54,13 +61,13 @@ fn detection_threads() -> usize {
         .min(4)
 }
 
-/// Whisper-based transcription engine using whisper-rs.
-pub struct Transcriber {
+/// Whisper engine: forced or detected language, dictionary prompt.
+pub struct WhisperEngine {
     ctx: Mutex<WhisperContext>,
     device: InferenceDevice,
 }
 
-impl Transcriber {
+impl WhisperEngine {
     pub fn new(model_path: &str) -> Result<Self, TranscribeError> {
         let path = Path::new(model_path);
         if !path.exists() {
@@ -81,7 +88,7 @@ impl Transcriber {
     }
 }
 
-impl TranscriptionEngine for Transcriber {
+impl TranscriptionEngine for WhisperEngine {
     fn transcribe(
         &self,
         audio: &[f32],
@@ -111,8 +118,8 @@ impl TranscriptionEngine for Transcriber {
             }
         };
 
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_language(Some(language));
+        let mut params = FullParams::greedy();
+        params.set_language(language);
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
@@ -136,45 +143,137 @@ impl TranscriptionEngine for Transcriber {
         }
 
         state
-            .full(params, audio)
+            .full(&params, audio)
             .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
 
-        let num_segments = state.full_n_segments();
         let mut text = String::new();
-
-        for i in 0..num_segments {
-            if let Some(segment) = state.get_segment(i) {
-                if let Ok(segment_text) = segment.to_str_lossy() {
-                    text.push_str(segment_text.as_ref());
-                }
-            }
+        for i in 0..state.full_n_segments() {
+            text.push_str(&state.segment_text_lossy(i));
         }
 
         Ok(text.trim().to_string())
     }
 }
 
-// Global transcriber instance (can be loaded/unloaded at runtime).
-static TRANSCRIBER: Lazy<Mutex<Option<Arc<Transcriber>>>> = Lazy::new(|| Mutex::new(None));
+/// Parakeet TDT engine. Ignores the language settings (the model auto-detects
+/// among its 25 European languages) and the dictionary prompt (it has none).
+pub struct ParakeetEngine {
+    ctx: Mutex<ParakeetContext>,
+    device: InferenceDevice,
+}
 
-/// Initialize the global transcriber with the given model file.
-/// Safe to call multiple times.
+impl ParakeetEngine {
+    pub fn new(model_path: &str) -> Result<Self, TranscribeError> {
+        if !Path::new(model_path).exists() {
+            return Err(TranscribeError::ModelNotFound);
+        }
+
+        let settings = crate::settings::load_settings_sync();
+        let (ctx, device) = inference::prepare_parakeet(model_path, settings.inference_device)?;
+
+        Ok(Self {
+            ctx: Mutex::new(ctx),
+            device,
+        })
+    }
+}
+
+impl TranscriptionEngine for ParakeetEngine {
+    fn transcribe(
+        &self,
+        audio: &[f32],
+        _languages: &[String],
+        _dictionary_prompt: Option<&str>,
+    ) -> Result<String, TranscribeError> {
+        if audio.is_empty() {
+            return Err(TranscribeError::EmptyAudio);
+        }
+
+        let mut ctx = self.ctx.lock().map_err(|_| {
+            TranscribeError::InferenceFailed("Transcriber lock poisoned".to_string())
+        })?;
+        let text = ctx
+            .transcribe(audio, detection_threads())
+            .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
+        inference::mark_executed(&self.device);
+
+        Ok(text.trim().to_string())
+    }
+}
+
+/// The engine currently in memory plus what the timing logs need.
+struct LoadedEngine {
+    engine: Arc<dyn TranscriptionEngine>,
+    kind: ModelEngine,
+    model_path: PathBuf,
+    load_ms: u128,
+}
+
+impl LoadedEngine {
+    fn file_name(&self) -> &str {
+        self.model_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("unknown")
+    }
+}
+
+fn engine_kind_for(path: &Path) -> ModelEngine {
+    model::definition_for_path(path)
+        .map(|def| def.engine)
+        .unwrap_or(ModelEngine::Whisper)
+}
+
+fn load_engine(model_path: &str) -> Result<LoadedEngine, TranscribeError> {
+    let path = PathBuf::from(model_path);
+    let kind = engine_kind_for(&path);
+    let started = Instant::now();
+    let engine: Arc<dyn TranscriptionEngine> = match kind {
+        ModelEngine::Whisper => Arc::new(WhisperEngine::new(model_path)?),
+        ModelEngine::Parakeet => Arc::new(ParakeetEngine::new(model_path)?),
+    };
+    let loaded = LoadedEngine {
+        engine,
+        kind,
+        model_path: path,
+        load_ms: started.elapsed().as_millis(),
+    };
+    tracing::info!(
+        engine = ?loaded.kind,
+        model = loaded.file_name(),
+        load_ms = loaded.load_ms as u64,
+        whisper_cpp = whisper_cpp::WHISPER_CPP_VERSION,
+        "Transcription engine loaded"
+    );
+    Ok(loaded)
+}
+
+// Global engine instance (can be loaded/unloaded/swapped at runtime).
+static TRANSCRIBER: Lazy<Mutex<Option<Arc<LoadedEngine>>>> = Lazy::new(|| Mutex::new(None));
+
+/// Initialize the global engine from `model_path`; the engine (Whisper or
+/// Parakeet) follows the model registry entry for that file name. A no-op when
+/// that model is already loaded; replaces a different loaded model.
 pub fn init_transcriber(model_path: &str) -> Result<(), TranscribeError> {
     let mut guard = TRANSCRIBER
         .lock()
         .map_err(|_| TranscribeError::ModelLoadFailed("Transcriber lock poisoned".to_string()))?;
-    if guard.is_some() {
-        return Ok(());
+    if let Some(loaded) = guard.as_ref() {
+        if loaded.model_path == Path::new(model_path) {
+            return Ok(());
+        }
+        tracing::info!("Replacing loaded transcription engine");
+        *guard = None;
+        inference::mark_unloaded();
     }
 
     tracing::info!("Initializing transcriber");
-    *guard = Some(Arc::new(Transcriber::new(model_path)?));
+    *guard = Some(Arc::new(load_engine(model_path)?));
 
     Ok(())
 }
 
-/// Get the global transcriber instance (None if not initialized).
-pub fn get_transcriber() -> Option<Arc<Transcriber>> {
+fn get_loaded() -> Option<Arc<LoadedEngine>> {
     match TRANSCRIBER.lock() {
         Ok(guard) => guard.clone(),
         Err(_) => None,
@@ -197,22 +296,35 @@ pub fn unload_transcriber() {
     inference::mark_unloaded();
 }
 
-/// Transcribe audio using the global transcriber.
+/// Transcribe audio using the global engine and log its timing (never the text).
 pub fn transcribe_audio(
     audio: &[f32],
     languages: &[String],
     dictionary_prompt: Option<&str>,
 ) -> Result<String, TranscribeError> {
-    match get_transcriber() {
-        Some(t) => t.transcribe(audio, languages, dictionary_prompt),
-        None => Err(TranscribeError::ModelNotFound),
-    }
+    let Some(loaded) = get_loaded() else {
+        return Err(TranscribeError::ModelNotFound);
+    };
+
+    let started = Instant::now();
+    let result = loaded
+        .engine
+        .transcribe(audio, languages, dictionary_prompt);
+    tracing::info!(
+        engine = ?loaded.kind,
+        model = loaded.file_name(),
+        audio_s = format!("{:.2}", audio.len() as f32 / SAMPLE_RATE),
+        load_ms = loaded.load_ms as u64,
+        transcribe_ms = started.elapsed().as_millis() as u64,
+        ok = result.is_ok(),
+        "Transcription timing"
+    );
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     static TRANSCRIBE_TEST_MUTEX: Mutex<()> = Mutex::new(());

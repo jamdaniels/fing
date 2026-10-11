@@ -38,6 +38,16 @@ pub(crate) fn is_onboarding_test_mode() -> bool {
     ONBOARDING_TEST_MODE.load(Ordering::SeqCst)
 }
 
+// Peak amplitude at or below which a recording counts as digital silence.
+// Whisper hallucinates text on such input, so no engine gets to see it.
+const DIGITAL_SILENCE_PEAK: f32 = 0.001;
+
+fn is_digital_silence(samples: &[f32]) -> bool {
+    samples
+        .iter()
+        .all(|sample| sample.abs() <= DIGITAL_SILENCE_PEAK)
+}
+
 /// Check if transcription contains only blank audio markers (no actual speech)
 fn is_blank_audio(text: &str) -> bool {
     let normalized = text.to_lowercase();
@@ -573,6 +583,12 @@ pub fn on_key_up(app: &AppHandle) {
             return;
         }
 
+        if is_digital_silence(&audio_buffer) {
+            tracing::info!("Recording is digital silence, skipping transcription");
+            finish_transcription(&app_handle, None, duration_ms, test_mode).await;
+            return;
+        }
+
         tracing::info!(
             "Processing {} samples ({:.1}s of audio)",
             audio_buffer.len(),
@@ -837,6 +853,13 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::thread;
+
+    #[test]
+    fn digital_silence_is_detected_by_peak() {
+        assert!(is_digital_silence(&[0.0; 48_000]));
+        assert!(is_digital_silence(&[0.001, -0.001, 0.0005]));
+        assert!(!is_digital_silence(&[0.0, 0.0, -0.002, 0.0]));
+    }
 
     #[test]
     fn failed_start_does_not_leak_into_next_stop_response() {

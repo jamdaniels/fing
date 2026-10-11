@@ -1,6 +1,6 @@
 ## Mission & Context
 - Fing is a privacy-first speech-to-text tray app: hold hotkey -> speak -> release -> text pasted. Its main goal is to be lightweight and fast.
-- Transcription is done locally via whisper.cpp/whisper-rs and downloaded models.
+- Transcription is done locally via whisper.cpp (Whisper and Parakeet, through the in-repo `fing-whisper-sys` crate) and downloaded models.
 - Core app states: `NeedsSetup -> Ready -> Recording -> Processing -> Ready`; recording failures return directly to `Ready`.
 - Stack: Tauri v2 + Rust, Vanilla TypeScript + HTML/CSS, Lucide icons, cpal/rubato audio, rusqlite/FTS5.
 - macOS and Windows behavior can differ; check the relevant platform code before changing hotkey, focus, tray, window, or input behavior.

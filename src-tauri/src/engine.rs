@@ -28,7 +28,7 @@ impl std::fmt::Display for TranscribeError {
 
 impl std::error::Error for TranscribeError {}
 
-/// Trait for speech-to-text engines (currently whisper-rs).
+/// Trait for speech-to-text engines (Whisper and Parakeet on whisper.cpp).
 pub trait TranscriptionEngine: Send + Sync {
     /// Transcribe 16kHz mono f32 audio samples to text.
     fn transcribe(
