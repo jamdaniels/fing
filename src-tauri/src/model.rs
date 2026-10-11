@@ -517,7 +517,7 @@ pub async fn download_variant(variant: ModelVariant) -> Result<PathBuf, String> 
     let def = get_definition(variant);
     let path = model_path_for_variant(variant);
     let part_path = path.with_extension("part");
-    tracing::info!("Starting {} model download to {:?}", def.display_name, path);
+    tracing::info!("Starting {} model download", def.display_name);
 
     // Create directory if needed
     if let Some(parent) = path.parent() {
@@ -675,11 +675,7 @@ pub fn delete_model(variant: ModelVariant) -> Result<(), String> {
         if let Ok(mut cache) = HASH_CACHE.lock() {
             cache.remove(&path);
         }
-        tracing::info!(
-            "Deleted {} model at {:?}",
-            get_definition(variant).display_name,
-            path
-        );
+        tracing::info!("Deleted {} model", get_definition(variant).display_name);
     }
     Ok(())
 }

@@ -8,7 +8,7 @@ use crate::audio::{AudioCapture, AudioTap};
 use crate::db::{save_transcript, NewTranscript};
 use crate::indicator::NoticeKind;
 use crate::microphone::{self, MicChoice, OpenedMic};
-use crate::model::{model_path_for_variant, ModelVariant};
+use crate::model::ModelVariant;
 use crate::paste::paste_text;
 use crate::settings::{load_settings, load_settings_sync};
 use crate::sounds;
@@ -596,8 +596,6 @@ pub fn on_key_up(app: &AppHandle) {
 
         // Initialize transcriber if needed
         if !is_transcriber_loaded() {
-            let model_path = model_path_for_variant(settings.active_model_variant);
-
             if let Err(e) = init_transcriber_for_variant_async(settings.active_model_variant).await
             {
                 tracing::error!("Failed to initialize transcriber: {}", e);
@@ -609,7 +607,7 @@ pub fn on_key_up(app: &AppHandle) {
                 finish_transcription(&app_handle, None, duration_ms, test_mode).await;
                 return;
             }
-            tracing::info!("Transcriber initialized from {:?}", model_path);
+            tracing::info!("Transcriber initialized for {:?}", settings.active_model_variant);
         }
 
         let dictionary_terms = crate::dictionary::sanitize_terms(&settings.dictionary_terms);
