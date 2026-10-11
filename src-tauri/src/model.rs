@@ -87,8 +87,8 @@ pub const MODEL_REGISTRY: &[ModelDefinition] = &[
         size_bytes: 415_611_879,
         display_name: "Parakeet TDT 0.6B v3 q4_k",
         description: "25 European languages, auto-detected",
-        // Placeholder until measured (FING-DIRECT.md §6).
-        memory_estimate_mb: 600,
+        // Measured: ~530 MB process RSS after load on Metal (FING-DIRECT.md §6).
+        memory_estimate_mb: 550,
     },
 ];
 
