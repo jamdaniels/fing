@@ -159,6 +159,8 @@
     "verifying": "Verifying...",
     "activate": "Activate",
     "activating": "Activating...",
+    "switchBusy": "Can't switch models while recording or transcribing. Try again in a moment.",
+    "switchFailed": "Couldn't load this model. The previous model is still in use.",
     "deleting": "Deleting...",
     "deleteTitle": "Delete {model}",
     "deleteBody": "You can download it again later.",
@@ -187,7 +189,6 @@
     "audioDetected": "Audio detected",
     "saySomething": "Say something to test...",
     "restartTitle": "Restart Required",
-    "restartBody": "Fing needs to restart to load the new model.",
     "inferenceRestartBody": "Fing needs to restart to apply the new processing device.",
     "restartNow": "Restart Now"
   },

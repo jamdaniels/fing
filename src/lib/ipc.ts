@@ -133,8 +133,9 @@ export async function deleteModel(variant: ModelVariant): Promise<void> {
   return await invoke("delete_model", { variant });
 }
 
-export async function setActiveModel(variant: ModelVariant): Promise<boolean> {
-  return await invoke<boolean>("set_active_model", { variant });
+/** Activates a downloaded model; the backend swaps the engine in place. */
+export async function setActiveModel(variant: ModelVariant): Promise<void> {
+  return await invoke("set_active_model", { variant });
 }
 
 export async function completeSetup(): Promise<void> {

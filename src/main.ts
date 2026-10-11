@@ -176,6 +176,9 @@ const MAX_DICTIONARY_TERMS = 100;
 const MAX_DICTIONARY_WORDS_PER_TERM = 3;
 let dictionaryError: string | null = null;
 let lazyModelToggleBusy = false;
+// Model being activated (the engine swap can take seconds on first load)
+let modelSwitchVariant: ModelVariant | null = null;
+let modelSwitchError: string | null = null;
 let updateCheckInProgress = false;
 let updateStatus: UpdateStatus = {
   updateAvailable: false,
@@ -1645,10 +1648,7 @@ function startModelDownloadPolling(variant: ModelVariant): void {
   }, 500);
 }
 
-function showRestartDialog(
-  previousVariant?: ModelVariant,
-  body = t("dialogs.restartBody")
-): void {
+function showRestartDialog(body: string): void {
   const modal = document.createElement("div");
   modal.className = "dialog-overlay";
   modal.innerHTML = `
@@ -1668,11 +1668,8 @@ function showRestartDialog(
 
   document
     .getElementById("restart-later-btn")
-    ?.addEventListener("click", async () => {
+    ?.addEventListener("click", () => {
       modal.remove();
-      if (previousVariant) {
-        await setActiveModel(previousVariant);
-      }
       loadSettings({ force: true, refreshDevices: false }).then(() =>
         renderContent()
       );
@@ -2160,25 +2157,34 @@ function handleSettingsClick(e: MouseEvent): void {
     ".activate-model-btn"
   ) as HTMLButtonElement | null;
   if (activateModelBtn) {
+    if (modelSwitchVariant) {
+      return;
+    }
     const variant = activateModelBtn.dataset.variant as ModelVariant;
-    const previousVariant = settings?.activeModelVariant;
-    activateModelBtn.disabled = true;
-    activateModelBtn.textContent = t("models.activating");
+    modelSwitchVariant = variant;
+    modelSwitchError = null;
+    // Later full-settings saves must carry the new model while it loads.
+    if (settings) {
+      settings = { ...settings, activeModelVariant: variant };
+    }
+    rerenderModelList();
 
+    // The backend unloads the current model and loads the new one in place;
+    // no restart. It refuses while a recording is being made or transcribed.
     setActiveModel(variant)
-      .then((needsRestart) => {
-        if (needsRestart) {
-          showRestartDialog(previousVariant);
-        } else {
-          loadSettings({ force: true, refreshDevices: false }).then(() =>
-            renderContent()
-          );
-        }
-      })
-      .catch((err) => {
+      .catch((err: unknown) => {
         console.error("Activate error:", err);
-        activateModelBtn.disabled = false;
-        activateModelBtn.textContent = t("models.activate");
+        modelSwitchError =
+          err === "model_switch_busy"
+            ? t("models.switchBusy")
+            : t("models.switchFailed");
+      })
+      .then(() => loadSettings({ force: true, refreshDevices: false }))
+      .finally(() => {
+        modelSwitchVariant = null;
+        if (currentView === "settings") {
+          renderContent();
+        }
       });
     return;
   }
@@ -2235,7 +2241,7 @@ function handleSettingsChange(e: Event): void {
         await refreshInferenceRuntimeInfo(true);
         renderContent();
         if (inferenceRuntimeInfo?.restartRequired) {
-          showRestartDialog(undefined, t("dialogs.inferenceRestartBody"));
+          showRestartDialog(t("dialogs.inferenceRestartBody"));
         }
       })
       .catch((error) => {
@@ -2358,6 +2364,13 @@ async function refreshInferenceRuntimeInfo(force = false): Promise<void> {
   }
 }
 
+function rerenderModelList(): void {
+  const modelList = document.querySelector(".model-list");
+  if (modelList && currentView === "settings") {
+    modelList.innerHTML = renderModelList();
+  }
+}
+
 function formatModelSize(bytes: number): string {
   return `${Math.round(bytes / 1_000_000)} MB`;
 }
@@ -2406,10 +2419,13 @@ function renderModelList(): string {
           const pct = Math.round(modelProgress.percentage);
           actions = `<span class="model-download-progress"><span class="loading-spinner" aria-hidden="true">${createIcon(LoaderCircle)}</span><span class="model-download-progress-value">${pct}%</span></span>`;
         }
+      } else if (modelSwitchVariant === model.variant) {
+        actions = `<span class="model-download-progress verifying"><span class="loading-spinner" aria-hidden="true">${createIcon(LoaderCircle)}</span><span class="model-download-progress-value">${t("models.activating")}</span></span>`;
       } else if (model.isDownloaded) {
+        const switching = modelSwitchVariant ? "disabled" : "";
         actions = `
-          <button class="btn btn-outline btn-sm activate-model-btn" data-variant="${model.variant}">${t("models.activate")}</button>
-          <button class="btn btn-outline btn-sm delete-model-btn" data-variant="${model.variant}">${t("common.delete")}</button>
+          <button class="btn btn-outline btn-sm activate-model-btn" data-variant="${model.variant}" ${switching}>${t("models.activate")}</button>
+          <button class="btn btn-outline btn-sm delete-model-btn" data-variant="${model.variant}" ${switching}>${t("common.delete")}</button>
         `;
       } else {
         actions = `<button class="btn btn-outline btn-sm download-model-btn" data-variant="${model.variant}">${t("common.download")}</button>`;
@@ -2426,7 +2442,11 @@ function renderModelList(): string {
     })
     .join("");
 
-  return header + rows + lazyModelRow;
+  const switchError = modelSwitchError
+    ? `<div class="model-error" role="alert">${escapeHtml(modelSwitchError)}</div>`
+    : "";
+
+  return header + rows + switchError + lazyModelRow;
 }
 
 function getModelQualityLabel(variant: ModelVariant): string {

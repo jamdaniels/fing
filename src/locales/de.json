@@ -159,6 +159,8 @@
     "verifying": "Wird überprüft...",
     "activate": "Aktivieren",
     "activating": "Wird aktiviert...",
+    "switchBusy": "Während einer Aufnahme oder Transkription kann das Modell nicht gewechselt werden. Versuche es gleich noch einmal.",
+    "switchFailed": "Dieses Modell konnte nicht geladen werden. Das bisherige Modell bleibt aktiv.",
     "deleting": "Wird gelöscht...",
     "deleteTitle": "{model} löschen",
     "deleteBody": "Du kannst es später erneut herunterladen.",
@@ -187,7 +189,6 @@
     "audioDetected": "Audio erkannt",
     "saySomething": "Sprich etwas zum Testen...",
     "restartTitle": "Neustart erforderlich",
-    "restartBody": "Fing muss neu gestartet werden, um das neue Modell zu laden.",
     "inferenceRestartBody": "Fing muss neu gestartet werden, um das neue Verarbeitungsgerät zu verwenden.",
     "restartNow": "Jetzt neu starten"
   },

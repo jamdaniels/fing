@@ -18,6 +18,7 @@ mod inference;
 mod level_meter;
 mod microphone;
 mod model;
+mod model_loader;
 mod paste;
 mod paths;
 mod platform;
@@ -440,31 +441,11 @@ fn delete_model(variant: model::ModelVariant) -> Result<(), String> {
     model::delete_model(variant)
 }
 
+/// Activate a downloaded model and hot-swap the engine (no restart). Fails
+/// with `model_loader::MODEL_SWITCH_BUSY` while recording or transcribing.
 #[tauri::command]
-async fn set_active_model(
-    variant: model::ModelVariant,
-    _app: tauri::AppHandle,
-) -> Result<bool, String> {
-    model::ensure_variant_verified(variant)?;
-
-    // Get current settings
-    let mut current_settings = settings::load_settings().await;
-    let needs_restart = current_settings.active_model_variant != variant;
-
-    // Update settings
-    current_settings.active_model_variant = variant;
-    settings::save_settings(&current_settings).await?;
-
-    // If app is in Ready state, we need to restart to reload the model
-    let current_state = state::get_state();
-    if needs_restart && current_state == AppState::Ready {
-        tracing::info!("Model variant changed to {:?}, restart required", variant);
-        // Return true to indicate restart is required
-        return Ok(true);
-    }
-
-    // If in NeedsSetup state, no restart needed - model will be loaded on complete_setup
-    Ok(false)
+async fn set_active_model(variant: model::ModelVariant) -> Result<(), String> {
+    model_loader::switch_active_model(variant).await
 }
 
 #[tauri::command]
@@ -579,42 +560,22 @@ async fn update_settings(
 
     if previous_lazy_mode != updated.lazy_model_loading {
         if updated.lazy_model_loading {
-            transcribe::unload_transcriber();
+            model_loader::unload().await;
             tracing::info!("Lazy model loading enabled, transcriber unloaded");
-        } else {
-            let model_path = match model::ensure_variant_available(updated.active_model_variant) {
-                Ok(path) => path,
-                Err(load_err) => {
-                    let mut rollback = updated.clone();
-                    rollback.lazy_model_loading = true;
-                    if let Err(save_err) = settings::save_settings(&rollback).await {
-                        tracing::error!(
-                                "Failed to roll back lazy model loading setting after invalid model: {}",
-                                save_err
-                            );
-                    }
-                    return Err(load_err);
-                }
-            };
-
-            let model_path_str = model_path.to_string_lossy().to_string();
-            let load_result = tauri::async_runtime::spawn_blocking(move || {
-                transcribe::init_transcriber(&model_path_str)
-            })
-            .await
-            .map_err(|e| format!("Transcriber initialization task failed: {e}"))?;
-
-            if let Err(load_err) = load_result {
-                let mut rollback = updated.clone();
-                rollback.lazy_model_loading = true;
-                if let Err(save_err) = settings::save_settings(&rollback).await {
-                    tracing::error!(
-                        "Failed to roll back lazy model loading setting after load error: {}",
-                        save_err
-                    );
-                }
-                return Err(format!("Failed to load model: {load_err}"));
+        } else if let Err(load_err) =
+            // Loads the active model (also one a concurrent model switch just
+            // selected); fails for a missing model or a failed load.
+            model_loader::ensure_loaded(updated.active_model_variant).await
+        {
+            let mut rollback = updated.clone();
+            rollback.lazy_model_loading = true;
+            if let Err(save_err) = settings::save_settings(&rollback).await {
+                tracing::error!(
+                    "Failed to roll back lazy model loading setting after load error: {}",
+                    save_err
+                );
             }
+            return Err(format!("Failed to load model: {load_err}"));
         }
     }
 
@@ -708,17 +669,14 @@ async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
     let current_settings = settings::load_settings().await;
     let variant = current_settings.active_model_variant;
 
-    let model_path = model::ensure_variant_verified(variant)?;
+    tauri::async_runtime::spawn_blocking(move || model::ensure_variant_verified(variant))
+        .await
+        .map_err(|e| format!("Model verification task failed: {e}"))??;
 
     if !current_settings.lazy_model_loading {
-        let model_path_str = model_path.to_string_lossy().to_string();
-        let init_result = tauri::async_runtime::spawn_blocking(move || {
-            transcribe::init_transcriber(&model_path_str)
-        })
-        .await
-        .map_err(|e| format!("Transcriber initialization task failed: {e}"))?;
-
-        init_result.map_err(|e| format!("Failed to initialize transcriber: {e}"))?;
+        model_loader::ensure_loaded(variant)
+            .await
+            .map_err(|e| format!("Failed to initialize transcriber: {e}"))?;
     }
 
     settings::update_settings_atomic(|latest_settings| {
@@ -1002,21 +960,23 @@ pub fn run() {
             let mut updates_enabled = false;
 
             if bootstrap_decision.app_state == AppState::Ready {
-                // Try to pre-load the transcriber, but don't block Ready state
-                // on failure. The hotkey handler will retry on first use.
+                // Pre-load the transcriber off the setup thread: the first
+                // Metal shader compile of a new build can take 10+ s and the
+                // tray must not wait for it. Failure doesn't block Ready; the
+                // hotkey handler retries on first use. The load goes through
+                // model_loader, so a hotkey press or a model switch during
+                // the preload waits for it instead of loading twice.
                 if !saved_settings.lazy_model_loading {
-                    if let Some(model_path) = available_model_path {
-                        if let Err(e) = tauri::async_runtime::block_on(async move {
-                            let model_path_str = model_path.to_string_lossy().to_string();
-                            tauri::async_runtime::spawn_blocking(move || {
-                                transcribe::init_transcriber(&model_path_str)
-                                    .map_err(|_| "transcriber initialization failed")
-                            })
-                            .await
-                            .map_err(|_| "transcriber preload task failed")?
-                        }) {
-                            tracing::warn!("Transcriber init deferred to first use: {}", e);
-                        }
+                    if available_model_path.is_some() {
+                        let variant = saved_settings.active_model_variant;
+                        tauri::async_runtime::spawn(async move {
+                            match model_loader::ensure_loaded(variant).await {
+                                Ok(()) => tracing::info!("Transcriber preloaded"),
+                                Err(e) => {
+                                    tracing::warn!("Transcriber init deferred to first use: {}", e)
+                                }
+                            }
+                        });
                     } else {
                         tracing::warn!("Available model path unavailable for eager preload");
                     }

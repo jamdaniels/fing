@@ -8,13 +8,11 @@ use crate::audio::{AudioCapture, AudioTap};
 use crate::db::{save_transcript, NewTranscript};
 use crate::indicator::NoticeKind;
 use crate::microphone::{self, MicChoice, OpenedMic};
-use crate::model::{ensure_variant_available, model_path_for_variant, ModelVariant};
+use crate::model::{model_path_for_variant, ModelVariant};
 use crate::paste::paste_text;
 use crate::settings::{load_settings, load_settings_sync};
 use crate::sounds;
-use crate::transcribe::{
-    init_transcriber, is_transcriber_loaded, transcribe_audio, unload_transcriber,
-};
+use crate::transcribe::{is_transcriber_loaded, transcribe_audio};
 
 // Maximum recording duration; the audio buffer is sized for the same limit.
 const MAX_RECORDING_DURATION: Duration =
@@ -272,21 +270,10 @@ fn mark_lazy_activity() -> u64 {
     LAZY_ACTIVITY_TOKEN.fetch_add(1, Ordering::SeqCst) + 1
 }
 
-async fn init_transcriber_async(model_path: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || init_transcriber(&model_path))
-        .await
-        .map_err(|e| format!("Transcriber initialization task failed: {e}"))?
-        .map_err(|e| e.to_string())
-}
-
+// Loads go through model_loader so they serialize with model switches,
+// the startup preload and the idle unload.
 async fn init_transcriber_for_variant_async(variant: ModelVariant) -> Result<(), String> {
-    let model_path_str = tauri::async_runtime::spawn_blocking(move || {
-        ensure_variant_available(variant).map(|path| path.to_string_lossy().to_string())
-    })
-    .await
-    .map_err(|e| format!("Model inspection task failed: {e}"))??;
-
-    init_transcriber_async(model_path_str).await
+    crate::model_loader::ensure_loaded(variant).await
 }
 
 fn spawn_lazy_preload_if_needed(variant: ModelVariant) {
@@ -331,7 +318,16 @@ fn schedule_lazy_unload_if_idle() {
             return;
         }
 
-        unload_transcriber();
+        // Re-checked under the model lock, so a load in flight (e.g. a model
+        // switch) completes first and is not unloaded mid-load.
+        let still_idle = move || {
+            LAZY_ACTIVITY_TOKEN.load(Ordering::SeqCst) == token
+                && !RECORDING_ACTIVE.load(Ordering::SeqCst)
+                && crate::state::get_state() == crate::state::AppState::Ready
+        };
+        if !crate::model_loader::unload_if_idle(still_idle).await {
+            return;
+        }
         tracing::info!(
             "Unloaded transcriber after {} seconds of idle time",
             LAZY_MODEL_IDLE_UNLOAD_SECS
