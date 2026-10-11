@@ -9,6 +9,7 @@
       "!!**/coverage",
       "!!**/src-tauri/gen",
       "!!**/src-tauri/target",
+      "!!**/src-tauri/crates/fing-whisper-sys/whisper.cpp",
       "!!**/target",
       "!!**/bun.lock",
       "!!**/.env",
