@@ -5,7 +5,7 @@
 //
 // Every `*.wav` in the clips dir (16 kHz mono 16-bit) runs through every model
 // in the models dir that is in the registry. A clip named `de_*` is
-// transcribed with languages [de] and [de, en], anything else with [en].
+// transcribed with languages [de], [en] and [en, de], anything else with [en].
 // FING_DIRECT_TERMS is an optional comma-separated dictionary. Output is what
 // the hotkey path would type; it prints transcripts, so only use your own audio.
 
@@ -108,7 +108,11 @@ fn engine_smoke() {
             let clip_name = clip.file_name().unwrap().to_string_lossy();
             let audio = read_wav_16k_mono(clip);
             let language_sets: Vec<Vec<String>> = if clip_name.starts_with("de_") {
-                vec![vec!["de".into()], vec!["de".into(), "en".into()]]
+                vec![
+                    vec!["de".into()],
+                    vec!["en".into()],
+                    vec!["en".into(), "de".into()],
+                ]
             } else {
                 vec![vec!["en".into()]]
             };

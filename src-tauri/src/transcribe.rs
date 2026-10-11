@@ -104,6 +104,7 @@ impl TranscriptionEngine for WhisperEngine {
         })?;
         let mut state = inference::create_state(&ctx, &self.device)?;
 
+        let detecting = matches!(language_plan(languages), LanguagePlan::Detect(_));
         let language = match language_plan(languages) {
             LanguagePlan::Explicit(language) => language,
             LanguagePlan::Detect(candidates) => {
@@ -117,6 +118,12 @@ impl TranscriptionEngine for WhisperEngine {
                 select_detected_language(&candidates, &probabilities)
             }
         };
+        tracing::info!(
+            configured = ?languages,
+            language,
+            detected = detecting,
+            "Whisper language"
+        );
 
         let mut params = FullParams::greedy();
         params.set_language(language);

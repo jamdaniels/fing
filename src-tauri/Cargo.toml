@@ -79,3 +79,8 @@ panic = "abort"
 # fing-whisper-sys always builds whisper.cpp as CMake Release (see its build.rs):
 # a RelWithDebInfo build breaks the MSVC static CRT link (/MD vs /MT) and a
 # debug ggml is far too slow to transcribe with.
+
+# Model activation hashes the whole model file (SHA-256, ~0.5 GB); unoptimized
+# sha2 makes that take seconds in dev builds.
+[profile.dev.package.sha2]
+opt-level = 3
