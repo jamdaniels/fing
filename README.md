@@ -6,7 +6,7 @@
 
 ![Fing](./assets/screenshot.webp)
 
-Hold your hotkey, speak, release — transcribed text is pasted instantly. Your voice never leaves your device.
+Hold your hotkey, speak, release — transcribed text is pasted instantly. For longer thoughts, double-tap it to go hands-free and tap again when you're done. Your voice never leaves your device.
 
 ## Why Fing
 
@@ -22,6 +22,7 @@ Hold your hotkey, speak, release — transcribed text is pasted instantly. Your 
 - **Multi-language transcription** — [99 languages](./src/lib/languages.ts) with auto-detection
 - **Localized UI** — Available in English and German
 - **Custom hotkey** — Bind any key or modifier combination
+- **Hands-free mode** — Double-tap the hotkey to keep recording without holding it
 - **Dictionary** — Add custom words to improve recognition
 - **Local history** — Optional transcripts that are searchable and auto-cleared after 30 days
 - **Copy & reuse** — One-click copy of any previous transcription

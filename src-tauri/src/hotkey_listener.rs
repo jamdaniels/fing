@@ -13,8 +13,12 @@
 //! - The backend runs under a supervisor that restarts it whenever it exits.
 //! - Backends re-enable / reinstall their hook after wake and on a schedule.
 //!
-//! Escape is never part of a hotkey; while the hotkey is held it cancels the
-//! recording instead of stopping it, so nothing is transcribed or pasted.
+//! Presses and releases go through `gesture`, which tells hold-to-talk apart
+//! from a double-tap into hands-free recording.
+//!
+//! Escape is never part of a hotkey; while recording (hotkey held or
+//! hands-free) it cancels the recording instead of stopping it, so nothing is
+//! transcribed or pasted.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -22,7 +26,11 @@ use tauri::AppHandle;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::hotkey_config::{get_hotkey_config, HotkeyConfig};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use gesture::{Action, Gesture};
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod gesture;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
@@ -63,10 +71,14 @@ const SLEEP_DETECTION_THRESHOLD_NS: u64 = 2_000_000_000;
 /// Suppress global hotkey activation (e.g. while the rebind modal is open).
 /// Pass-through still occurs so the modal can capture the keys; the listener
 /// just stops dispatching press/release events and clears any in-flight state.
+/// Any recording is cancelled too, since its stop press could no longer reach
+/// it, and the hands-free gesture starts over.
 pub fn set_suppressed(suppressed: bool) {
     SUPPRESSED.store(suppressed, Ordering::SeqCst);
     if suppressed {
         reset_listener_state();
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        dispatch_hotkey_event(HotkeyEvent::Cancel);
     }
 }
 
@@ -75,7 +87,7 @@ static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 static HOTKEY_STATE: Lazy<Mutex<HotkeyState>> = Lazy::new(|| Mutex::new(HotkeyState::default()));
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-static HOTKEY_EVENT_TX: OnceLock<mpsc::Sender<HotkeyEvent>> = OnceLock::new();
+static HOTKEY_EVENT_TX: OnceLock<mpsc::Sender<TimedHotkeyEvent>> = OnceLock::new();
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,6 +95,15 @@ enum HotkeyEvent {
     Press,
     Release,
     Cancel,
+    SystemWake,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[derive(Clone, Copy, Debug)]
+struct TimedHotkeyEvent {
+    event: HotkeyEvent,
+    /// When the key event happened, before any queueing.
+    at: Instant,
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -116,22 +137,6 @@ pub fn start_hotkey_listener(app: AppHandle) -> Result<(), String> {
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn start_hotkey_listener_impl(app: AppHandle) -> Result<(), String> {
     let _ = APP_HANDLE.set(app);
-
-    HOTKEY_EVENT_TX.get_or_init(|| {
-        let (tx, rx) = mpsc::channel::<HotkeyEvent>();
-
-        std::thread::spawn(move || {
-            while let Ok(event) = rx.recv() {
-                let Some(app) = APP_HANDLE.get() else {
-                    continue;
-                };
-
-                run_hotkey_event(app, event);
-            }
-        });
-
-        tx
-    });
 
     if !LISTENER_STARTED.swap(true, Ordering::SeqCst) {
         // The supervisor waits for permission itself, so the hotkey starts
@@ -200,29 +205,105 @@ fn supervise_backend() {
     }
 }
 
+/// Hotkey presses and releases seen by the focused main window's webview,
+/// which on Windows (WebView2) never reach the low-level hook.
+pub fn dispatch_frontend_hotkey(app: &AppHandle, press: bool) {
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        let _ = APP_HANDLE.set(app.clone());
+        dispatch_hotkey_event(if press {
+            HotkeyEvent::Press
+        } else {
+            HotkeyEvent::Release
+        });
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        if press {
+            crate::hotkey::on_key_down(app);
+        } else {
+            crate::hotkey::on_key_up(app);
+        }
+    }
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn run_hotkey_event(app: &AppHandle, event: HotkeyEvent) {
-    match event {
-        HotkeyEvent::Press => crate::hotkey::on_key_down(app),
-        HotkeyEvent::Release => crate::hotkey::on_key_up(app),
-        HotkeyEvent::Cancel => crate::hotkey::on_key_cancel(app),
+fn hotkey_event_sender() -> &'static mpsc::Sender<TimedHotkeyEvent> {
+    HOTKEY_EVENT_TX.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<TimedHotkeyEvent>();
+        std::thread::spawn(move || run_hotkey_worker(rx));
+        tx
+    })
+}
+
+/// Feed hotkey events through the gesture one at a time, in the order they
+/// happened, and run the recording actions it produces. Recording calls can
+/// block (opening the microphone), so they run here, off the hook thread.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn run_hotkey_worker(rx: mpsc::Receiver<TimedHotkeyEvent>) {
+    let mut gesture = Gesture::default();
+
+    loop {
+        let received = match gesture.deadline() {
+            Some(deadline) => rx.recv_timeout(deadline.saturating_duration_since(Instant::now())),
+            None => rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+        };
+
+        let action = match received {
+            Ok(TimedHotkeyEvent { event, at }) => {
+                // A pending tap whose window ended before this event stops
+                // first, even if the worker was too busy to notice in time.
+                if let Some(action) = gesture.expire(at) {
+                    run_action(action);
+                }
+                match event {
+                    HotkeyEvent::Press => gesture.press(at, crate::hotkey::recording_session),
+                    HotkeyEvent::Release => gesture.release(at),
+                    HotkeyEvent::Cancel => Some(gesture.cancel()),
+                    HotkeyEvent::SystemWake => gesture.system_woke(),
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => gesture.expire(Instant::now()),
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+
+        if let Some(action) = action {
+            run_action(action);
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn run_action(action: Action) {
+    let Some(app) = APP_HANDLE.get() else {
+        return;
+    };
+
+    match action {
+        Action::Start => crate::hotkey::on_key_down(app),
+        Action::Stop => crate::hotkey::on_key_up(app),
+        Action::Cancel => crate::hotkey::on_key_cancel(app),
     }
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn dispatch_hotkey_event(event: HotkeyEvent) {
-    let Some(tx) = HOTKEY_EVENT_TX.get() else {
-        if let Some(app) = APP_HANDLE.get() {
-            run_hotkey_event(app, event);
-        }
-        return;
+    let timed = TimedHotkeyEvent {
+        event,
+        at: Instant::now(),
     };
 
-    if let Err(error) = tx.send(event) {
+    if let Err(error) = hotkey_event_sender().send(timed) {
+        // Without the worker there is no gesture: plain hold-to-talk.
         tracing::warn!("Hotkey worker unavailable: {}", error);
-        if let Some(app) = APP_HANDLE.get() {
-            run_hotkey_event(app, event);
-        }
+        let action = match event {
+            HotkeyEvent::Press => Action::Start,
+            HotkeyEvent::Release => Action::Stop,
+            HotkeyEvent::Cancel => Action::Cancel,
+            HotkeyEvent::SystemWake => return,
+        };
+        run_action(action);
     }
 }
 
@@ -254,7 +335,13 @@ pub(crate) fn handle_key_event(event: KeyEvent) -> bool {
 
     let test_mode = onboarding_test_mode();
     let outcome = lock_hotkey_state().on_event(event, &config, backend::is_key_down, || {
-        test_mode || crate::state::get_state().can_record()
+        if crate::hotkey::is_recording_active() {
+            Availability::Recording
+        } else if test_mode || crate::state::get_state().can_record() {
+            Availability::Ready
+        } else {
+            Availability::Unavailable
+        }
     });
 
     if let Some(hotkey_event) = outcome.dispatch {
@@ -269,6 +356,9 @@ pub(crate) fn handle_key_event(event: KeyEvent) -> bool {
 pub(crate) fn handle_system_wake() {
     tracing::info!("System wake detected, resyncing hotkey listener");
     resync_listener_state();
+    // Resync only stops a recording whose held key was released; a
+    // hands-free recording has none, so the gesture stops it separately.
+    dispatch_hotkey_event(HotkeyEvent::SystemWake);
 }
 
 /// Detects system sleep by comparing a clock that runs during sleep with
@@ -307,6 +397,19 @@ pub(crate) fn is_idle() -> bool {
     !state.hotkey_active && state.pressed_keys.is_empty()
 }
 
+/// What a hotkey press or Escape can act on when it happens.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Availability {
+    /// Busy (e.g. transcribing) or not set up: presses pass through.
+    Unavailable,
+    /// Idle: a hotkey press starts recording.
+    Ready,
+    /// Recording: a hotkey press goes to the gesture (e.g. to stop
+    /// hands-free) and Escape cancels, even when the hotkey isn't held.
+    Recording,
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 #[derive(Debug, Default, PartialEq, Eq)]
 struct EventOutcome {
@@ -343,10 +446,10 @@ impl HotkeyState {
         event: KeyEvent,
         config: &HotkeyConfig,
         is_key_down: impl Fn(u32) -> bool,
-        can_activate: impl FnOnce() -> bool,
+        availability: impl FnOnce() -> Availability,
     ) -> EventOutcome {
         if event.token == ESCAPE_TOKEN {
-            return self.on_escape(event);
+            return self.on_escape(event, availability);
         }
 
         if event.is_press {
@@ -367,7 +470,9 @@ impl HotkeyState {
                 return EventOutcome::swallowed(None);
             }
 
-            if hotkey_matches(&self.pressed_keys, config) && can_activate() {
+            if hotkey_matches(&self.pressed_keys, config)
+                && availability() != Availability::Unavailable
+            {
                 self.hotkey_active = true;
                 return EventOutcome::swallowed(Some(HotkeyEvent::Press));
             }
@@ -391,10 +496,14 @@ impl HotkeyState {
         EventOutcome::swallowed(dispatch)
     }
 
-    /// Escape is never tracked as a held key. Pressed while the hotkey is
-    /// active, it ends the hotkey without a release so the recording is
-    /// discarded; the remaining hotkey key-ups then dispatch nothing.
-    fn on_escape(&mut self, event: KeyEvent) -> EventOutcome {
+    /// Escape is never tracked as a held key. Pressed while recording, it
+    /// cancels so the recording is discarded; if the hotkey is held, it ends
+    /// without a release and the remaining hotkey key-ups dispatch nothing.
+    fn on_escape(
+        &mut self,
+        event: KeyEvent,
+        availability: impl FnOnce() -> Availability,
+    ) -> EventOutcome {
         if !event.is_press {
             return EventOutcome {
                 dispatch: None,
@@ -402,12 +511,13 @@ impl HotkeyState {
             };
         }
 
-        if self.hotkey_active {
+        if self.hotkey_active || availability() == Availability::Recording {
             self.hotkey_active = false;
             self.swallowed_escape = Some(event.code);
             return EventOutcome::swallowed(Some(HotkeyEvent::Cancel));
         }
 
+        // Auto-repeat of an Escape that already cancelled.
         EventOutcome {
             dispatch: None,
             swallow: self.swallowed_escape.is_some(),
@@ -566,6 +676,18 @@ mod tests {
         move |key_code| held.iter().any(|token| code(token) == key_code)
     }
 
+    fn ready() -> Availability {
+        Availability::Ready
+    }
+
+    fn recording() -> Availability {
+        Availability::Recording
+    }
+
+    fn unavailable() -> Availability {
+        Availability::Unavailable
+    }
+
     #[test]
     fn matches_exact_key_sets() {
         let config = config(&["ControlLeft", "KeyK"]);
@@ -599,11 +721,11 @@ mod tests {
         let config = config(&["F9"]);
         let mut state = HotkeyState::default();
 
-        let outcome = state.on_event(press("F9"), &config, os_holding(&[]), || true);
+        let outcome = state.on_event(press("F9"), &config, os_holding(&[]), ready);
         assert_eq!(outcome.dispatch, Some(HotkeyEvent::Press));
         assert!(outcome.swallow);
 
-        let outcome = state.on_event(release("F9"), &config, os_holding(&[]), || true);
+        let outcome = state.on_event(release("F9"), &config, os_holding(&[]), ready);
         assert_eq!(outcome.dispatch, Some(HotkeyEvent::Release));
         assert!(state.pressed_keys.is_empty());
     }
@@ -613,7 +735,7 @@ mod tests {
         let config = config(&["F9"]);
         let mut state = HotkeyState::default();
 
-        let outcome = state.on_event(press("F9"), &config, os_holding(&[]), || false);
+        let outcome = state.on_event(press("F9"), &config, os_holding(&[]), unavailable);
         assert_eq!(outcome, EventOutcome::default());
         assert!(!state.hotkey_active);
     }
@@ -623,10 +745,10 @@ mod tests {
         // Win+L / Ctrl+Cmd+Q: the lock screen swallows both key-ups.
         let config = config(&["F9"]);
         let mut state = HotkeyState::default();
-        state.on_event(press("MetaLeft"), &config, os_holding(&[]), || true);
-        state.on_event(press("KeyL"), &config, os_holding(&["MetaLeft"]), || true);
+        state.on_event(press("MetaLeft"), &config, os_holding(&[]), ready);
+        state.on_event(press("KeyL"), &config, os_holding(&["MetaLeft"]), ready);
 
-        let outcome = state.on_event(press("F9"), &config, os_holding(&[]), || true);
+        let outcome = state.on_event(press("F9"), &config, os_holding(&[]), ready);
 
         assert_eq!(outcome.dispatch, Some(HotkeyEvent::Press));
         assert_eq!(state.pressed_keys, pressed(&["F9"]));
@@ -636,14 +758,9 @@ mod tests {
     fn keeps_physically_held_modifiers() {
         let config = config(&["ControlLeft", "Space"]);
         let mut state = HotkeyState::default();
-        state.on_event(press("ControlLeft"), &config, os_holding(&[]), || true);
+        state.on_event(press("ControlLeft"), &config, os_holding(&[]), ready);
 
-        let outcome = state.on_event(
-            press("Space"),
-            &config,
-            os_holding(&["ControlLeft"]),
-            || true,
-        );
+        let outcome = state.on_event(press("Space"), &config, os_holding(&["ControlLeft"]), ready);
 
         assert_eq!(outcome.dispatch, Some(HotkeyEvent::Press));
     }
@@ -652,10 +769,10 @@ mod tests {
     fn missed_hotkey_release_stops_recording_on_next_press() {
         let config = config(&["F9"]);
         let mut state = HotkeyState::default();
-        state.on_event(press("F9"), &config, os_holding(&[]), || true);
+        state.on_event(press("F9"), &config, os_holding(&[]), ready);
 
         // F9's key-up was lost; the next key press must not be swallowed.
-        let outcome = state.on_event(press("KeyA"), &config, os_holding(&[]), || true);
+        let outcome = state.on_event(press("KeyA"), &config, os_holding(&[]), ready);
 
         assert_eq!(outcome.dispatch, Some(HotkeyEvent::Release));
         assert!(!outcome.swallow);
@@ -666,9 +783,9 @@ mod tests {
     fn other_keys_are_swallowed_while_hotkey_is_held() {
         let config = config(&["F9"]);
         let mut state = HotkeyState::default();
-        state.on_event(press("F9"), &config, os_holding(&[]), || true);
+        state.on_event(press("F9"), &config, os_holding(&[]), ready);
 
-        let outcome = state.on_event(press("KeyA"), &config, os_holding(&["F9"]), || true);
+        let outcome = state.on_event(press("KeyA"), &config, os_holding(&["F9"]), ready);
 
         assert_eq!(outcome.dispatch, None);
         assert!(outcome.swallow);
@@ -679,13 +796,13 @@ mod tests {
     fn escape_cancels_active_hotkey_and_is_swallowed() {
         let config = config(&["MetaRight"]);
         let mut state = HotkeyState::default();
-        state.on_event(press("MetaRight"), &config, os_holding(&[]), || true);
+        state.on_event(press("MetaRight"), &config, os_holding(&[]), ready);
 
         let outcome = state.on_event(
             press(ESCAPE_TOKEN),
             &config,
             os_holding(&["MetaRight"]),
-            || true,
+            ready,
         );
         assert_eq!(outcome.dispatch, Some(HotkeyEvent::Cancel));
         assert!(outcome.swallow);
@@ -696,21 +813,21 @@ mod tests {
             press(ESCAPE_TOKEN),
             &config,
             os_holding(&["MetaRight"]),
-            || true,
+            ready,
         );
         assert_eq!(outcome.dispatch, None);
         assert!(outcome.swallow);
-        let outcome = state.on_event(release(ESCAPE_TOKEN), &config, os_holding(&[]), || true);
+        let outcome = state.on_event(release(ESCAPE_TOKEN), &config, os_holding(&[]), ready);
         assert_eq!(outcome.dispatch, None);
         assert!(outcome.swallow);
 
         // Releasing the hotkey afterwards must not start a transcription.
-        let outcome = state.on_event(release("MetaRight"), &config, os_holding(&[]), || true);
+        let outcome = state.on_event(release("MetaRight"), &config, os_holding(&[]), ready);
         assert_eq!(outcome, EventOutcome::default());
         assert!(state.pressed_keys.is_empty());
 
         // The next hotkey press records again.
-        let outcome = state.on_event(press("MetaRight"), &config, os_holding(&[]), || true);
+        let outcome = state.on_event(press("MetaRight"), &config, os_holding(&[]), ready);
         assert_eq!(outcome.dispatch, Some(HotkeyEvent::Press));
     }
 
@@ -718,18 +835,18 @@ mod tests {
     fn missed_escape_release_stops_swallowing_escape() {
         let config = config(&["MetaRight"]);
         let mut state = HotkeyState::default();
-        state.on_event(press("MetaRight"), &config, os_holding(&[]), || true);
+        state.on_event(press("MetaRight"), &config, os_holding(&[]), ready);
         state.on_event(
             press(ESCAPE_TOKEN),
             &config,
             os_holding(&["MetaRight"]),
-            || true,
+            ready,
         );
 
         // Escape's key-up was lost; the next resync sees it is no longer held.
         state.resync(Some(&config), os_holding(&[]));
 
-        let outcome = state.on_event(press(ESCAPE_TOKEN), &config, os_holding(&[]), || true);
+        let outcome = state.on_event(press(ESCAPE_TOKEN), &config, os_holding(&[]), ready);
         assert_eq!(outcome, EventOutcome::default());
     }
 
@@ -738,24 +855,58 @@ mod tests {
         let config = config(&["MetaRight"]);
         let mut state = HotkeyState::default();
 
-        let outcome = state.on_event(press(ESCAPE_TOKEN), &config, os_holding(&[]), || true);
+        let outcome = state.on_event(press(ESCAPE_TOKEN), &config, os_holding(&[]), ready);
         assert_eq!(outcome, EventOutcome::default());
-        let outcome = state.on_event(release(ESCAPE_TOKEN), &config, os_holding(&[]), || true);
+        let outcome = state.on_event(release(ESCAPE_TOKEN), &config, os_holding(&[]), ready);
         assert_eq!(outcome, EventOutcome::default());
         assert!(state.pressed_keys.is_empty());
+    }
+
+    #[test]
+    fn hotkey_press_reaches_hands_free_recording() {
+        let config = config(&["F9"]);
+        let mut state = HotkeyState::default();
+
+        let outcome = state.on_event(press("F9"), &config, os_holding(&[]), recording);
+        assert_eq!(outcome.dispatch, Some(HotkeyEvent::Press));
+        assert!(outcome.swallow);
+
+        let outcome = state.on_event(release("F9"), &config, os_holding(&[]), recording);
+        assert_eq!(outcome.dispatch, Some(HotkeyEvent::Release));
+    }
+
+    #[test]
+    fn escape_cancels_hands_free_recording_and_is_swallowed() {
+        let config = config(&["F9"]);
+        let mut state = HotkeyState::default();
+
+        let outcome = state.on_event(press(ESCAPE_TOKEN), &config, os_holding(&[]), recording);
+        assert_eq!(outcome.dispatch, Some(HotkeyEvent::Cancel));
+        assert!(outcome.swallow);
+
+        // Once the recording is cancelled, auto-repeat and key-up are
+        // swallowed too.
+        let outcome = state.on_event(press(ESCAPE_TOKEN), &config, os_holding(&[]), ready);
+        assert_eq!(outcome, EventOutcome::swallowed(None));
+        let outcome = state.on_event(release(ESCAPE_TOKEN), &config, os_holding(&[]), ready);
+        assert_eq!(outcome, EventOutcome::swallowed(None));
+
+        // Afterwards Escape belongs to the focused app again.
+        let outcome = state.on_event(press(ESCAPE_TOKEN), &config, os_holding(&[]), ready);
+        assert_eq!(outcome, EventOutcome::default());
     }
 
     #[test]
     fn held_escape_does_not_block_the_hotkey() {
         let config = config(&["MetaRight"]);
         let mut state = HotkeyState::default();
-        state.on_event(press(ESCAPE_TOKEN), &config, os_holding(&[]), || true);
+        state.on_event(press(ESCAPE_TOKEN), &config, os_holding(&[]), ready);
 
         let outcome = state.on_event(
             press("MetaRight"),
             &config,
             os_holding(&[ESCAPE_TOKEN]),
-            || true,
+            ready,
         );
         assert_eq!(outcome.dispatch, Some(HotkeyEvent::Press));
     }
@@ -764,13 +915,8 @@ mod tests {
     fn resync_releases_hotkey_only_when_no_longer_held() {
         let config = config(&["ControlLeft", "Space"]);
         let mut state = HotkeyState::default();
-        state.on_event(press("ControlLeft"), &config, os_holding(&[]), || true);
-        state.on_event(
-            press("Space"),
-            &config,
-            os_holding(&["ControlLeft"]),
-            || true,
-        );
+        state.on_event(press("ControlLeft"), &config, os_holding(&[]), ready);
+        state.on_event(press("Space"), &config, os_holding(&["ControlLeft"]), ready);
 
         assert!(!state.resync(Some(&config), os_holding(&["ControlLeft", "Space"])));
         assert!(state.hotkey_active);
@@ -784,7 +930,7 @@ mod tests {
     fn resync_without_config_clears_state() {
         let config = config(&["F9"]);
         let mut state = HotkeyState::default();
-        state.on_event(press("F9"), &config, os_holding(&[]), || true);
+        state.on_event(press("F9"), &config, os_holding(&[]), ready);
 
         assert!(!state.resync(None, os_holding(&["F9"])));
         assert!(!state.hotkey_active);

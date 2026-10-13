@@ -8,7 +8,7 @@
     "updateAvailable": "Update verfügbar"
   },
   "indicator": {
-    "recordingLimitReached": "Aufnahmelimit erreicht (2 Min.)",
+    "recordingLimitReached": "Aufnahmelimit erreicht (5 Min.)",
     "microphoneUnavailable": "Mikrofon nicht verfügbar",
     "usingMicrophone": "Verwende {name}",
     "modelLoadFailed": "Modell ließ sich nicht laden",

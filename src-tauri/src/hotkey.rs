@@ -16,12 +16,13 @@ use crate::transcribe::{
     init_transcriber, is_transcriber_loaded, transcribe_audio, unload_transcriber,
 };
 
-// Maximum recording duration (2 minutes) in milliseconds
-const MAX_RECORDING_DURATION_MS: u64 = 2 * 60 * 1000;
+// Maximum recording duration; the audio buffer is sized for the same limit.
+const MAX_RECORDING_DURATION: Duration =
+    Duration::from_secs(crate::audio::MAX_RECORDING_DURATION_SECS as u64);
 const LAZY_MODEL_IDLE_UNLOAD_SECS: u64 = 10;
 
-// Track if key is currently held
-static KEY_HELD: AtomicBool = AtomicBool::new(false);
+// Whether a recording is in progress (hotkey held or hands-free)
+static RECORDING_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 // Recording session ID to track auto-stop timer validity
 static RECORDING_SESSION_ID: AtomicU64 = AtomicU64::new(0);
@@ -63,6 +64,15 @@ enum AudioCommand {
     },
     /// Stop capturing and drop the audio without resampling it.
     Discard,
+}
+
+/// The current recording as seen by the hotkey gesture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecordingSession {
+    Inactive,
+    Live,
+    /// Recording, but the microphone failed to open.
+    Failed,
 }
 
 #[derive(Clone, Debug)]
@@ -179,6 +189,27 @@ fn current_recording_start_status() -> RecordingStartStatus {
     start_status.clone()
 }
 
+/// Whether a recording is in progress, from its start until it stops or is
+/// cancelled.
+pub(crate) fn is_recording_active() -> bool {
+    RECORDING_ACTIVE.load(Ordering::SeqCst)
+}
+
+pub(crate) fn recording_session() -> RecordingSession {
+    let _lifecycle_guard = lock_recording_lifecycle();
+    if !RECORDING_ACTIVE.load(Ordering::SeqCst) {
+        return RecordingSession::Inactive;
+    }
+    let session_id = RECORDING_SESSION_ID.load(Ordering::SeqCst);
+    match current_recording_start_status() {
+        RecordingStartStatus::Failed {
+            session_id: failed_session_id,
+            ..
+        } if failed_session_id == session_id => RecordingSession::Failed,
+        _ => RecordingSession::Live,
+    }
+}
+
 fn lock_recording_lifecycle() -> MutexGuard<'static, ()> {
     match RECORDING_LIFECYCLE.lock() {
         Ok(guard) => guard,
@@ -278,7 +309,7 @@ fn schedule_lazy_unload_if_idle() {
         if LAZY_ACTIVITY_TOKEN.load(Ordering::SeqCst) != token {
             return;
         }
-        if KEY_HELD.load(Ordering::SeqCst) {
+        if RECORDING_ACTIVE.load(Ordering::SeqCst) {
             return;
         }
         if crate::state::get_state() != crate::state::AppState::Ready {
@@ -298,12 +329,12 @@ fn schedule_lazy_unload_if_idle() {
     });
 }
 
-/// Called when F8 is pressed down
+/// Start recording (hotkey pressed)
 pub fn on_key_down(app: &AppHandle) {
     let _lifecycle_guard = lock_recording_lifecycle();
     let is_test_mode = ONBOARDING_TEST_MODE.load(Ordering::SeqCst);
 
-    if KEY_HELD.load(Ordering::SeqCst) {
+    if RECORDING_ACTIVE.load(Ordering::SeqCst) {
         return;
     }
 
@@ -342,7 +373,7 @@ pub fn on_key_down(app: &AppHandle) {
         }
         app.emit("app-state-changed", "recording").ok();
     }
-    KEY_HELD.store(true, Ordering::SeqCst);
+    RECORDING_ACTIVE.store(true, Ordering::SeqCst);
 
     // Show recording indicator
     crate::indicator::show_recording(app).ok();
@@ -359,17 +390,20 @@ pub fn on_key_down(app: &AppHandle) {
         *start = Some(Instant::now());
     }
 
-    // Increment session ID and start auto-stop timer (2 min max)
+    // Increment session ID and start auto-stop timer
     let session_id = RECORDING_SESSION_ID.fetch_add(1, Ordering::SeqCst) + 1;
     set_recording_start_status(RecordingStartStatus::Idle);
     let app_for_timer = app.clone();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(MAX_RECORDING_DURATION_MS)).await;
+        tokio::time::sleep(MAX_RECORDING_DURATION).await;
 
         // Only trigger auto-stop if this session is still active
         let current_session = RECORDING_SESSION_ID.load(Ordering::SeqCst);
-        if current_session == session_id && KEY_HELD.load(Ordering::SeqCst) {
-            tracing::info!("Auto-stopping recording after 2 minutes");
+        if current_session == session_id && RECORDING_ACTIVE.load(Ordering::SeqCst) {
+            tracing::info!(
+                "Auto-stopping recording after {} seconds",
+                MAX_RECORDING_DURATION.as_secs()
+            );
             notify(
                 &app_for_timer,
                 NoticeKind::Info,
@@ -435,12 +469,12 @@ fn after_microphone_opened(app: &AppHandle, choice: MicChoice, opened: OpenedMic
     }
 }
 
-/// Called when F8 is released
+/// Stop recording and transcribe (hotkey released, or tapped in hands-free)
 pub fn on_key_up(app: &AppHandle) {
     let _lifecycle_guard = lock_recording_lifecycle();
     let is_test_mode = ONBOARDING_TEST_MODE.load(Ordering::SeqCst);
 
-    if !KEY_HELD.swap(false, Ordering::SeqCst) {
+    if !RECORDING_ACTIVE.swap(false, Ordering::SeqCst) {
         return;
     }
 
@@ -653,13 +687,13 @@ pub fn on_key_up(app: &AppHandle) {
     });
 }
 
-/// Called when Escape is pressed while the hotkey is held: stop recording and
-/// discard the audio, so nothing is transcribed, pasted or saved.
+/// Called when Escape is pressed while recording: stop recording and discard
+/// the audio, so nothing is transcribed, pasted or saved.
 pub fn on_key_cancel(app: &AppHandle) {
     let _lifecycle_guard = lock_recording_lifecycle();
     let is_test_mode = ONBOARDING_TEST_MODE.load(Ordering::SeqCst);
 
-    if !KEY_HELD.swap(false, Ordering::SeqCst) {
+    if !RECORDING_ACTIVE.swap(false, Ordering::SeqCst) {
         return;
     }
 

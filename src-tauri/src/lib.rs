@@ -30,7 +30,7 @@ use audio::{AudioCapture, AudioDevice, MicrophoneTest};
 use state::AppState;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
-    mpsc, Mutex, OnceLock,
+    Mutex,
 };
 #[cfg(target_os = "macos")]
 use tauri::ActivationPolicy;
@@ -67,30 +67,6 @@ pub struct MicTestStartResult {
     pub requested_device: Option<String>,
     pub actual_device: String,
     pub device_matched: bool,
-}
-
-enum FrontendHotkeyCommand {
-    Press(tauri::AppHandle),
-    Release(tauri::AppHandle),
-}
-
-static FRONTEND_HOTKEY_TX: OnceLock<mpsc::Sender<FrontendHotkeyCommand>> = OnceLock::new();
-
-fn frontend_hotkey_sender() -> &'static mpsc::Sender<FrontendHotkeyCommand> {
-    FRONTEND_HOTKEY_TX.get_or_init(|| {
-        let (tx, rx) = mpsc::channel::<FrontendHotkeyCommand>();
-
-        std::thread::spawn(move || {
-            while let Ok(command) = rx.recv() {
-                match command {
-                    FrontendHotkeyCommand::Press(app) => hotkey::on_key_down(&app),
-                    FrontendHotkeyCommand::Release(app) => hotkey::on_key_up(&app),
-                }
-            }
-        });
-
-        tx
-    })
 }
 
 #[tauri::command]
@@ -711,21 +687,16 @@ fn apply_saved_hotkey(app: &tauri::AppHandle, hotkey: &str, warning: &str) {
 
 // Frontend hotkey handling for Windows WebView2 workaround
 // WebView2 doesn't properly propagate keyboard events to WH_KEYBOARD_LL hooks
-// so we need to handle hotkeys from JavaScript when the window is focused
+// so we need to handle hotkeys from JavaScript when the window is focused.
+// They share the global listener's worker, so double-tap works there too.
 #[tauri::command]
 fn hotkey_press(app: tauri::AppHandle) {
-    if let Err(e) = frontend_hotkey_sender().send(FrontendHotkeyCommand::Press(app.clone())) {
-        tracing::warn!("Frontend hotkey press worker unavailable: {}", e);
-        hotkey::on_key_down(&app);
-    }
+    hotkey_listener::dispatch_frontend_hotkey(&app, true);
 }
 
 #[tauri::command]
 fn hotkey_release(app: tauri::AppHandle) {
-    if let Err(e) = frontend_hotkey_sender().send(FrontendHotkeyCommand::Release(app.clone())) {
-        tracing::warn!("Frontend hotkey release worker unavailable: {}", e);
-        hotkey::on_key_up(&app);
-    }
+    hotkey_listener::dispatch_frontend_hotkey(&app, false);
 }
 
 #[tauri::command]

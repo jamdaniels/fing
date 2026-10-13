@@ -10,12 +10,10 @@ use std::sync::{Arc, Mutex};
 
 static OVERFLOW_LOGGED: AtomicBool = AtomicBool::new(false);
 
-/// Maximum recording duration in seconds (2 minutes).
-pub const MAX_RECORDING_DURATION_SECS: u32 = 120;
+/// Maximum recording duration in seconds (5 minutes).
+pub const MAX_RECORDING_DURATION_SECS: u32 = 300;
 /// Whisper model input sample rate.
 pub const WHISPER_SAMPLE_RATE: u32 = 16000;
-/// Initial audio buffer capacity before the input device sample rate is known.
-const INITIAL_BUFFER_CAPACITY: usize = (MAX_RECORDING_DURATION_SECS * WHISPER_SAMPLE_RATE) as usize;
 
 fn max_buffer_size_for_sample_rate(sample_rate: u32) -> usize {
     MAX_RECORDING_DURATION_SECS as usize * sample_rate as usize
@@ -129,7 +127,8 @@ impl AudioCapture {
     pub fn new() -> Self {
         Self {
             stream: None,
-            buffer: Arc::new(Mutex::new(Vec::with_capacity(INITIAL_BUFFER_CAPACITY))),
+            // `init_capture` reserves room for the device's sample rate.
+            buffer: Arc::new(Mutex::new(Vec::new())),
             native_sample_rate: WHISPER_SAMPLE_RATE,
             is_recording: false,
             live_session: Arc::new(AtomicU64::new(0)),

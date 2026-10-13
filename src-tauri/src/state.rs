@@ -10,7 +10,7 @@ pub enum AppState {
     NeedsSetup,
     /// Idle and ready to record (hotkey active).
     Ready,
-    /// Actively capturing audio while hotkey is held.
+    /// Actively capturing audio (hotkey held, or hands-free after a double-tap).
     Recording,
     /// Transcribing captured audio.
     Processing,

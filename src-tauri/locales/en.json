@@ -8,7 +8,7 @@
     "updateAvailable": "Update Available"
   },
   "indicator": {
-    "recordingLimitReached": "Recording limit reached (2 min)",
+    "recordingLimitReached": "Recording limit reached (5 min)",
     "microphoneUnavailable": "Microphone unavailable",
     "usingMicrophone": "Using {name}",
     "modelLoadFailed": "Couldn't load model",
