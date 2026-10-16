@@ -7,6 +7,7 @@ use crate::model::{self, ModelEngine};
 use crate::whisper_cpp::{self, FullParams, ParakeetContext, WhisperContext};
 use once_cell::sync::Lazy;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -88,13 +89,27 @@ impl WhisperEngine {
     }
 }
 
-impl TranscriptionEngine for WhisperEngine {
-    fn transcribe(
+/// A language pinned by an earlier part of the recording, if it is still one
+/// of the detection candidates.
+fn pinned_candidate<'a>(candidates: &[&'a str], pinned: Option<&str>) -> Option<&'a str> {
+    let pinned = pinned?;
+    candidates
+        .iter()
+        .copied()
+        .find(|candidate| *candidate == pinned)
+}
+
+impl WhisperEngine {
+    /// One `whisper_full` pass. `pinned` replaces detection with the language
+    /// an earlier part of the same recording used. Returns the text and the
+    /// language used.
+    fn run(
         &self,
         audio: &[f32],
         languages: &[String],
         dictionary_prompt: Option<&str>,
-    ) -> Result<String, TranscribeError> {
+        pinned: Option<&str>,
+    ) -> Result<(String, String), TranscribeError> {
         if audio.is_empty() {
             return Err(TranscribeError::EmptyAudio);
         }
@@ -104,24 +119,33 @@ impl TranscriptionEngine for WhisperEngine {
         })?;
         let mut state = inference::create_state(&ctx, &self.device)?;
 
-        let detecting = matches!(language_plan(languages), LanguagePlan::Detect(_));
+        let mut detecting = false;
+        let mut pinning = false;
         let language = match language_plan(languages) {
             LanguagePlan::Explicit(language) => language,
-            LanguagePlan::Detect(candidates) => {
-                let threads = detection_threads();
-                state
-                    .pcm_to_mel(audio, threads)
-                    .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
-                let (_, probabilities) = state
-                    .lang_detect(0, threads)
-                    .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
-                select_detected_language(&candidates, &probabilities)
-            }
+            LanguagePlan::Detect(candidates) => match pinned_candidate(&candidates, pinned) {
+                Some(language) => {
+                    pinning = true;
+                    language
+                }
+                None => {
+                    detecting = true;
+                    let threads = detection_threads();
+                    state
+                        .pcm_to_mel(audio, threads)
+                        .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
+                    let (_, probabilities) = state
+                        .lang_detect(0, threads)
+                        .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
+                    select_detected_language(&candidates, &probabilities)
+                }
+            },
         };
         tracing::info!(
             configured = ?languages,
             language,
             detected = detecting,
+            pinned = pinning,
             "Whisper language"
         );
 
@@ -158,7 +182,30 @@ impl TranscriptionEngine for WhisperEngine {
             text.push_str(&state.segment_text_lossy(i));
         }
 
-        Ok(text.trim().to_string())
+        Ok((text.trim().to_string(), language.to_string()))
+    }
+}
+
+impl TranscriptionEngine for WhisperEngine {
+    fn transcribe(
+        &self,
+        audio: &[f32],
+        languages: &[String],
+        dictionary_prompt: Option<&str>,
+    ) -> Result<String, TranscribeError> {
+        self.run(audio, languages, dictionary_prompt, None)
+            .map(|(text, _)| text)
+    }
+
+    fn transcribe_part(
+        &self,
+        audio: &[f32],
+        languages: &[String],
+        dictionary_prompt: Option<&str>,
+        language: Option<&str>,
+    ) -> Result<(String, Option<String>), TranscribeError> {
+        self.run(audio, languages, dictionary_prompt, language)
+            .map(|(text, language)| (text, Some(language)))
     }
 }
 
@@ -214,6 +261,9 @@ struct LoadedEngine {
     kind: ModelEngine,
     model_path: PathBuf,
     load_ms: u128,
+    /// Distinct per load, so parts of one recording can tell whether they all
+    /// ran on the same engine.
+    generation: u64,
 }
 
 impl LoadedEngine {
@@ -231,6 +281,8 @@ fn engine_kind_for(path: &Path) -> ModelEngine {
         .unwrap_or(ModelEngine::Whisper)
 }
 
+static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
+
 fn load_engine(model_path: &str) -> Result<LoadedEngine, TranscribeError> {
     let path = PathBuf::from(model_path);
     let kind = engine_kind_for(&path);
@@ -244,6 +296,7 @@ fn load_engine(model_path: &str) -> Result<LoadedEngine, TranscribeError> {
         kind,
         model_path: path,
         load_ms: started.elapsed().as_millis(),
+        generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
     };
     tracing::info!(
         engine = ?loaded.kind,
@@ -303,20 +356,17 @@ pub fn unload_transcriber() {
     inference::mark_unloaded();
 }
 
-/// Transcribe audio using the global engine and log its timing (never the text).
-pub fn transcribe_audio(
+/// Run `transcribe` on the global engine and log its timing (never the text).
+fn timed<T>(
     audio: &[f32],
-    languages: &[String],
-    dictionary_prompt: Option<&str>,
-) -> Result<String, TranscribeError> {
+    transcribe: impl FnOnce(&LoadedEngine) -> Result<T, TranscribeError>,
+) -> Result<(T, u64), TranscribeError> {
     let Some(loaded) = get_loaded() else {
         return Err(TranscribeError::ModelNotFound);
     };
 
     let started = Instant::now();
-    let result = loaded
-        .engine
-        .transcribe(audio, languages, dictionary_prompt);
+    let result = transcribe(&loaded);
     tracing::info!(
         engine = ?loaded.kind,
         model = loaded.file_name(),
@@ -326,7 +376,51 @@ pub fn transcribe_audio(
         ok = result.is_ok(),
         "Transcription timing"
     );
-    result
+    result.map(|value| (value, loaded.generation))
+}
+
+/// Transcribe audio using the global engine and log its timing (never the text).
+pub fn transcribe_audio(
+    audio: &[f32],
+    languages: &[String],
+    dictionary_prompt: Option<&str>,
+) -> Result<String, TranscribeError> {
+    timed(audio, |loaded| {
+        loaded
+            .engine
+            .transcribe(audio, languages, dictionary_prompt)
+    })
+    .map(|(text, _)| text)
+}
+
+/// One part of a recording transcribed by [`transcribe_audio_part`].
+#[derive(Debug, Clone)]
+pub struct PartTranscript {
+    pub text: String,
+    /// Language the part used; pass it to the next part of the recording.
+    pub language: Option<String>,
+    /// Identifies the loaded engine; parts are only combined when it matches.
+    pub engine: u64,
+}
+
+/// Like [`transcribe_audio`], for one part of a longer recording: `language`
+/// pins the language an earlier part used.
+pub fn transcribe_audio_part(
+    audio: &[f32],
+    languages: &[String],
+    dictionary_prompt: Option<&str>,
+    language: Option<&str>,
+) -> Result<PartTranscript, TranscribeError> {
+    timed(audio, |loaded| {
+        loaded
+            .engine
+            .transcribe_part(audio, languages, dictionary_prompt, language)
+    })
+    .map(|((text, language), engine)| PartTranscript {
+        text,
+        language,
+        engine,
+    })
 }
 
 #[cfg(test)]

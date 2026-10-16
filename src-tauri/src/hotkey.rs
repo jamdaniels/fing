@@ -12,7 +12,7 @@ use crate::model::ModelVariant;
 use crate::paste::paste_text;
 use crate::settings::{load_settings, load_settings_sync};
 use crate::sounds;
-use crate::transcribe::{is_transcriber_loaded, transcribe_audio};
+use crate::transcribe::is_transcriber_loaded;
 
 // Maximum recording duration; the audio buffer is sized for the same limit.
 const MAX_RECORDING_DURATION: Duration =
@@ -40,14 +40,14 @@ pub(crate) fn is_onboarding_test_mode() -> bool {
 // Whisper hallucinates text on such input, so no engine gets to see it.
 const DIGITAL_SILENCE_PEAK: f32 = 0.001;
 
-fn is_digital_silence(samples: &[f32]) -> bool {
+pub(crate) fn is_digital_silence(samples: &[f32]) -> bool {
     samples
         .iter()
         .all(|sample| sample.abs() <= DIGITAL_SILENCE_PEAK)
 }
 
 /// Check if transcription contains only blank audio markers (no actual speech)
-fn is_blank_audio(text: &str) -> bool {
+pub(crate) fn is_blank_audio(text: &str) -> bool {
     let normalized = text.to_lowercase();
     matches!(
         normalized.as_str(),
@@ -437,6 +437,14 @@ pub fn on_key_down(app: &AppHandle) {
     match start_result {
         Ok((tap, opened)) => {
             set_recording_start_status(RecordingStartStatus::Started { session_id });
+            let dictionary_terms =
+                crate::dictionary::sanitize_terms(&settings_snapshot.dictionary_terms);
+            crate::pretranscribe::start(
+                tap.clone(),
+                session_id,
+                settings_snapshot.languages.clone(),
+                crate::dictionary::build_prompt(&dictionary_terms),
+            );
             crate::level_meter::start(app, tap);
             if let Some(cue) = start_cue {
                 cue.play();
@@ -483,6 +491,7 @@ pub fn on_key_up(app: &AppHandle) {
     if !RECORDING_ACTIVE.swap(false, Ordering::SeqCst) {
         return;
     }
+    let released = Instant::now();
 
     // Calculate recording duration
     let duration_ms = {
@@ -548,6 +557,8 @@ pub fn on_key_up(app: &AppHandle) {
 
     let duration_ms = duration_ms as i64;
 
+    // Stop pre-transcription first, so it starts no new chunk.
+    let pretranscription = crate::pretranscribe::stop(session_id);
     let cmd_tx = audio_cmd_tx("stop");
 
     // Spawn async task for transcription
@@ -561,6 +572,14 @@ pub fn on_key_up(app: &AppHandle) {
             }
         } else {
             Err("Audio thread unavailable".to_string())
+        };
+        // Wait for a chunk still in flight (the engine runs one call at a time).
+        let pretranscribed = match pretranscription {
+            Some(stopped) => tokio::task::spawn_blocking(move || stopped.wait())
+                .await
+                .ok()
+                .flatten(),
+            None => None,
         };
 
         // Get the audio buffer
@@ -613,11 +632,13 @@ pub fn on_key_up(app: &AppHandle) {
         let dictionary_terms = crate::dictionary::sanitize_terms(&settings.dictionary_terms);
         let dictionary_prompt = crate::dictionary::build_prompt(&dictionary_terms);
 
-        // Transcribe
-        let text = match transcribe_audio(
+        // Transcribe (only the tail when chunks were pre-transcribed)
+        let text = match crate::pretranscribe::transcribe_recording(
+            pretranscribed,
             &audio_buffer,
             &settings.languages,
             dictionary_prompt.as_deref(),
+            released,
         ) {
             Ok(t) => t,
             Err(e) => {
@@ -708,6 +729,7 @@ pub fn on_key_cancel(app: &AppHandle) {
     }
 
     tracing::info!("Recording cancelled by Escape");
+    crate::pretranscribe::cancel();
 
     let session_id = RECORDING_SESSION_ID.load(Ordering::SeqCst);
     let recording_started = matches!(

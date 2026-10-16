@@ -370,107 +370,7 @@ impl AudioCapture {
     }
 
     pub fn resample_to_16k(&self, buffer: Vec<f32>) -> Vec<f32> {
-        if self.native_sample_rate == WHISPER_SAMPLE_RATE {
-            return buffer;
-        }
-
-        if buffer.is_empty() {
-            return buffer;
-        }
-
-        // Use rubato for high-quality resampling
-        let chunk_size = 1024;
-        let mut resampler = match Fft::<f32>::new(
-            self.native_sample_rate as usize,
-            WHISPER_SAMPLE_RATE as usize,
-            chunk_size,
-            2,
-            1,
-            FixedSync::Input,
-        ) {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::error!("Failed to create resampler: {}", e);
-                // Fallback: simple linear interpolation
-                return Self::simple_resample(
-                    &buffer,
-                    self.native_sample_rate,
-                    WHISPER_SAMPLE_RATE,
-                );
-            }
-        };
-
-        let input_frames = buffer.len();
-        let input_adapter = match InterleavedSlice::new(&buffer, 1, input_frames) {
-            Ok(adapter) => adapter,
-            Err(e) => {
-                tracing::error!("Failed to create input adapter: {}", e);
-                return Self::simple_resample(
-                    &buffer,
-                    self.native_sample_rate,
-                    WHISPER_SAMPLE_RATE,
-                );
-            }
-        };
-
-        let mut output = vec![0.0f32; resampler.process_all_needed_output_len(input_frames)];
-        let output_capacity = output.len();
-        let process_result = {
-            let mut output_adapter =
-                match InterleavedSlice::new_mut(&mut output, 1, output_capacity) {
-                    Ok(adapter) => adapter,
-                    Err(e) => {
-                        tracing::error!("Failed to create output adapter: {}", e);
-                        return Self::simple_resample(
-                            &buffer,
-                            self.native_sample_rate,
-                            WHISPER_SAMPLE_RATE,
-                        );
-                    }
-                };
-
-            resampler.process_all_into_buffer(
-                &input_adapter,
-                &mut output_adapter,
-                input_frames,
-                None,
-            )
-        };
-
-        match process_result {
-            Ok((_, output_frames)) => {
-                output.truncate(output_frames);
-                output
-            }
-            Err(e) => {
-                tracing::error!("Resampling error: {}", e);
-                Self::simple_resample(&buffer, self.native_sample_rate, WHISPER_SAMPLE_RATE)
-            }
-        }
-    }
-
-    fn simple_resample(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
-        let ratio = from_rate as f64 / to_rate as f64;
-        let output_len = (input.len() as f64 / ratio) as usize;
-        let mut output = Vec::with_capacity(output_len);
-
-        for i in 0..output_len {
-            let src_idx = i as f64 * ratio;
-            let idx = src_idx as usize;
-            let frac = src_idx - idx as f64;
-
-            let sample = if idx + 1 < input.len() {
-                input[idx] * (1.0 - frac as f32) + input[idx + 1] * frac as f32
-            } else if idx < input.len() {
-                input[idx]
-            } else {
-                0.0
-            };
-
-            output.push(sample);
-        }
-
-        output
+        resample_to_16k(buffer, self.native_sample_rate)
     }
 
     /// Get current audio level during mic test and clear old samples
@@ -499,6 +399,94 @@ impl AudioCapture {
             is_receiving_audio,
         }
     }
+}
+
+/// Resample mono audio from `native_sample_rate` to 16 kHz (the stop path
+/// and pre-transcription chunks share this).
+pub fn resample_to_16k(buffer: Vec<f32>, native_sample_rate: u32) -> Vec<f32> {
+    if native_sample_rate == WHISPER_SAMPLE_RATE {
+        return buffer;
+    }
+
+    if buffer.is_empty() {
+        return buffer;
+    }
+
+    // Use rubato for high-quality resampling
+    let chunk_size = 1024;
+    let mut resampler = match Fft::<f32>::new(
+        native_sample_rate as usize,
+        WHISPER_SAMPLE_RATE as usize,
+        chunk_size,
+        2,
+        1,
+        FixedSync::Input,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("Failed to create resampler: {}", e);
+            // Fallback: simple linear interpolation
+            return simple_resample(&buffer, native_sample_rate, WHISPER_SAMPLE_RATE);
+        }
+    };
+
+    let input_frames = buffer.len();
+    let input_adapter = match InterleavedSlice::new(&buffer, 1, input_frames) {
+        Ok(adapter) => adapter,
+        Err(e) => {
+            tracing::error!("Failed to create input adapter: {}", e);
+            return simple_resample(&buffer, native_sample_rate, WHISPER_SAMPLE_RATE);
+        }
+    };
+
+    let mut output = vec![0.0f32; resampler.process_all_needed_output_len(input_frames)];
+    let output_capacity = output.len();
+    let process_result = {
+        let mut output_adapter = match InterleavedSlice::new_mut(&mut output, 1, output_capacity) {
+            Ok(adapter) => adapter,
+            Err(e) => {
+                tracing::error!("Failed to create output adapter: {}", e);
+                return simple_resample(&buffer, native_sample_rate, WHISPER_SAMPLE_RATE);
+            }
+        };
+
+        resampler.process_all_into_buffer(&input_adapter, &mut output_adapter, input_frames, None)
+    };
+
+    match process_result {
+        Ok((_, output_frames)) => {
+            output.truncate(output_frames);
+            output
+        }
+        Err(e) => {
+            tracing::error!("Resampling error: {}", e);
+            simple_resample(&buffer, native_sample_rate, WHISPER_SAMPLE_RATE)
+        }
+    }
+}
+
+fn simple_resample(input: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32> {
+    let ratio = from_rate as f64 / to_rate as f64;
+    let output_len = (input.len() as f64 / ratio) as usize;
+    let mut output = Vec::with_capacity(output_len);
+
+    for i in 0..output_len {
+        let src_idx = i as f64 * ratio;
+        let idx = src_idx as usize;
+        let frac = src_idx - idx as f64;
+
+        let sample = if idx + 1 < input.len() {
+            input[idx] * (1.0 - frac as f32) + input[idx + 1] * frac as f32
+        } else if idx < input.len() {
+            input[idx]
+        } else {
+            0.0
+        };
+
+        output.push(sample);
+    }
+
+    output
 }
 
 /// Read-only view of the capture buffer (mono samples at the native rate).
@@ -530,6 +518,18 @@ impl AudioTap {
         };
         out.clear();
         out.extend_from_slice(&buf[buf.len().saturating_sub(count)..]);
+    }
+
+    /// Append the samples recorded since index `start` to `out` and return
+    /// how many were appended. The lock is held only for the copy.
+    pub fn append_from(&self, start: usize, out: &mut Vec<f32>) -> usize {
+        let buf = match self.buffer.lock() {
+            Ok(buf) => buf,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let new = buf.get(start..).unwrap_or_default();
+        out.extend_from_slice(new);
+        new.len()
     }
 }
 
@@ -787,13 +787,26 @@ mod tests {
     }
 
     #[test]
+    fn tap_appends_samples_since_an_index() {
+        let capture = AudioCapture::new();
+        capture.buffer.lock().unwrap().extend([0.1, 0.2, 0.3]);
+        let tap = capture.tap();
+        let mut out = vec![9.0];
+        assert_eq!(tap.append_from(1, &mut out), 2);
+        assert_eq!(out, vec![9.0, 0.2, 0.3]);
+        assert_eq!(tap.append_from(3, &mut out), 0);
+        assert_eq!(tap.append_from(10, &mut out), 0);
+        assert_eq!(out.len(), 3);
+    }
+
+    #[test]
     fn simple_resample_fallback_downsamples_and_handles_short_input() {
-        let output = AudioCapture::simple_resample(&[0.5; 4_800], 48_000, 16_000);
+        let output = simple_resample(&[0.5; 4_800], 48_000, 16_000);
         assert_eq!(output.len(), 1_600);
         assert!(output.iter().all(|sample| (*sample - 0.5).abs() < 1e-6));
 
-        assert!(AudioCapture::simple_resample(&[], 48_000, 16_000).is_empty());
-        assert!(AudioCapture::simple_resample(&[0.5], 48_000, 16_000).is_empty());
+        assert!(simple_resample(&[], 48_000, 16_000).is_empty());
+        assert!(simple_resample(&[0.5], 48_000, 16_000).is_empty());
     }
 
     #[test]

@@ -22,6 +22,7 @@ mod model_loader;
 mod paste;
 mod paths;
 mod platform;
+mod pretranscribe;
 mod settings;
 mod sounds;
 mod state;

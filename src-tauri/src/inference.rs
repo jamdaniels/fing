@@ -221,10 +221,24 @@ pub fn prepare_context(
     Ok(prepared)
 }
 
+/// Params for the default device. `engine_smoke` can force the CPU with
+/// FING_DIRECT_CPU=1 to approximate a slower machine.
+#[cfg(not(target_os = "windows"))]
+fn default_context_params() -> ContextParams {
+    #[cfg(test)]
+    if std::env::var_os("FING_DIRECT_CPU").is_some() {
+        return ContextParams {
+            use_gpu: false,
+            ..ContextParams::default()
+        };
+    }
+    ContextParams::default()
+}
+
 #[cfg(not(target_os = "windows"))]
 fn prepare_default_context(model_path: &str) -> Result<PreparedContext, TranscribeError> {
     install_log_filter();
-    let context = WhisperContext::new(Path::new(model_path), ContextParams::default())
+    let context = WhisperContext::new(Path::new(model_path), default_context_params())
         .map_err(|error| TranscribeError::ModelLoadFailed(error.to_string()))?;
     Ok(PreparedContext {
         context,
@@ -264,7 +278,7 @@ pub fn prepare_parakeet(
     #[cfg(not(target_os = "windows"))]
     let (context, device) = {
         install_log_filter();
-        let context = ParakeetContext::new(Path::new(model_path), ContextParams::default())
+        let context = ParakeetContext::new(Path::new(model_path), default_context_params())
             .map_err(|error| TranscribeError::ModelLoadFailed(error.to_string()))?;
         (context, default_device())
     };

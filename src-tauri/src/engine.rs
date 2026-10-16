@@ -37,4 +37,19 @@ pub trait TranscriptionEngine: Send + Sync {
         languages: &[String],
         dictionary_prompt: Option<&str>,
     ) -> Result<String, TranscribeError>;
+
+    /// Transcribe one part of a longer recording. `language` pins the
+    /// language an earlier part used, so a short part is not re-detected.
+    /// Returns the text and the language this part used (`None` for engines
+    /// without a language setting).
+    fn transcribe_part(
+        &self,
+        audio: &[f32],
+        languages: &[String],
+        dictionary_prompt: Option<&str>,
+        language: Option<&str>,
+    ) -> Result<(String, Option<String>), TranscribeError> {
+        let _ = language;
+        Ok((self.transcribe(audio, languages, dictionary_prompt)?, None))
+    }
 }
