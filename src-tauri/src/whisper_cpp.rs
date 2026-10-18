@@ -6,6 +6,7 @@ use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::fmt;
 use std::path::Path;
 use std::ptr::NonNull;
+use std::time::{Duration, Instant};
 
 pub use sys::WHISPER_CPP_VERSION;
 
@@ -72,6 +73,130 @@ pub unsafe fn set_log_callback(callback: Option<LogCallback>, user_data: *mut c_
         sys::whisper_log_set(callback, user_data);
         sys::parakeet_log_set(callback, user_data);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Stage timing
+// ---------------------------------------------------------------------------
+
+/// Where the time of one `full` call went, from whisper.cpp callbacks (the
+/// per-state counters behind `whisper_get_timings` are not exposed for the
+/// separate states Fing uses).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Stages {
+    /// Mel spectrogram, up to the first encoder run.
+    pub mel: Duration,
+    /// Encoder runs, each up to its first decoder step (so this includes the
+    /// prompt prefill). With no decoder step at all, the rest of the call.
+    pub encode: Duration,
+    /// Everything else: decoding, temperature fallbacks, segment output.
+    pub decode: Duration,
+}
+
+impl Stages {
+    pub fn mel_ms(&self) -> u64 {
+        self.mel.as_millis() as u64
+    }
+
+    pub fn encode_ms(&self) -> u64 {
+        self.encode.as_millis() as u64
+    }
+
+    pub fn decode_ms(&self) -> u64 {
+        self.decode.as_millis() as u64
+    }
+}
+
+/// Collects stage boundaries; the callbacks get a pointer to it as user data
+/// and run on the calling thread while `full` runs.
+struct StageClock {
+    started: Instant,
+    first_encode: Option<Instant>,
+    /// Start of the current encoder run, until its first decoder step.
+    encode_start: Option<Instant>,
+    encode: Duration,
+}
+
+impl StageClock {
+    fn new() -> Self {
+        Self {
+            started: Instant::now(),
+            first_encode: None,
+            encode_start: None,
+            encode: Duration::ZERO,
+        }
+    }
+
+    fn encoder_begin(&mut self) {
+        let now = Instant::now();
+        self.end_encode(now);
+        self.first_encode.get_or_insert(now);
+        self.encode_start = Some(now);
+    }
+
+    fn end_encode(&mut self, now: Instant) {
+        if let Some(start) = self.encode_start.take() {
+            self.encode += now - start;
+        }
+    }
+
+    fn finish(mut self) -> Stages {
+        let now = Instant::now();
+        self.end_encode(now);
+        let total = now - self.started;
+        let mel = self.first_encode.map_or(total, |at| at - self.started);
+        Stages {
+            mel,
+            encode: self.encode,
+            decode: total.saturating_sub(mel + self.encode),
+        }
+    }
+
+    fn user_data(&mut self) -> *mut c_void {
+        (self as *mut Self).cast()
+    }
+}
+
+unsafe fn clock<'a>(user_data: *mut c_void) -> &'a mut StageClock {
+    unsafe { &mut *user_data.cast::<StageClock>() }
+}
+
+unsafe extern "C" fn whisper_encoder_begin(
+    _ctx: *mut sys::whisper_context,
+    _state: *mut sys::whisper_state,
+    user_data: *mut c_void,
+) -> bool {
+    unsafe { clock(user_data) }.encoder_begin();
+    true
+}
+
+unsafe extern "C" fn whisper_logits_filter(
+    _ctx: *mut sys::whisper_context,
+    _state: *mut sys::whisper_state,
+    _tokens: *const sys::whisper_token_data,
+    _n_tokens: c_int,
+    _logits: *mut f32,
+    user_data: *mut c_void,
+) {
+    unsafe { clock(user_data) }.end_encode(Instant::now());
+}
+
+unsafe extern "C" fn parakeet_encoder_begin(
+    _ctx: *mut sys::parakeet_context,
+    _state: *mut sys::parakeet_state,
+    user_data: *mut c_void,
+) -> bool {
+    unsafe { clock(user_data) }.encoder_begin();
+    true
+}
+
+unsafe extern "C" fn parakeet_new_token(
+    _ctx: *mut sys::parakeet_context,
+    _state: *mut sys::parakeet_state,
+    _token_data: *const sys::parakeet_token_data,
+    user_data: *mut c_void,
+) {
+    unsafe { clock(user_data) }.end_encode(Instant::now());
 }
 
 // ---------------------------------------------------------------------------
@@ -192,20 +317,27 @@ impl WhisperState<'_> {
         Ok((id, probabilities))
     }
 
-    pub fn full(&mut self, params: &FullParams<'_>, audio: &[f32]) -> Result<(), FfiError> {
+    pub fn full(&mut self, params: &FullParams<'_>, audio: &[f32]) -> Result<Stages, FfiError> {
+        let n_samples = n_samples(audio)?;
+        let mut clock = StageClock::new();
+        let mut raw = params.raw;
+        raw.encoder_begin_callback = Some(whisper_encoder_begin);
+        raw.encoder_begin_callback_user_data = clock.user_data();
+        raw.logits_filter_callback = Some(whisper_logits_filter);
+        raw.logits_filter_callback_user_data = clock.user_data();
         let code = unsafe {
             sys::whisper_full_with_state(
                 self.ctx.ptr.as_ptr(),
                 self.ptr.as_ptr(),
-                params.raw,
+                raw,
                 audio.as_ptr(),
-                n_samples(audio)?,
+                n_samples,
             )
         };
         if code != 0 {
             return Err(err(format!("whisper_full failed ({code})")));
         }
-        Ok(())
+        Ok(clock.finish())
     }
 
     pub fn full_n_segments(&self) -> i32 {
@@ -215,6 +347,7 @@ impl WhisperState<'_> {
     pub fn segment_text_lossy(&self, segment: i32) -> String {
         lossy(unsafe { sys::whisper_full_get_segment_text_from_state(self.ptr.as_ptr(), segment) })
     }
+
 }
 
 impl Drop for WhisperState<'_> {
@@ -315,7 +448,12 @@ impl ParakeetContext {
 
     /// Run encoder + TDT decoder over the whole clip and join the segment texts.
     /// Clips up to the model's audio context (~50 s) take the single-chunk path.
-    pub fn transcribe(&mut self, audio: &[f32], threads: usize) -> Result<String, FfiError> {
+    pub fn transcribe(
+        &mut self,
+        audio: &[f32],
+        threads: usize,
+    ) -> Result<(String, Stages), FfiError> {
+        let n_samples = n_samples(audio)?;
         let mut params = unsafe {
             sys::parakeet_full_default_params(
                 sys::parakeet_sampling_strategy_PARAKEET_SAMPLING_GREEDY,
@@ -324,18 +462,25 @@ impl ParakeetContext {
         params.n_threads = threads as c_int;
         params.no_context = true;
 
+        let mut clock = StageClock::new();
+        params.encoder_begin_callback = Some(parakeet_encoder_begin);
+        params.encoder_begin_callback_user_data = clock.user_data();
+        params.new_token_callback = Some(parakeet_new_token);
+        params.new_token_callback_user_data = clock.user_data();
+
         let code = unsafe {
             sys::parakeet_full_with_state(
                 self.ctx.as_ptr(),
                 self.state.as_ptr(),
                 params,
                 audio.as_ptr(),
-                n_samples(audio)?,
+                n_samples,
             )
         };
         if code != 0 {
             return Err(err(format!("parakeet_full failed ({code})")));
         }
+        let stages = clock.finish();
 
         let segments = unsafe { sys::parakeet_full_n_segments_from_state(self.state.as_ptr()) };
         let mut text = String::new();
@@ -344,7 +489,7 @@ impl ParakeetContext {
                 sys::parakeet_full_get_segment_text_from_state(self.state.as_ptr(), segment)
             }));
         }
-        Ok(text)
+        Ok((text, stages))
     }
 }
 

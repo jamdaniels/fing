@@ -46,19 +46,29 @@ pub(crate) fn is_digital_silence(samples: &[f32]) -> bool {
         .all(|sample| sample.abs() <= DIGITAL_SILENCE_PEAK)
 }
 
-/// Check if transcription contains only blank audio markers (no actual speech)
+/// Check if a transcription has no actual speech: only markers like
+/// "[BLANK_AUDIO]" or sound annotations like "[swoosh]", "(clicking)" or "♪",
+/// which Whisper writes on room noise.
 pub(crate) fn is_blank_audio(text: &str) -> bool {
-    let normalized = text.to_lowercase();
-    matches!(
-        normalized.as_str(),
-        "[blank_audio]"
-            | "(blank audio)"
-            | "[silence]"
-            | "(silence)"
-            | "[no speech]"
-            | "(no speech)"
-            | "[inaudible]"
-    )
+    let mut depth = 0_usize;
+    let mut annotated = false;
+    for c in text.chars() {
+        match c {
+            '[' | '(' => {
+                depth += 1;
+                annotated = true;
+            }
+            ']' | ')' => match depth.checked_sub(1) {
+                Some(outer) => depth = outer,
+                None => return false,
+            },
+            '♪' | '♫' | '♬' | '♩' => annotated = true,
+            _ if depth > 0 => {}
+            c if c.is_whitespace() || c.is_ascii_punctuation() => {}
+            _ => return false,
+        }
+    }
+    annotated && depth == 0
 }
 
 // Commands sent to the audio thread
@@ -866,6 +876,37 @@ pub fn disable_onboarding_test_mode() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn blank_markers_and_sound_annotations_are_blank() {
+        for text in [
+            "[BLANK_AUDIO]",
+            "(blank audio)",
+            "[inaudible]",
+            "[Music]",
+            "[swoosh]",
+            "(clicking)",
+            "[waves crashing]",
+            "(clicking) [Music].",
+            "♪ ♪",
+        ] {
+            assert!(is_blank_audio(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn text_with_words_is_not_blank() {
+        for text in [
+            "",
+            "Thank you.",
+            "Call me (after five).",
+            "[laughs] That works.",
+            "(clicking",
+            "clicking)",
+        ] {
+            assert!(!is_blank_audio(text), "{text}");
+        }
+    }
+
     use super::*;
     use std::sync::mpsc;
     use std::thread;

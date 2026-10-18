@@ -265,3 +265,53 @@ fn pretranscribe_smoke() {
     }
     crate::transcribe::unload_transcriber();
 }
+
+// Noise and silence handling: per clip, the text and whether the hotkey path
+// drops it as blank (`noise_*` clips should). Clips named `de_*` use [de],
+// others [en]. Per-stage timing logs need RUST_LOG.
+//
+//   RUST_LOG=fing_lib::transcribe=info FING_DIRECT_MODELS=<models dir> FING_DIRECT_CLIPS=<clips dir> \
+//     bun run scripts/cargo-test.ts silence_smoke -- --ignored --nocapture --test-threads=1
+#[test]
+#[ignore = "needs real model files and clips"]
+fn silence_smoke() {
+    let (Some(models_dir), Some(clips_dir)) =
+        (env_dir("FING_DIRECT_MODELS"), env_dir("FING_DIRECT_CLIPS"))
+    else {
+        eprintln!("set FING_DIRECT_MODELS and FING_DIRECT_CLIPS");
+        return;
+    };
+    let _ = tracing_subscriber::fmt::try_init();
+    let clips = sorted_files(&clips_dir, "wav");
+
+    for model_path in sorted_files(&models_dir, "bin") {
+        let Some(def) = model::definition_for_path(&model_path) else {
+            continue;
+        };
+        let name = def.filename;
+        crate::transcribe::unload_transcriber();
+        if let Err(err) = crate::transcribe::init_transcriber(model_path.to_str().unwrap()) {
+            println!("[{name}] LOAD FAILED: {err}");
+            continue;
+        }
+        for clip in &clips {
+            let clip_name = clip.file_name().unwrap().to_string_lossy();
+            let audio = read_wav_16k_mono(clip);
+            let languages: Vec<String> = if clip_name.starts_with("de_") {
+                vec!["de".into()]
+            } else {
+                vec!["en".into()]
+            };
+            let started = Instant::now();
+            let text = crate::transcribe::transcribe_audio(&audio, &languages, None)
+                .unwrap_or_else(|err| format!("FAILED: {err}"));
+            println!(
+                "[{name}] {clip_name} {:.1}s: {} ms, blank {}: {text}",
+                audio.len() as f32 / 16_000.0,
+                started.elapsed().as_millis(),
+                text.is_empty() || crate::hotkey::is_blank_audio(&text),
+            );
+        }
+    }
+    crate::transcribe::unload_transcriber();
+}

@@ -121,6 +121,7 @@ impl WhisperEngine {
 
         let mut detecting = false;
         let mut pinning = false;
+        let detect_started = Instant::now();
         let language = match language_plan(languages) {
             LanguagePlan::Explicit(language) => language,
             LanguagePlan::Detect(candidates) => match pinned_candidate(&candidates, pinned) {
@@ -141,6 +142,7 @@ impl WhisperEngine {
                 }
             },
         };
+        let detect_ms = detect_started.elapsed().as_millis() as u64;
         tracing::info!(
             configured = ?languages,
             language,
@@ -173,7 +175,7 @@ impl WhisperEngine {
             }
         }
 
-        state
+        let stages = state
             .full(&params, audio)
             .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
 
@@ -181,6 +183,13 @@ impl WhisperEngine {
         for i in 0..state.full_n_segments() {
             text.push_str(&state.segment_text_lossy(i));
         }
+        tracing::info!(
+            detect_ms,
+            mel_ms = stages.mel_ms(),
+            encode_ms = stages.encode_ms(),
+            decode_ms = stages.decode_ms(),
+            "Whisper stages"
+        );
 
         Ok((text.trim().to_string(), language.to_string()))
     }
@@ -246,10 +255,16 @@ impl TranscriptionEngine for ParakeetEngine {
         let mut ctx = self.ctx.lock().map_err(|_| {
             TranscribeError::InferenceFailed("Transcriber lock poisoned".to_string())
         })?;
-        let text = ctx
+        let (text, stages) = ctx
             .transcribe(audio, detection_threads())
             .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
         inference::mark_executed(&self.device);
+        tracing::info!(
+            mel_ms = stages.mel_ms(),
+            encode_ms = stages.encode_ms(),
+            decode_ms = stages.decode_ms(),
+            "Parakeet stages"
+        );
 
         Ok(text.trim().to_string())
     }
