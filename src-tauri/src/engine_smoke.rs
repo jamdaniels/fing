@@ -309,7 +309,7 @@ fn silence_smoke() {
                 "[{name}] {clip_name} {:.1}s: {} ms, blank {}: {text}",
                 audio.len() as f32 / 16_000.0,
                 started.elapsed().as_millis(),
-                text.is_empty() || crate::hotkey::is_blank_audio(&text),
+                crate::hotkey::is_blank_audio(&text),
             );
         }
     }

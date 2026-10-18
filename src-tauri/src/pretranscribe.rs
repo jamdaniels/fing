@@ -20,7 +20,7 @@ use crate::transcribe::{
 
 /// Kill switch. Deliberately not a persisted setting: settings load/save is
 /// regression-critical.
-pub const PRETRANSCRIBE_ENABLED: bool = true;
+const PRETRANSCRIBE_ENABLED: bool = true;
 
 /// How often the worker looks at the live buffer.
 const TICK: Duration = Duration::from_millis(500);
@@ -102,14 +102,14 @@ struct Pause {
 
 /// Where the next chunk of `samples` (the uncommitted audio, mono at
 /// `sample_rate`) should end, as an offset into it; `None` while no cut is due.
-pub fn plan_cut(samples: &[f32], sample_rate: u32) -> Option<usize> {
+fn plan_cut(samples: &[f32], sample_rate: u32) -> Option<usize> {
     let frame_len = frame_len(sample_rate);
-    let frame_db: Vec<f32> = samples.chunks_exact(frame_len).map(frame_dbfs).collect();
     let min_chunk = ms_to_frames(MIN_CHUNK_MS);
     let max_chunk = ms_to_frames(MAX_CHUNK_MS);
-    if frame_db.len() <= min_chunk {
+    if samples.len() / frame_len <= min_chunk {
         return None;
     }
+    let frame_db: Vec<f32> = samples.chunks_exact(frame_len).map(frame_dbfs).collect();
 
     let threshold = active_threshold(&frame_db);
     let active: Vec<bool> = frame_db.iter().map(|db| *db > threshold).collect();
@@ -189,7 +189,7 @@ pub fn plan_cut(samples: &[f32], sample_rate: u32) -> Option<usize> {
 }
 
 /// A native-rate sample index mapped onto the 16 kHz buffer.
-pub fn to_16k_index(native_index: usize, native_rate: u32) -> usize {
+fn to_16k_index(native_index: usize, native_rate: u32) -> usize {
     (native_index as u64 * u64::from(WHISPER_SAMPLE_RATE) / u64::from(native_rate.max(1))) as usize
 }
 
@@ -240,8 +240,12 @@ impl Committed {
         if self.language.is_none() {
             self.language = part.language;
         }
-        let text = part.text.trim();
-        if !text.is_empty() && !is_blank_audio(text) {
+        self.push_text(&part.text);
+    }
+
+    fn push_text(&mut self, text: &str) {
+        let text = text.trim();
+        if !is_blank_audio(text) {
             self.texts.push(text.to_string());
         }
     }
@@ -256,11 +260,15 @@ struct Worker {
 
 static WORKER: Mutex<Option<Worker>> = Mutex::new(None);
 
-fn take_worker() -> Option<Worker> {
+fn lock_worker() -> std::sync::MutexGuard<'static, Option<Worker>> {
     match WORKER.lock() {
-        Ok(mut worker) => worker.take(),
-        Err(poisoned) => poisoned.into_inner().take(),
+        Ok(worker) => worker,
+        Err(poisoned) => poisoned.into_inner(),
     }
+}
+
+fn take_worker() -> Option<Worker> {
+    lock_worker().take()
 }
 
 /// Start pre-transcribing the recording behind `tap` (recording `session_id`).
@@ -282,11 +290,7 @@ pub fn start(
         .spawn(move || run(&tap, &stop_rx, languages, dictionary_prompt));
     match spawned {
         Ok(handle) => {
-            let mut worker = match WORKER.lock() {
-                Ok(worker) => worker,
-                Err(poisoned) => poisoned.into_inner(),
-            };
-            *worker = Some(Worker {
+            *lock_worker() = Some(Worker {
                 session_id,
                 stop_tx,
                 handle,
@@ -406,14 +410,19 @@ fn run(
     let mut pending = Vec::new();
 
     while matches!(stop_rx.recv_timeout(TICK), Err(RecvTimeoutError::Timeout)) {
+        // Without an engine nothing is copied; the copy catches up once one
+        // is loaded.
+        if !is_transcriber_loaded() {
+            if !tap.is_live() {
+                break;
+            }
+            continue;
+        }
         tap.append_from(committed.cut + pending.len(), &mut pending);
         // Checked after the copy: if the recording ended meanwhile, the copy
         // may hold another recording's audio.
         if !tap.is_live() {
             break;
-        }
-        if !is_transcriber_loaded() {
-            continue;
         }
         let stop_requested = || !matches!(stop_rx.try_recv(), Err(TryRecvError::Empty));
         if commit_due_chunks(&mut committed, &mut pending, stop_requested) == Flow::Stop {
@@ -444,14 +453,13 @@ pub fn transcribe_recording(
         }
         usable
     });
-    let Some(committed) = committed else {
+    let Some(mut committed) = committed else {
         return transcribe_audio(audio, languages, dictionary_prompt);
     };
 
     let tail_start = to_16k_index(committed.cut, committed.native_rate).min(audio.len());
     let tail = &audio[tail_start..];
     let started = Instant::now();
-    let mut texts = committed.texts;
     if !tail.is_empty() && !is_digital_silence(tail) {
         let part = transcribe_audio_part(
             tail,
@@ -463,10 +471,7 @@ pub fn transcribe_recording(
             tracing::warn!("Engine changed since pre-transcription; transcribing in full");
             return transcribe_audio(audio, languages, dictionary_prompt);
         }
-        let text = part.text.trim();
-        if !text.is_empty() && !is_blank_audio(text) {
-            texts.push(text.to_string());
-        }
+        committed.push_text(&part.text);
     }
     tracing::info!(
         chunks = committed.chunks,
@@ -476,7 +481,7 @@ pub fn transcribe_recording(
         release_ms = released.elapsed().as_millis() as u64,
         "Pre-transcription"
     );
-    Ok(texts.join(" "))
+    Ok(committed.texts.join(" "))
 }
 
 #[cfg(test)]

@@ -46,10 +46,13 @@ pub(crate) fn is_digital_silence(samples: &[f32]) -> bool {
         .all(|sample| sample.abs() <= DIGITAL_SILENCE_PEAK)
 }
 
-/// Check if a transcription has no actual speech: only markers like
+/// Check if a transcription has no actual speech: empty, or only markers like
 /// "[BLANK_AUDIO]" or sound annotations like "[swoosh]", "(clicking)" or "♪",
 /// which Whisper writes on room noise.
 pub(crate) fn is_blank_audio(text: &str) -> bool {
+    if text.trim().is_empty() {
+        return true;
+    }
     let mut depth = 0_usize;
     let mut annotated = false;
     for c in text.chars() {
@@ -447,13 +450,11 @@ pub fn on_key_down(app: &AppHandle) {
     match start_result {
         Ok((tap, opened)) => {
             set_recording_start_status(RecordingStartStatus::Started { session_id });
-            let dictionary_terms =
-                crate::dictionary::sanitize_terms(&settings_snapshot.dictionary_terms);
             crate::pretranscribe::start(
                 tap.clone(),
                 session_id,
                 settings_snapshot.languages.clone(),
-                crate::dictionary::build_prompt(&dictionary_terms),
+                crate::dictionary::build_prompt(&settings_snapshot.dictionary_terms),
             );
             crate::level_meter::start(app, tap);
             if let Some(cue) = start_cue {
@@ -636,7 +637,10 @@ pub fn on_key_up(app: &AppHandle) {
                 finish_transcription(&app_handle, None, duration_ms, test_mode).await;
                 return;
             }
-            tracing::info!("Transcriber initialized for {:?}", settings.active_model_variant);
+            tracing::info!(
+                "Transcriber initialized for {:?}",
+                settings.active_model_variant
+            );
         }
 
         let dictionary_terms = crate::dictionary::sanitize_terms(&settings.dictionary_terms);
@@ -669,7 +673,7 @@ pub fn on_key_up(app: &AppHandle) {
             .to_string();
 
         // Filter out whisper special tokens indicating no speech
-        if text.is_empty() || is_blank_audio(&text) {
+        if is_blank_audio(&text) {
             tracing::info!("No speech detected, skipping paste/save");
             finish_transcription(&app_handle, None, duration_ms, test_mode).await;
             return;
@@ -879,6 +883,8 @@ mod tests {
     #[test]
     fn blank_markers_and_sound_annotations_are_blank() {
         for text in [
+            "",
+            "  ",
             "[BLANK_AUDIO]",
             "(blank audio)",
             "[inaudible]",
@@ -896,7 +902,7 @@ mod tests {
     #[test]
     fn text_with_words_is_not_blank() {
         for text in [
-            "",
+            ".",
             "Thank you.",
             "Call me (after five).",
             "[laughs] That works.",

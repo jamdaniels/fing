@@ -520,16 +520,14 @@ impl AudioTap {
         out.extend_from_slice(&buf[buf.len().saturating_sub(count)..]);
     }
 
-    /// Append the samples recorded since index `start` to `out` and return
-    /// how many were appended. The lock is held only for the copy.
-    pub fn append_from(&self, start: usize, out: &mut Vec<f32>) -> usize {
+    /// Append the samples recorded since index `start` to `out`. The lock is
+    /// held only for the copy.
+    pub fn append_from(&self, start: usize, out: &mut Vec<f32>) {
         let buf = match self.buffer.lock() {
             Ok(buf) => buf,
             Err(poisoned) => poisoned.into_inner(),
         };
-        let new = buf.get(start..).unwrap_or_default();
-        out.extend_from_slice(new);
-        new.len()
+        out.extend_from_slice(buf.get(start..).unwrap_or_default());
     }
 }
 
@@ -792,10 +790,10 @@ mod tests {
         capture.buffer.lock().unwrap().extend([0.1, 0.2, 0.3]);
         let tap = capture.tap();
         let mut out = vec![9.0];
-        assert_eq!(tap.append_from(1, &mut out), 2);
+        tap.append_from(1, &mut out);
         assert_eq!(out, vec![9.0, 0.2, 0.3]);
-        assert_eq!(tap.append_from(3, &mut out), 0);
-        assert_eq!(tap.append_from(10, &mut out), 0);
+        tap.append_from(3, &mut out);
+        tap.append_from(10, &mut out);
         assert_eq!(out.len(), 3);
     }
 

@@ -85,26 +85,12 @@ pub unsafe fn set_log_callback(callback: Option<LogCallback>, user_data: *mut c_
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Stages {
     /// Mel spectrogram, up to the first encoder run.
-    pub mel: Duration,
+    pub mel_ms: u64,
     /// Encoder runs, each up to its first decoder step (so this includes the
     /// prompt prefill). With no decoder step at all, the rest of the call.
-    pub encode: Duration,
+    pub encode_ms: u64,
     /// Everything else: decoding, temperature fallbacks, segment output.
-    pub decode: Duration,
-}
-
-impl Stages {
-    pub fn mel_ms(&self) -> u64 {
-        self.mel.as_millis() as u64
-    }
-
-    pub fn encode_ms(&self) -> u64 {
-        self.encode.as_millis() as u64
-    }
-
-    pub fn decode_ms(&self) -> u64 {
-        self.decode.as_millis() as u64
-    }
+    pub decode_ms: u64,
 }
 
 /// Collects stage boundaries; the callbacks get a pointer to it as user data
@@ -146,9 +132,9 @@ impl StageClock {
         let total = now - self.started;
         let mel = self.first_encode.map_or(total, |at| at - self.started);
         Stages {
-            mel,
-            encode: self.encode,
-            decode: total.saturating_sub(mel + self.encode),
+            mel_ms: mel.as_millis() as u64,
+            encode_ms: self.encode.as_millis() as u64,
+            decode_ms: total.saturating_sub(mel + self.encode).as_millis() as u64,
         }
     }
 
@@ -161,9 +147,10 @@ unsafe fn clock<'a>(user_data: *mut c_void) -> &'a mut StageClock {
     unsafe { &mut *user_data.cast::<StageClock>() }
 }
 
-unsafe extern "C" fn whisper_encoder_begin(
-    _ctx: *mut sys::whisper_context,
-    _state: *mut sys::whisper_state,
+/// Encoder-begin callback for both whisper and parakeet.
+unsafe extern "C" fn encoder_begin<Ctx, State>(
+    _ctx: *mut Ctx,
+    _state: *mut State,
     user_data: *mut c_void,
 ) -> bool {
     unsafe { clock(user_data) }.encoder_begin();
@@ -179,15 +166,6 @@ unsafe extern "C" fn whisper_logits_filter(
     user_data: *mut c_void,
 ) {
     unsafe { clock(user_data) }.end_encode(Instant::now());
-}
-
-unsafe extern "C" fn parakeet_encoder_begin(
-    _ctx: *mut sys::parakeet_context,
-    _state: *mut sys::parakeet_state,
-    user_data: *mut c_void,
-) -> bool {
-    unsafe { clock(user_data) }.encoder_begin();
-    true
 }
 
 unsafe extern "C" fn parakeet_new_token(
@@ -321,7 +299,8 @@ impl WhisperState<'_> {
         let n_samples = n_samples(audio)?;
         let mut clock = StageClock::new();
         let mut raw = params.raw;
-        raw.encoder_begin_callback = Some(whisper_encoder_begin);
+        raw.encoder_begin_callback =
+            Some(encoder_begin::<sys::whisper_context, sys::whisper_state>);
         raw.encoder_begin_callback_user_data = clock.user_data();
         raw.logits_filter_callback = Some(whisper_logits_filter);
         raw.logits_filter_callback_user_data = clock.user_data();
@@ -347,7 +326,6 @@ impl WhisperState<'_> {
     pub fn segment_text_lossy(&self, segment: i32) -> String {
         lossy(unsafe { sys::whisper_full_get_segment_text_from_state(self.ptr.as_ptr(), segment) })
     }
-
 }
 
 impl Drop for WhisperState<'_> {
@@ -463,7 +441,8 @@ impl ParakeetContext {
         params.no_context = true;
 
         let mut clock = StageClock::new();
-        params.encoder_begin_callback = Some(parakeet_encoder_begin);
+        params.encoder_begin_callback =
+            Some(encoder_begin::<sys::parakeet_context, sys::parakeet_state>);
         params.encoder_begin_callback_user_data = clock.user_data();
         params.new_token_callback = Some(parakeet_new_token);
         params.new_token_callback_user_data = clock.user_data();

@@ -185,9 +185,9 @@ impl WhisperEngine {
         }
         tracing::info!(
             detect_ms,
-            mel_ms = stages.mel_ms(),
-            encode_ms = stages.encode_ms(),
-            decode_ms = stages.decode_ms(),
+            mel_ms = stages.mel_ms,
+            encode_ms = stages.encode_ms,
+            decode_ms = stages.decode_ms,
             "Whisper stages"
         );
 
@@ -260,9 +260,9 @@ impl TranscriptionEngine for ParakeetEngine {
             .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
         inference::mark_executed(&self.device);
         tracing::info!(
-            mel_ms = stages.mel_ms(),
-            encode_ms = stages.encode_ms(),
-            decode_ms = stages.decode_ms(),
+            mel_ms = stages.mel_ms,
+            encode_ms = stages.encode_ms,
+            decode_ms = stages.decode_ms,
             "Parakeet stages"
         );
 
@@ -371,41 +371,13 @@ pub fn unload_transcriber() {
     inference::mark_unloaded();
 }
 
-/// Run `transcribe` on the global engine and log its timing (never the text).
-fn timed<T>(
-    audio: &[f32],
-    transcribe: impl FnOnce(&LoadedEngine) -> Result<T, TranscribeError>,
-) -> Result<(T, u64), TranscribeError> {
-    let Some(loaded) = get_loaded() else {
-        return Err(TranscribeError::ModelNotFound);
-    };
-
-    let started = Instant::now();
-    let result = transcribe(&loaded);
-    tracing::info!(
-        engine = ?loaded.kind,
-        model = loaded.file_name(),
-        audio_s = format!("{:.2}", audio.len() as f32 / SAMPLE_RATE),
-        load_ms = loaded.load_ms as u64,
-        transcribe_ms = started.elapsed().as_millis() as u64,
-        ok = result.is_ok(),
-        "Transcription timing"
-    );
-    result.map(|value| (value, loaded.generation))
-}
-
 /// Transcribe audio using the global engine and log its timing (never the text).
 pub fn transcribe_audio(
     audio: &[f32],
     languages: &[String],
     dictionary_prompt: Option<&str>,
 ) -> Result<String, TranscribeError> {
-    timed(audio, |loaded| {
-        loaded
-            .engine
-            .transcribe(audio, languages, dictionary_prompt)
-    })
-    .map(|(text, _)| text)
+    transcribe_audio_part(audio, languages, dictionary_prompt, None).map(|part| part.text)
 }
 
 /// One part of a recording transcribed by [`transcribe_audio_part`].
@@ -426,15 +398,27 @@ pub fn transcribe_audio_part(
     dictionary_prompt: Option<&str>,
     language: Option<&str>,
 ) -> Result<PartTranscript, TranscribeError> {
-    timed(audio, |loaded| {
-        loaded
-            .engine
-            .transcribe_part(audio, languages, dictionary_prompt, language)
-    })
-    .map(|((text, language), engine)| PartTranscript {
+    let Some(loaded) = get_loaded() else {
+        return Err(TranscribeError::ModelNotFound);
+    };
+
+    let started = Instant::now();
+    let result = loaded
+        .engine
+        .transcribe_part(audio, languages, dictionary_prompt, language);
+    tracing::info!(
+        engine = ?loaded.kind,
+        model = loaded.file_name(),
+        audio_s = format!("{:.2}", audio.len() as f32 / SAMPLE_RATE),
+        load_ms = loaded.load_ms as u64,
+        transcribe_ms = started.elapsed().as_millis() as u64,
+        ok = result.is_ok(),
+        "Transcription timing"
+    );
+    result.map(|(text, language)| PartTranscript {
         text,
         language,
-        engine,
+        engine: loaded.generation,
     })
 }
 
