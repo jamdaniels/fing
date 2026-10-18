@@ -107,8 +107,9 @@ impl WhisperContext {
         let mut raw = unsafe { sys::whisper_context_default_params() };
         raw.use_gpu = params.use_gpu;
         raw.gpu_device = params.gpu_device;
-        // whisper-rs defaulted flash attention off; keep its behavior.
-        raw.flash_attn = false;
+        // Explicit so a whisper.cpp bump can't silently change it. Faster on
+        // Metal and lighter on CPU; Whisper only (Parakeet does not use it).
+        raw.flash_attn = true;
         let ptr = unsafe { sys::whisper_init_from_file_with_params_no_state(path.as_ptr(), raw) };
         NonNull::new(ptr)
             .map(|ptr| Self { ptr })
