@@ -1,10 +1,10 @@
 // Transcription engines (Whisper and Parakeet on whisper.cpp) and the global
 // loaded-engine slot.
 
-use crate::engine::{TranscribeError, TranscriptionEngine};
+use crate::engine::{AbortFlag, TranscribeError, TranscriptionEngine};
 use crate::inference::{self, InferenceDevice};
 use crate::model::{self, ModelEngine};
-use crate::whisper_cpp::{self, FullParams, ParakeetContext, WhisperContext};
+use crate::whisper_cpp::{self, FfiError, FullParams, ParakeetContext, WhisperContext};
 use once_cell::sync::Lazy;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -53,6 +53,21 @@ fn select_detected_language<'a>(candidates: &[&'a str], probabilities: &[f32]) -
         .max_by(|left, right| left.1.total_cmp(&right.1))
         .map(|(language, _)| language)
         .unwrap_or(DEFAULT_LANGUAGE)
+}
+
+/// The error for a failed whisper.cpp inference call.
+fn inference_error(error: FfiError) -> TranscribeError {
+    match error {
+        FfiError::Aborted => TranscribeError::Aborted,
+        FfiError::Failed(message) => TranscribeError::InferenceFailed(message),
+    }
+}
+
+fn aborted(abort: &AbortFlag) -> Result<(), TranscribeError> {
+    if abort.is_aborted() {
+        return Err(TranscribeError::Aborted);
+    }
+    Ok(())
 }
 
 fn detection_threads() -> usize {
@@ -109,6 +124,7 @@ impl WhisperEngine {
         languages: &[String],
         dictionary_prompt: Option<&str>,
         pinned: Option<&str>,
+        abort: &AbortFlag,
     ) -> Result<(String, String), TranscribeError> {
         if audio.is_empty() {
             return Err(TranscribeError::EmptyAudio);
@@ -117,6 +133,8 @@ impl WhisperEngine {
         let ctx = self.ctx.lock().map_err(|_| {
             TranscribeError::InferenceFailed("Transcriber lock poisoned".to_string())
         })?;
+        // The lock may have waited for another call of the same recording.
+        aborted(abort)?;
         let mut state = inference::create_state(&ctx, &self.device)?;
 
         let mut detecting = false;
@@ -175,9 +193,11 @@ impl WhisperEngine {
             }
         }
 
+        // Language detection can't be aborted; check before the main pass.
+        aborted(abort)?;
         let stages = state
-            .full(&params, audio)
-            .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
+            .full(&params, audio, abort.as_atomic())
+            .map_err(inference_error)?;
 
         let mut text = String::new();
         for i in 0..state.full_n_segments() {
@@ -201,8 +221,9 @@ impl TranscriptionEngine for WhisperEngine {
         audio: &[f32],
         languages: &[String],
         dictionary_prompt: Option<&str>,
+        abort: &AbortFlag,
     ) -> Result<String, TranscribeError> {
-        self.run(audio, languages, dictionary_prompt, None)
+        self.run(audio, languages, dictionary_prompt, None, abort)
             .map(|(text, _)| text)
     }
 
@@ -212,8 +233,9 @@ impl TranscriptionEngine for WhisperEngine {
         languages: &[String],
         dictionary_prompt: Option<&str>,
         language: Option<&str>,
+        abort: &AbortFlag,
     ) -> Result<(String, Option<String>), TranscribeError> {
-        self.run(audio, languages, dictionary_prompt, language)
+        self.run(audio, languages, dictionary_prompt, language, abort)
             .map(|(text, language)| (text, Some(language)))
     }
 }
@@ -247,6 +269,7 @@ impl TranscriptionEngine for ParakeetEngine {
         audio: &[f32],
         _languages: &[String],
         _dictionary_prompt: Option<&str>,
+        abort: &AbortFlag,
     ) -> Result<String, TranscribeError> {
         if audio.is_empty() {
             return Err(TranscribeError::EmptyAudio);
@@ -255,9 +278,10 @@ impl TranscriptionEngine for ParakeetEngine {
         let mut ctx = self.ctx.lock().map_err(|_| {
             TranscribeError::InferenceFailed("Transcriber lock poisoned".to_string())
         })?;
+        aborted(abort)?;
         let (text, stages) = ctx
-            .transcribe(audio, detection_threads())
-            .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
+            .transcribe(audio, detection_threads(), abort.as_atomic())
+            .map_err(inference_error)?;
         inference::mark_executed(&self.device);
         tracing::info!(
             mel_ms = stages.mel_ms,
@@ -372,12 +396,14 @@ pub fn unload_transcriber() {
 }
 
 /// Transcribe audio using the global engine and log its timing (never the text).
+/// Setting `abort` stops it with [`TranscribeError::Aborted`].
 pub fn transcribe_audio(
     audio: &[f32],
     languages: &[String],
     dictionary_prompt: Option<&str>,
+    abort: &AbortFlag,
 ) -> Result<String, TranscribeError> {
-    transcribe_audio_part(audio, languages, dictionary_prompt, None).map(|part| part.text)
+    transcribe_audio_part(audio, languages, dictionary_prompt, None, abort).map(|part| part.text)
 }
 
 /// One part of a recording transcribed by [`transcribe_audio_part`].
@@ -397,15 +423,17 @@ pub fn transcribe_audio_part(
     languages: &[String],
     dictionary_prompt: Option<&str>,
     language: Option<&str>,
+    abort: &AbortFlag,
 ) -> Result<PartTranscript, TranscribeError> {
     let Some(loaded) = get_loaded() else {
         return Err(TranscribeError::ModelNotFound);
     };
 
     let started = Instant::now();
-    let result = loaded
-        .engine
-        .transcribe_part(audio, languages, dictionary_prompt, language);
+    let result =
+        loaded
+            .engine
+            .transcribe_part(audio, languages, dictionary_prompt, language, abort);
     tracing::info!(
         engine = ?loaded.kind,
         model = loaded.file_name(),
@@ -413,6 +441,7 @@ pub fn transcribe_audio_part(
         load_ms = loaded.load_ms as u64,
         transcribe_ms = started.elapsed().as_millis() as u64,
         ok = result.is_ok(),
+        aborted = matches!(result, Err(TranscribeError::Aborted)),
         "Transcription timing"
     );
     result.map(|(text, language)| PartTranscript {
@@ -515,7 +544,7 @@ mod tests {
         unload_transcriber();
 
         assert!(matches!(
-            transcribe_audio(&[0.25], &[], None),
+            transcribe_audio(&[0.25], &[], None, &AbortFlag::default()),
             Err(TranscribeError::ModelNotFound)
         ));
         assert!(!is_transcriber_loaded());

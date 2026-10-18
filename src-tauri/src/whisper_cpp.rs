@@ -6,23 +6,51 @@ use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::fmt;
 use std::path::Path;
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 pub use sys::WHISPER_CPP_VERSION;
 
 #[derive(Debug, Clone)]
-pub struct FfiError(String);
+pub enum FfiError {
+    Failed(String),
+    /// The abort flag passed to the call was set.
+    Aborted,
+}
 
 impl fmt::Display for FfiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        match self {
+            FfiError::Failed(message) => f.write_str(message),
+            FfiError::Aborted => f.write_str("aborted"),
+        }
     }
 }
 
 impl std::error::Error for FfiError {}
 
 fn err(message: impl Into<String>) -> FfiError {
-    FfiError(message.into())
+    FfiError::Failed(message.into())
+}
+
+/// The error for a failed `full` call: an abort makes whisper.cpp fail
+/// with an ordinary error code, so the flag tells the two apart.
+fn full_error(name: &str, code: c_int, abort: &AtomicBool) -> FfiError {
+    if abort.load(Ordering::SeqCst) {
+        FfiError::Aborted
+    } else {
+        err(format!("{name} failed ({code})"))
+    }
+}
+
+/// Abort callback for both whisper and parakeet; `data` is the `AtomicBool`
+/// passed to `full`. Checked after every encoder run and decoder step.
+unsafe extern "C" fn abort_requested(data: *mut c_void) -> bool {
+    unsafe { &*data.cast::<AtomicBool>() }.load(Ordering::Relaxed)
+}
+
+fn abort_user_data(abort: &AtomicBool) -> *mut c_void {
+    (abort as *const AtomicBool).cast_mut().cast()
 }
 
 fn path_cstring(path: &Path) -> Result<CString, FfiError> {
@@ -295,7 +323,14 @@ impl WhisperState<'_> {
         Ok((id, probabilities))
     }
 
-    pub fn full(&mut self, params: &FullParams<'_>, audio: &[f32]) -> Result<Stages, FfiError> {
+    /// Run `whisper_full`. Setting `abort` stops it after the current
+    /// encoder run or decoder step with [`FfiError::Aborted`].
+    pub fn full(
+        &mut self,
+        params: &FullParams<'_>,
+        audio: &[f32],
+        abort: &AtomicBool,
+    ) -> Result<Stages, FfiError> {
         let n_samples = n_samples(audio)?;
         let mut clock = StageClock::new();
         let mut raw = params.raw;
@@ -304,6 +339,8 @@ impl WhisperState<'_> {
         raw.encoder_begin_callback_user_data = clock.user_data();
         raw.logits_filter_callback = Some(whisper_logits_filter);
         raw.logits_filter_callback_user_data = clock.user_data();
+        raw.abort_callback = Some(abort_requested);
+        raw.abort_callback_user_data = abort_user_data(abort);
         let code = unsafe {
             sys::whisper_full_with_state(
                 self.ctx.ptr.as_ptr(),
@@ -314,7 +351,7 @@ impl WhisperState<'_> {
             )
         };
         if code != 0 {
-            return Err(err(format!("whisper_full failed ({code})")));
+            return Err(full_error("whisper_full", code, abort));
         }
         Ok(clock.finish())
     }
@@ -426,10 +463,13 @@ impl ParakeetContext {
 
     /// Run encoder + TDT decoder over the whole clip and join the segment texts.
     /// Clips up to the model's audio context (~50 s) take the single-chunk path.
+    /// Setting `abort` stops it after the current encoder run or decoder step
+    /// with [`FfiError::Aborted`]; the state is reset on the next call.
     pub fn transcribe(
         &mut self,
         audio: &[f32],
         threads: usize,
+        abort: &AtomicBool,
     ) -> Result<(String, Stages), FfiError> {
         let n_samples = n_samples(audio)?;
         let mut params = unsafe {
@@ -446,6 +486,8 @@ impl ParakeetContext {
         params.encoder_begin_callback_user_data = clock.user_data();
         params.new_token_callback = Some(parakeet_new_token);
         params.new_token_callback_user_data = clock.user_data();
+        params.abort_callback = Some(abort_requested);
+        params.abort_callback_user_data = abort_user_data(abort);
 
         let code = unsafe {
             sys::parakeet_full_with_state(
@@ -457,7 +499,7 @@ impl ParakeetContext {
             )
         };
         if code != 0 {
-            return Err(err(format!("parakeet_full failed ({code})")));
+            return Err(full_error("parakeet_full", code, abort));
         }
         let stages = clock.finish();
 

@@ -1115,6 +1115,12 @@ pub fn run() {
         .run(|app, event| {
             let _ = (&app, &event);
 
+            // Don't leave whisper.cpp mid-graph at exit (e.g. a cancelled
+            // recording's pre-transcription chunk).
+            if let tauri::RunEvent::Exit = event {
+                hotkey::abort_transcriptions();
+            }
+
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::ExitRequested { code: None, .. } = event {
                 if PERMISSION_RESTART_ARMED.load(Ordering::Relaxed) {

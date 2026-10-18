@@ -12,7 +12,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::audio::{resample_to_16k, AudioTap, WHISPER_SAMPLE_RATE};
-use crate::engine::TranscribeError;
+use crate::engine::{AbortFlag, TranscribeError};
 use crate::hotkey::{is_blank_audio, is_digital_silence};
 use crate::transcribe::{
     is_transcriber_loaded, transcribe_audio, transcribe_audio_part, PartTranscript,
@@ -255,7 +255,16 @@ struct Worker {
     session_id: u64,
     /// Dropping it wakes the worker and stops it.
     stop_tx: Sender<()>,
+    /// The recording's abort flag; also aborts a chunk in flight.
+    abort: AbortFlag,
     handle: JoinHandle<Committed>,
+}
+
+impl Worker {
+    /// Stop the worker and abort a chunk in flight; its result is dropped.
+    fn cancel(self) {
+        self.abort.abort();
+    }
 }
 
 static WORKER: Mutex<Option<Worker>> = Mutex::new(None);
@@ -272,12 +281,13 @@ fn take_worker() -> Option<Worker> {
 }
 
 /// Start pre-transcribing the recording behind `tap` (recording `session_id`).
-/// The worker exits once the tap goes stale.
+/// The worker exits once the tap goes stale or `abort` is set.
 pub fn start(
     tap: AudioTap,
     session_id: u64,
     languages: Vec<String>,
     dictionary_prompt: Option<String>,
+    abort: AbortFlag,
 ) {
     cancel();
     if !PRETRANSCRIBE_ENABLED {
@@ -285,14 +295,16 @@ pub fn start(
     }
 
     let (stop_tx, stop_rx) = mpsc::channel();
+    let worker_abort = abort.clone();
     let spawned = std::thread::Builder::new()
         .name("pretranscribe".to_string())
-        .spawn(move || run(&tap, &stop_rx, languages, dictionary_prompt));
+        .spawn(move || run(&tap, &stop_rx, languages, dictionary_prompt, &worker_abort));
     match spawned {
         Ok(handle) => {
             *lock_worker() = Some(Worker {
                 session_id,
                 stop_tx,
+                abort,
                 handle,
             });
         }
@@ -301,9 +313,12 @@ pub fn start(
 }
 
 /// Stop the worker and drop whatever it transcribed (Escape). A chunk in
-/// flight finishes in the background and its result is discarded.
+/// flight is aborted in the background, so it never holds the engine (or a
+/// model being swapped out) for long.
 pub fn cancel() {
-    drop(take_worker());
+    if let Some(worker) = take_worker() {
+        worker.cancel();
+    }
 }
 
 /// A stopped worker whose committed chunks can still be collected.
@@ -329,6 +344,7 @@ impl Stopped {
 pub fn stop(session_id: u64) -> Option<Stopped> {
     let worker = take_worker()?;
     if worker.session_id != session_id {
+        worker.cancel();
         return None;
     }
     drop(worker.stop_tx);
@@ -345,16 +361,17 @@ pub(crate) enum Flow {
 }
 
 /// Transcribe and commit every chunk the planner cuts from `pending` (the
-/// native-rate audio after `committed.cut`). `stop_requested` is checked
-/// before each chunk.
+/// native-rate audio after `committed.cut`). `stop_requested` and `abort`
+/// are checked before each chunk; `abort` also stops a chunk in flight.
 pub(crate) fn commit_due_chunks(
     committed: &mut Committed,
     pending: &mut Vec<f32>,
     stop_requested: impl Fn() -> bool,
+    abort: &AbortFlag,
 ) -> Flow {
     let rate = committed.native_rate;
     while let Some(offset) = plan_cut(pending, rate) {
-        if stop_requested() {
+        if stop_requested() || abort.is_aborted() {
             return Flow::Stop;
         }
         let started = Instant::now();
@@ -367,6 +384,7 @@ pub(crate) fn commit_due_chunks(
                 &committed.languages,
                 committed.dictionary_prompt.as_deref(),
                 committed.language.as_deref(),
+                abort,
             ) {
                 Ok(part) if committed.engine.is_some_and(|engine| engine != part.engine) => {
                     tracing::warn!("Engine changed during pre-transcription; dropping chunks");
@@ -376,6 +394,10 @@ pub(crate) fn commit_due_chunks(
                 Ok(part) => Some(part),
                 // Unloaded meanwhile; nothing committed, retry next tick.
                 Err(TranscribeError::ModelNotFound) => return Flow::Continue,
+                Err(TranscribeError::Aborted) => {
+                    tracing::info!("Pre-transcription chunk aborted");
+                    return Flow::Stop;
+                }
                 Err(e) => {
                     tracing::warn!("Pre-transcription chunk failed: {}", e);
                     return Flow::Stop;
@@ -405,11 +427,14 @@ fn run(
     stop_rx: &Receiver<()>,
     languages: Vec<String>,
     dictionary_prompt: Option<String>,
+    abort: &AbortFlag,
 ) -> Committed {
     let mut committed = Committed::new(tap.sample_rate(), languages, dictionary_prompt);
     let mut pending = Vec::new();
 
-    while matches!(stop_rx.recv_timeout(TICK), Err(RecvTimeoutError::Timeout)) {
+    while matches!(stop_rx.recv_timeout(TICK), Err(RecvTimeoutError::Timeout))
+        && !abort.is_aborted()
+    {
         // Without an engine nothing is copied; the copy catches up once one
         // is loaded.
         if !is_transcriber_loaded() {
@@ -425,7 +450,7 @@ fn run(
             break;
         }
         let stop_requested = || !matches!(stop_rx.try_recv(), Err(TryRecvError::Empty));
-        if commit_due_chunks(&mut committed, &mut pending, stop_requested) == Flow::Stop {
+        if commit_due_chunks(&mut committed, &mut pending, stop_requested, abort) == Flow::Stop {
             break;
         }
     }
@@ -436,13 +461,15 @@ fn run(
 /// With committed chunks, only the tail after them is transcribed and the
 /// texts are joined; otherwise (or when the chunks no longer match the
 /// settings or the engine) this is the same single pass as without
-/// pre-transcription.
+/// pre-transcription. Setting `abort` stops it with
+/// [`TranscribeError::Aborted`].
 pub fn transcribe_recording(
     committed: Option<Committed>,
     audio: &[f32],
     languages: &[String],
     dictionary_prompt: Option<&str>,
     released: Instant,
+    abort: &AbortFlag,
 ) -> Result<String, TranscribeError> {
     let committed = committed.filter(|committed| {
         let usable = committed.chunks > 0
@@ -454,7 +481,7 @@ pub fn transcribe_recording(
         usable
     });
     let Some(mut committed) = committed else {
-        return transcribe_audio(audio, languages, dictionary_prompt);
+        return transcribe_audio(audio, languages, dictionary_prompt, abort);
     };
 
     let tail_start = to_16k_index(committed.cut, committed.native_rate).min(audio.len());
@@ -466,10 +493,11 @@ pub fn transcribe_recording(
             languages,
             dictionary_prompt,
             committed.language.as_deref(),
+            abort,
         )?;
         if committed.engine.is_some_and(|engine| engine != part.engine) {
             tracing::warn!("Engine changed since pre-transcription; transcribing in full");
-            return transcribe_audio(audio, languages, dictionary_prompt);
+            return transcribe_audio(audio, languages, dictionary_prompt, abort);
         }
         committed.push_text(&part.text);
     }
@@ -717,8 +745,12 @@ mod tests {
         assert_eq!(committed.language.as_deref(), Some("de"));
     }
 
+    /// Serializes the tests that use the global worker slot.
+    static WORKER_TEST_MUTEX: Mutex<()> = Mutex::new(());
+
     #[test]
     fn stop_never_returns_another_sessions_worker() {
+        let _guard = WORKER_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let handle = std::thread::spawn(move || {
             let _ = stop_rx.recv();
@@ -727,12 +759,38 @@ mod tests {
                 ..Committed::default()
             }
         });
+        let abort = AbortFlag::default();
         *WORKER.lock().unwrap() = Some(Worker {
             session_id: 7,
             stop_tx,
+            abort: abort.clone(),
             handle,
         });
         assert!(stop(8).is_none(), "other session");
         assert!(take_worker().is_none(), "mismatched worker is dropped");
+        assert!(abort.is_aborted(), "mismatched worker's chunk is aborted");
+    }
+
+    #[test]
+    fn cancel_aborts_the_workers_chunk() {
+        let _guard = WORKER_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let (stop_tx, _stop_rx) = mpsc::channel::<()>();
+        let abort = AbortFlag::default();
+        let worker_abort = abort.clone();
+        let handle = std::thread::spawn(move || {
+            while !worker_abort.is_aborted() {
+                std::thread::yield_now();
+            }
+            Committed::default()
+        });
+        *WORKER.lock().unwrap() = Some(Worker {
+            session_id: 9,
+            stop_tx,
+            abort: abort.clone(),
+            handle,
+        });
+        cancel();
+        assert!(abort.is_aborted());
+        assert!(take_worker().is_none());
     }
 }

@@ -1,6 +1,8 @@
 // Transcription engine trait
 
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Errors that can occur during transcription.
 #[derive(Debug, Clone, Serialize)]
@@ -13,6 +15,8 @@ pub enum TranscribeError {
     InferenceFailed(String),
     /// No audio samples provided.
     EmptyAudio,
+    /// Stopped through its [`AbortFlag`] (Escape, or a cancelled recording).
+    Aborted,
 }
 
 impl std::fmt::Display for TranscribeError {
@@ -22,11 +26,37 @@ impl std::fmt::Display for TranscribeError {
             TranscribeError::ModelLoadFailed(msg) => write!(f, "Failed to load model: {msg}"),
             TranscribeError::InferenceFailed(msg) => write!(f, "Inference failed: {msg}"),
             TranscribeError::EmptyAudio => write!(f, "Audio buffer is empty"),
+            TranscribeError::Aborted => write!(f, "Transcription aborted"),
         }
     }
 }
 
 impl std::error::Error for TranscribeError {}
+
+/// Cancels the transcriptions of one recording. whisper.cpp polls it after
+/// every encoder run and decoder step, so a running call returns
+/// [`TranscribeError::Aborted`] within one of those. Clones share the flag.
+#[derive(Debug, Clone, Default)]
+pub struct AbortFlag(Arc<AtomicBool>);
+
+impl AbortFlag {
+    pub fn abort(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_aborted(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn as_atomic(&self) -> &AtomicBool {
+        &self.0
+    }
+
+    /// Whether `other` is a clone of this flag.
+    pub fn same(&self, other: &AbortFlag) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
 
 /// Trait for speech-to-text engines (Whisper and Parakeet on whisper.cpp).
 pub trait TranscriptionEngine: Send + Sync {
@@ -36,6 +66,7 @@ pub trait TranscriptionEngine: Send + Sync {
         audio: &[f32],
         languages: &[String],
         dictionary_prompt: Option<&str>,
+        abort: &AbortFlag,
     ) -> Result<String, TranscribeError>;
 
     /// Transcribe one part of a longer recording. `language` pins the
@@ -48,8 +79,12 @@ pub trait TranscriptionEngine: Send + Sync {
         languages: &[String],
         dictionary_prompt: Option<&str>,
         language: Option<&str>,
+        abort: &AbortFlag,
     ) -> Result<(String, Option<String>), TranscribeError> {
         let _ = language;
-        Ok((self.transcribe(audio, languages, dictionary_prompt)?, None))
+        Ok((
+            self.transcribe(audio, languages, dictionary_prompt, abort)?,
+            None,
+        ))
     }
 }

@@ -9,6 +9,7 @@
 // FING_DIRECT_TERMS is an optional comma-separated dictionary. Output is what
 // the hotkey path would type; it prints transcripts, so only use your own audio.
 
+use crate::engine::{AbortFlag, TranscribeError};
 use crate::model::{self, ModelEngine};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -118,8 +119,12 @@ fn engine_smoke() {
             };
             for languages in language_sets {
                 let started = Instant::now();
-                let result =
-                    crate::transcribe::transcribe_audio(&audio, &languages, prompt.as_deref());
+                let result = crate::transcribe::transcribe_audio(
+                    &audio,
+                    &languages,
+                    prompt.as_deref(),
+                    &AbortFlag::default(),
+                );
                 let ms = started.elapsed().as_millis();
                 match result {
                     Ok(text) => {
@@ -204,7 +209,12 @@ fn pretranscribe_smoke() {
         }
         // Warm-up, so the first measured call does not pay for it.
         if let Some((_, audio)) = clips.first() {
-            let _ = crate::transcribe::transcribe_audio(&audio[..RATE as usize * 5], &[], None);
+            let _ = crate::transcribe::transcribe_audio(
+                &audio[..RATE as usize * 5],
+                &[],
+                None,
+                &AbortFlag::default(),
+            );
         }
 
         for (clip_name, audio) in &clips {
@@ -216,10 +226,16 @@ fn pretranscribe_smoke() {
             let end_s = audio.len() as f64 / f64::from(RATE);
             for languages in language_sets {
                 let started = Instant::now();
-                let full = crate::transcribe::transcribe_audio(audio, &languages, None)
-                    .expect("full pass");
+                let full = crate::transcribe::transcribe_audio(
+                    audio,
+                    &languages,
+                    None,
+                    &AbortFlag::default(),
+                )
+                .expect("full pass");
                 let full_ms = started.elapsed().as_secs_f64() * 1000.0;
 
+                let abort = AbortFlag::default();
                 let mut committed = Committed::new(RATE, languages.clone(), None);
                 let mut cut = 0;
                 let mut pending = Vec::new();
@@ -230,9 +246,12 @@ fn pretranscribe_smoke() {
                     pending.extend_from_slice(&audio[cut + pending.len()..read]);
                     let before = pending.len();
                     let tick = Instant::now();
-                    let flow = commit_due_chunks(&mut committed, &mut pending, || {
-                        clock + tick.elapsed().as_secs_f64() >= end_s
-                    });
+                    let flow = commit_due_chunks(
+                        &mut committed,
+                        &mut pending,
+                        || clock + tick.elapsed().as_secs_f64() >= end_s,
+                        &abort,
+                    );
                     cut += before - pending.len();
                     clock += tick.elapsed().as_secs_f64();
                     busy_until = clock;
@@ -245,9 +264,15 @@ fn pretranscribe_smoke() {
                 let wait_ms = (busy_until - end_s).max(0.0) * 1000.0;
                 let chunks = committed.chunks();
                 let started = Instant::now();
-                let chunked =
-                    transcribe_recording(Some(committed), audio, &languages, None, Instant::now())
-                        .expect("chunked pass");
+                let chunked = transcribe_recording(
+                    Some(committed),
+                    audio,
+                    &languages,
+                    None,
+                    Instant::now(),
+                    &abort,
+                )
+                .expect("chunked pass");
                 let tail_ms = started.elapsed().as_secs_f64() * 1000.0;
 
                 println!(
@@ -303,8 +328,13 @@ fn silence_smoke() {
                 vec!["en".into()]
             };
             let started = Instant::now();
-            let text = crate::transcribe::transcribe_audio(&audio, &languages, None)
-                .unwrap_or_else(|err| format!("FAILED: {err}"));
+            let text = crate::transcribe::transcribe_audio(
+                &audio,
+                &languages,
+                None,
+                &AbortFlag::default(),
+            )
+            .unwrap_or_else(|err| format!("FAILED: {err}"));
             println!(
                 "[{name}] {clip_name} {:.1}s: {} ms, blank {}: {text}",
                 audio.len() as f32 / 16_000.0,
@@ -312,6 +342,101 @@ fn silence_smoke() {
                 crate::hotkey::is_blank_audio(&text),
             );
         }
+    }
+    crate::transcribe::unload_transcriber();
+}
+
+// Aborting a running transcription (Escape while Processing): per model, on
+// the longest clip, how long a call takes to return once the flag is set
+// mid-call, and that the engine still gives the same text afterwards (the
+// Parakeet state is reused across calls). Clips named `de_*` use [de],
+// others [en]. Prints transcripts.
+//
+//   FING_DIRECT_MODELS=<models dir> FING_DIRECT_CLIPS=<clips dir> \
+//     bun run scripts/cargo-test.ts abort_smoke -- --ignored --nocapture --test-threads=1
+#[test]
+#[ignore = "needs real model files and clips"]
+fn abort_smoke() {
+    let (Some(models_dir), Some(clips_dir)) =
+        (env_dir("FING_DIRECT_MODELS"), env_dir("FING_DIRECT_CLIPS"))
+    else {
+        eprintln!("set FING_DIRECT_MODELS and FING_DIRECT_CLIPS");
+        return;
+    };
+    let Some((clip_name, audio)) = sorted_files(&clips_dir, "wav")
+        .iter()
+        .map(|clip| {
+            let name = clip.file_name().unwrap().to_string_lossy().into_owned();
+            (name, read_wav_16k_mono(clip))
+        })
+        .max_by_key(|(_, audio)| audio.len())
+    else {
+        eprintln!("no clips");
+        return;
+    };
+    let languages: Vec<String> = if clip_name.starts_with("de_") {
+        vec!["de".into()]
+    } else {
+        vec!["en".into()]
+    };
+    let transcribe =
+        |abort: &AbortFlag| crate::transcribe::transcribe_audio(&audio, &languages, None, abort);
+
+    for model_path in sorted_files(&models_dir, "bin") {
+        let Some(def) = model::definition_for_path(&model_path) else {
+            continue;
+        };
+        let name = def.filename;
+        crate::transcribe::unload_transcriber();
+        if let Err(err) = crate::transcribe::init_transcriber(model_path.to_str().unwrap()) {
+            println!("[{name}] LOAD FAILED: {err}");
+            continue;
+        }
+
+        let started = Instant::now();
+        let baseline = transcribe(&AbortFlag::default()).expect("baseline");
+        let full_ms = started.elapsed().as_millis();
+
+        let set = AbortFlag::default();
+        set.abort();
+        let started = Instant::now();
+        assert!(matches!(transcribe(&set), Err(TranscribeError::Aborted)));
+        let preset_ms = started.elapsed().as_millis();
+
+        // Abort at a quarter and at half of the full pass.
+        for fraction in [4, 2] {
+            let abort = AbortFlag::default();
+            let delay = std::time::Duration::from_millis((full_ms / fraction) as u64);
+            let setter = {
+                let abort = abort.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(delay);
+                    abort.abort();
+                    Instant::now()
+                })
+            };
+            let result = transcribe(&abort);
+            let returned = Instant::now();
+            let aborted_at = setter.join().unwrap();
+            println!(
+                "[{name}] {clip_name}: abort at {} ms of {full_ms} ms returned after {} ms ({})",
+                delay.as_millis(),
+                returned.saturating_duration_since(aborted_at).as_millis(),
+                match &result {
+                    Ok(_) => "finished first".to_string(),
+                    Err(err) => err.to_string(),
+                },
+            );
+        }
+
+        let after = transcribe(&AbortFlag::default()).expect("after abort");
+        println!(
+            "[{name}] {clip_name} {:.1}s: full {full_ms} ms, preset abort {preset_ms} ms, \
+             same text after aborts: {}",
+            audio.len() as f32 / 16_000.0,
+            after == baseline
+        );
+        assert_eq!(after, baseline, "engine still works after an abort");
     }
     crate::transcribe::unload_transcriber();
 }

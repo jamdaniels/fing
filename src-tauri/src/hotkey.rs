@@ -6,6 +6,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::audio::{AudioCapture, AudioTap};
 use crate::db::{save_transcript, NewTranscript};
+use crate::engine::{AbortFlag, TranscribeError};
 use crate::indicator::NoticeKind;
 use crate::microphone::{self, MicChoice, OpenedMic};
 use crate::model::ModelVariant;
@@ -118,6 +119,59 @@ static RECORDING_START: Mutex<Option<Instant>> = Mutex::new(None);
 // Frontmost app when recording started (to restore focus before paste)
 #[cfg(target_os = "macos")]
 static FRONTMOST_APP: Mutex<Option<String>> = Mutex::new(None);
+
+/// Abort flag of the current recording, from key down until its text is
+/// about to be pasted. Escape sets it while recording or transcribing;
+/// whisper.cpp then stops within one encoder run or decoder step.
+static SESSION_ABORT: Mutex<Option<AbortFlag>> = Mutex::new(None);
+
+fn lock_session_abort() -> MutexGuard<'static, Option<AbortFlag>> {
+    match SESSION_ABORT.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!("Session abort mutex poisoned, recovering");
+            poisoned.into_inner()
+        }
+    }
+}
+
+/// Abort the current recording's transcriptions, if it still can be.
+/// Returns whether there was one to abort.
+fn abort_session() -> bool {
+    let mut slot = lock_session_abort();
+    // Set under the lock, so `claim_for_paste` can't miss it.
+    match slot.take() {
+        Some(abort) => {
+            abort.abort();
+            true
+        }
+        None => false,
+    }
+}
+
+/// Close the cancel window of the recording behind `abort` just before its
+/// text is pasted. False when Escape aborted it first.
+fn claim_for_paste(abort: &AbortFlag) -> bool {
+    let mut slot = lock_session_abort();
+    if slot.as_ref().is_some_and(|current| current.same(abort)) {
+        *slot = None;
+    }
+    !abort.is_aborted()
+}
+
+/// Whether Escape can still cancel the transcription in progress (its text
+/// is not being pasted yet).
+pub(crate) fn is_transcription_cancellable() -> bool {
+    crate::state::get_state() == crate::state::AppState::Processing
+        && lock_session_abort().is_some()
+}
+
+/// Abort any transcription still running (app exit), including a cancelled
+/// recording's pre-transcription chunk.
+pub fn abort_transcriptions() {
+    abort_session();
+    crate::pretranscribe::cancel();
+}
 
 /// Initialize the audio thread (call once at startup or before first recording)
 fn ensure_audio_thread() {
@@ -412,6 +466,8 @@ pub fn on_key_down(app: &AppHandle) {
     // Increment session ID and start auto-stop timer
     let session_id = RECORDING_SESSION_ID.fetch_add(1, Ordering::SeqCst) + 1;
     set_recording_start_status(RecordingStartStatus::Idle);
+    let abort = AbortFlag::default();
+    *lock_session_abort() = Some(abort.clone());
     let app_for_timer = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(MAX_RECORDING_DURATION).await;
@@ -455,6 +511,7 @@ pub fn on_key_down(app: &AppHandle) {
                 session_id,
                 settings_snapshot.languages.clone(),
                 crate::dictionary::build_prompt(&settings_snapshot.dictionary_terms),
+                abort,
             );
             crate::level_meter::start(app, tap);
             if let Some(cue) = start_cue {
@@ -570,6 +627,8 @@ pub fn on_key_up(app: &AppHandle) {
 
     // Stop pre-transcription first, so it starts no new chunk.
     let pretranscription = crate::pretranscribe::stop(session_id);
+    // Escape sets it while this transcribes (see `on_transcription_cancel`).
+    let abort = lock_session_abort().clone().unwrap_or_default();
     let cmd_tx = audio_cmd_tx("stop");
 
     // Spawn async task for transcription
@@ -592,6 +651,11 @@ pub fn on_key_up(app: &AppHandle) {
                 .flatten(),
             None => None,
         };
+
+        if abort.is_aborted() {
+            finish_cancelled(&app_handle, duration_ms, test_mode).await;
+            return;
+        }
 
         // Get the audio buffer
         let audio_buffer = match stop_result {
@@ -653,8 +717,13 @@ pub fn on_key_up(app: &AppHandle) {
             &settings.languages,
             dictionary_prompt.as_deref(),
             released,
+            &abort,
         ) {
             Ok(t) => t,
+            Err(TranscribeError::Aborted) => {
+                finish_cancelled(&app_handle, duration_ms, test_mode).await;
+                return;
+            }
             Err(e) => {
                 tracing::error!("Transcription failed: {}", e);
                 notify(
@@ -676,6 +745,12 @@ pub fn on_key_up(app: &AppHandle) {
         if is_blank_audio(&text) {
             tracing::info!("No speech detected, skipping paste/save");
             finish_transcription(&app_handle, None, duration_ms, test_mode).await;
+            return;
+        }
+
+        // Past this point Escape no longer cancels.
+        if !claim_for_paste(&abort) {
+            finish_cancelled(&app_handle, duration_ms, test_mode).await;
             return;
         }
 
@@ -743,6 +818,7 @@ pub fn on_key_cancel(app: &AppHandle) {
     }
 
     tracing::info!("Recording cancelled by Escape");
+    abort_session();
     crate::pretranscribe::cancel();
 
     let session_id = RECORDING_SESSION_ID.load(Ordering::SeqCst);
@@ -763,6 +839,35 @@ pub fn on_key_cancel(app: &AppHandle) {
         }
     }
 
+    clear_frontmost_app();
+
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        finish_transcription(&app_handle, None, 0, is_test_mode).await;
+    });
+}
+
+/// Called when Escape is pressed while a recording is being transcribed:
+/// abort the transcription so nothing is pasted or saved. The task started
+/// by `on_key_up` sees the abort and returns to Ready.
+pub fn on_transcription_cancel(app: &AppHandle) {
+    if crate::state::get_state() != crate::state::AppState::Processing || !abort_session() {
+        return;
+    }
+    tracing::info!("Transcription cancelled by Escape");
+    // Hide now: the task may still be loading the model or finishing an
+    // encoder run.
+    crate::indicator::hide(app).ok();
+}
+
+/// End a transcription that Escape aborted: nothing is pasted or saved.
+async fn finish_cancelled(app: &AppHandle, duration_ms: i64, is_test_mode: bool) {
+    tracing::info!("Transcription aborted; nothing pasted");
+    clear_frontmost_app();
+    finish_transcription(app, None, duration_ms, is_test_mode).await;
+}
+
+fn clear_frontmost_app() {
     #[cfg(target_os = "macos")]
     {
         match FRONTMOST_APP.lock() {
@@ -771,11 +876,6 @@ pub fn on_key_cancel(app: &AppHandle) {
         }
         .take();
     }
-
-    let app_handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        finish_transcription(&app_handle, None, 0, is_test_mode).await;
-    });
 }
 
 /// Show a notice in the indicator; error details stay in the logs.
@@ -791,6 +891,9 @@ async fn finish_transcription(
     _duration_ms: i64,
     is_test_mode: bool,
 ) {
+    // The recording is over; Escape has nothing left to cancel.
+    lock_session_abort().take();
+
     // Hide indicator
     crate::indicator::hide(app).ok();
 
