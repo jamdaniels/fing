@@ -14,7 +14,7 @@ fn main() {
         );
     }
 
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target = Target::from_env();
 
     for path in [
         "build.rs",
@@ -27,20 +27,44 @@ fn main() {
     ] {
         println!("cargo:rerun-if-changed={path}");
     }
+    println!("cargo:rerun-if-env-changed=VULKAN_SDK");
 
     println!(
         "cargo:rustc-env=FING_WHISPER_CPP_VERSION={}",
         whisper_cpp_version(&source)
     );
 
-    build_native(&source, &target_os);
+    build_native(&source, &target);
     generate_bindings(&source);
 }
 
-fn build_native(source: &Path, target_os: &str) {
+/// The cargo target this build script compiles for (not the host: the
+/// universal macOS build compiles the crate once per architecture).
+struct Target {
+    os: String,
+    arch: String,
+    msvc: bool,
+    static_crt: bool,
+}
+
+impl Target {
+    fn from_env() -> Self {
+        let var = |name: &str| env::var(name).unwrap_or_default();
+        Self {
+            os: var("CARGO_CFG_TARGET_OS"),
+            arch: var("CARGO_CFG_TARGET_ARCH"),
+            msvc: var("CARGO_CFG_TARGET_ENV") == "msvc",
+            static_crt: var("CARGO_CFG_TARGET_FEATURE")
+                .split(',')
+                .any(|feature| feature == "crt-static"),
+        }
+    }
+}
+
+fn build_native(source: &Path, target: &Target) {
     let mut config = cmake::Config::new(source);
     // Always Release, also for cargo dev builds: a debug ggml is unusably slow,
-    // and RelWithDebInfo trips the MSVC static CRT config (see whisper-rs-sys).
+    // and RelWithDebInfo trips the MSVC static CRT config.
     config
         .profile("Release")
         .define("CMAKE_BUILD_TYPE", "Release")
@@ -58,14 +82,58 @@ fn build_native(source: &Path, target_os: &str) {
         .define("GGML_OPENMP", "OFF")
         .define("GGML_CCACHE", "OFF");
 
-    if target_os == "macos" {
+    // GGML_NATIVE is off, so the x86 instruction sets are chosen here instead
+    // of by the build machine's CPU (a CI runner may have AVX-512).
+    if target.arch == "x86_64" {
+        // macOS 11 still runs on the Ivy Bridge Mac Pro (2013): AVX, no AVX2.
+        // On Windows, Haswell (2013) and newer.
+        let avx2 = if target.os == "macos" { "OFF" } else { "ON" };
         config
-            .define("GGML_METAL", "ON")
-            .define("GGML_METAL_NDEBUG", "ON")
-            .define("GGML_METAL_EMBED_LIBRARY", "ON")
-            .define("GGML_BLAS", "ON")
-            .define("GGML_BLAS_VENDOR", "Apple")
-            .define("GGML_ACCELERATE", "ON");
+            .define("GGML_SSE42", "ON")
+            .define("GGML_AVX", "ON")
+            .define("GGML_F16C", "ON")
+            .define("GGML_AVX2", avx2)
+            .define("GGML_FMA", avx2)
+            .define("GGML_BMI2", avx2)
+            .define("GGML_AVX512", "OFF");
+    }
+
+    match target.os.as_str() {
+        "macos" => {
+            // Metal only on Apple Silicon; Intel Macs run on the CPU with
+            // Accelerate.
+            let metal = if target.arch == "aarch64" {
+                "ON"
+            } else {
+                "OFF"
+            };
+            config
+                .define("GGML_METAL", metal)
+                .define("GGML_METAL_NDEBUG", "ON")
+                .define("GGML_METAL_EMBED_LIBRARY", "ON")
+                .define("GGML_BLAS", "ON")
+                .define("GGML_BLAS_VENDOR", "Apple")
+                .define("GGML_ACCELERATE", "ON");
+        }
+        "windows" => {
+            config.define("GGML_VULKAN", "ON");
+        }
+        _ => {}
+    }
+
+    if target.msvc {
+        config.cflag("/utf-8").cxxflag("/utf-8");
+        // Match the static CRT that .cargo/config.toml selects for Fing.exe
+        // (/MT), whichever way CMake picks the runtime library.
+        config.static_crt(target.static_crt);
+        config.define("CMAKE_POLICY_DEFAULT_CMP0091", "NEW").define(
+            "CMAKE_MSVC_RUNTIME_LIBRARY",
+            if target.static_crt {
+                "MultiThreaded"
+            } else {
+                "MultiThreadedDLL"
+            },
+        );
     }
 
     let destination = config.build();
@@ -79,15 +147,36 @@ fn build_native(source: &Path, target_os: &str) {
         println!("cargo:rustc-link-lib=static={lib}");
     }
 
-    if target_os == "macos" {
-        println!("cargo:rustc-link-lib=static=ggml-metal");
-        println!("cargo:rustc-link-lib=static=ggml-blas");
-        for framework in ["Metal", "MetalKit", "Foundation", "Accelerate"] {
-            println!("cargo:rustc-link-lib=framework={framework}");
+    match target.os.as_str() {
+        "macos" => {
+            if target.arch == "aarch64" {
+                println!("cargo:rustc-link-lib=static=ggml-metal");
+                for framework in ["Metal", "MetalKit"] {
+                    println!("cargo:rustc-link-lib=framework={framework}");
+                }
+            }
+            println!("cargo:rustc-link-lib=static=ggml-blas");
+            for framework in ["Foundation", "Accelerate"] {
+                println!("cargo:rustc-link-lib=framework={framework}");
+            }
+            println!("cargo:rustc-link-lib=dylib=c++");
         }
-        println!("cargo:rustc-link-lib=dylib=c++");
-    } else if target_os == "linux" {
-        println!("cargo:rustc-link-lib=dylib=stdc++");
+        "windows" => {
+            println!("cargo:rustc-link-lib=static=ggml-vulkan");
+            // vulkan-1.dll ships with the GPU driver; the import library
+            // comes from the Vulkan SDK.
+            match env::var("VULKAN_SDK") {
+                Ok(sdk) => println!(
+                    "cargo:rustc-link-search=native={}",
+                    Path::new(&sdk).join("Lib").display()
+                ),
+                Err(_) => panic!("VULKAN_SDK is not set; install the Vulkan SDK"),
+            }
+            println!("cargo:rustc-link-lib=dylib=vulkan-1");
+            println!("cargo:rustc-link-lib=dylib=advapi32");
+        }
+        "linux" => println!("cargo:rustc-link-lib=dylib=stdc++"),
+        _ => {}
     }
 }
 
