@@ -222,11 +222,11 @@ pub fn prepare_context(
 }
 
 /// Params for the default device. `engine_smoke` can force the CPU with
-/// FING_DIRECT_CPU=1 to approximate a slower machine.
+/// FING_SMOKE_CPU=1 to approximate a slower machine.
 #[cfg(not(target_os = "windows"))]
 fn default_context_params() -> ContextParams {
     #[cfg(test)]
-    if std::env::var_os("FING_DIRECT_CPU").is_some() {
+    if std::env::var_os("FING_SMOKE_CPU").is_some() {
         return ContextParams {
             use_gpu: false,
             ..ContextParams::default()

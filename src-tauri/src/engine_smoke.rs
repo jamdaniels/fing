@@ -1,12 +1,12 @@
 // Opt-in end-to-end engine check against real model files and WAV clips.
 //
-//   FING_DIRECT_MODELS=<models dir> FING_DIRECT_CLIPS=<clips dir> \
+//   FING_SMOKE_MODELS=<models dir> FING_SMOKE_CLIPS=<clips dir> \
 //     bun run scripts/cargo-test.ts engine_smoke::engine_smoke -- --ignored --nocapture --test-threads=1
 //
 // Every `*.wav` in the clips dir (16 kHz mono 16-bit) runs through every model
 // in the models dir that is in the registry. A clip named `de_*` is
 // transcribed with languages [de], [en] and [en, de], anything else with [en].
-// FING_DIRECT_TERMS is an optional comma-separated dictionary. Output is what
+// FING_SMOKE_TERMS is an optional comma-separated dictionary. Output is what
 // the hotkey path would type; it prints transcripts, so only use your own audio.
 
 use crate::engine::{AbortFlag, TranscribeError};
@@ -63,14 +63,14 @@ fn rss_mb() -> u64 {
 #[ignore = "needs real model files and clips"]
 fn engine_smoke() {
     let (Some(models_dir), Some(clips_dir)) =
-        (env_dir("FING_DIRECT_MODELS"), env_dir("FING_DIRECT_CLIPS"))
+        (env_dir("FING_SMOKE_MODELS"), env_dir("FING_SMOKE_CLIPS"))
     else {
-        eprintln!("set FING_DIRECT_MODELS and FING_DIRECT_CLIPS");
+        eprintln!("set FING_SMOKE_MODELS and FING_SMOKE_CLIPS");
         return;
     };
 
     let terms = crate::dictionary::sanitize_terms(
-        &std::env::var("FING_DIRECT_TERMS")
+        &std::env::var("FING_SMOKE_TERMS")
             .map(|t| {
                 t.split(',')
                     .filter(|s| !s.is_empty())
@@ -171,19 +171,19 @@ fn word_edits(left: &str, right: &str) -> usize {
 // transcribes, and on release the tail waits for any chunk still in flight.
 // Clips shorter than 12 s are skipped (they never produce a chunk).
 //
-//   FING_DIRECT_MODELS=<models dir> FING_DIRECT_CLIPS=<clips dir> \
+//   FING_SMOKE_MODELS=<models dir> FING_SMOKE_CLIPS=<clips dir> \
 //     bun run scripts/cargo-test.ts pretranscribe_smoke -- --ignored --nocapture --test-threads=1
 //
-// FING_DIRECT_CPU=1 loads the models without the GPU (macOS).
+// FING_SMOKE_CPU=1 loads the models without the GPU (macOS).
 #[test]
 #[ignore = "needs real model files and clips"]
 fn pretranscribe_smoke() {
     use crate::pretranscribe::{commit_due_chunks, transcribe_recording, Committed, Flow};
 
     let (Some(models_dir), Some(clips_dir)) =
-        (env_dir("FING_DIRECT_MODELS"), env_dir("FING_DIRECT_CLIPS"))
+        (env_dir("FING_SMOKE_MODELS"), env_dir("FING_SMOKE_CLIPS"))
     else {
-        eprintln!("set FING_DIRECT_MODELS and FING_DIRECT_CLIPS");
+        eprintln!("set FING_SMOKE_MODELS and FING_SMOKE_CLIPS");
         return;
     };
     const RATE: u32 = 16_000;
@@ -295,15 +295,15 @@ fn pretranscribe_smoke() {
 // drops it as blank (`noise_*` clips should). Clips named `de_*` use [de],
 // others [en]. Per-stage timing logs need RUST_LOG.
 //
-//   RUST_LOG=fing_lib::transcribe=info FING_DIRECT_MODELS=<models dir> FING_DIRECT_CLIPS=<clips dir> \
+//   RUST_LOG=fing_lib::transcribe=info FING_SMOKE_MODELS=<models dir> FING_SMOKE_CLIPS=<clips dir> \
 //     bun run scripts/cargo-test.ts silence_smoke -- --ignored --nocapture --test-threads=1
 #[test]
 #[ignore = "needs real model files and clips"]
 fn silence_smoke() {
     let (Some(models_dir), Some(clips_dir)) =
-        (env_dir("FING_DIRECT_MODELS"), env_dir("FING_DIRECT_CLIPS"))
+        (env_dir("FING_SMOKE_MODELS"), env_dir("FING_SMOKE_CLIPS"))
     else {
-        eprintln!("set FING_DIRECT_MODELS and FING_DIRECT_CLIPS");
+        eprintln!("set FING_SMOKE_MODELS and FING_SMOKE_CLIPS");
         return;
     };
     let _ = tracing_subscriber::fmt::try_init();
@@ -352,15 +352,15 @@ fn silence_smoke() {
 // Parakeet state is reused across calls). Clips named `de_*` use [de],
 // others [en]. Prints transcripts.
 //
-//   FING_DIRECT_MODELS=<models dir> FING_DIRECT_CLIPS=<clips dir> \
+//   FING_SMOKE_MODELS=<models dir> FING_SMOKE_CLIPS=<clips dir> \
 //     bun run scripts/cargo-test.ts abort_smoke -- --ignored --nocapture --test-threads=1
 #[test]
 #[ignore = "needs real model files and clips"]
 fn abort_smoke() {
     let (Some(models_dir), Some(clips_dir)) =
-        (env_dir("FING_DIRECT_MODELS"), env_dir("FING_DIRECT_CLIPS"))
+        (env_dir("FING_SMOKE_MODELS"), env_dir("FING_SMOKE_CLIPS"))
     else {
-        eprintln!("set FING_DIRECT_MODELS and FING_DIRECT_CLIPS");
+        eprintln!("set FING_SMOKE_MODELS and FING_SMOKE_CLIPS");
         return;
     };
     let Some((clip_name, audio)) = sorted_files(&clips_dir, "wav")
