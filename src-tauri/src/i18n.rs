@@ -21,6 +21,7 @@ pub struct IndicatorTranslations {
     /// Shown while recording when the mic changed; `{name}` is the device.
     pub using_microphone: String,
     pub model_load_failed: String,
+    pub model_missing: String,
     pub transcription_failed: String,
 }
 
@@ -74,6 +75,7 @@ mod tests {
                 &indicator.recording_limit_reached,
                 &indicator.microphone_unavailable,
                 &indicator.model_load_failed,
+                &indicator.model_missing,
                 &indicator.transcription_failed,
             ] {
                 assert!(!message.is_empty());

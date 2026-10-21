@@ -413,6 +413,25 @@ pub fn on_key_down(app: &AppHandle) {
 
     let settings_snapshot = load_settings_sync();
 
+    // Onboarding and model repair make sure the active model is on disk, but
+    // the file can still go missing while the app runs. Don't record audio
+    // that can't be transcribed; Settings > Models offers the download.
+    if !is_test_mode
+        && !is_transcriber_loaded()
+        && !crate::model::is_variant_downloaded(settings_snapshot.active_model_variant)
+    {
+        tracing::warn!(
+            "Active {:?} model is not downloaded; not recording",
+            settings_snapshot.active_model_variant
+        );
+        notify(
+            app,
+            NoticeKind::Error,
+            &crate::i18n::current().indicator.model_missing,
+        );
+        return;
+    }
+
     if !is_test_mode && settings_snapshot.lazy_model_loading {
         // Invalidate any pending lazy unload timer from older activity.
         mark_lazy_activity();
@@ -688,19 +707,21 @@ pub fn on_key_up(app: &AppHandle) {
         // Load settings for model variant and language
         let settings = load_settings().await;
 
-        // Initialize transcriber if needed
-        if !is_transcriber_loaded() {
-            if let Err(e) = init_transcriber_for_variant_async(settings.active_model_variant).await
-            {
-                tracing::error!("Failed to initialize transcriber: {}", e);
-                notify(
-                    &app_handle,
-                    NoticeKind::Error,
-                    &crate::i18n::current().indicator.model_load_failed,
-                );
-                finish_transcription(&app_handle, None, duration_ms, test_mode).await;
-                return;
-            }
+        // Make sure the active model is the one loaded. This returns at once
+        // when it already is; otherwise it loads it, replacing any other
+        // engine (e.g. a model picked again during onboarding after a test).
+        let was_loaded = is_transcriber_loaded();
+        if let Err(e) = init_transcriber_for_variant_async(settings.active_model_variant).await {
+            tracing::error!("Failed to initialize transcriber: {}", e);
+            notify(
+                &app_handle,
+                NoticeKind::Error,
+                &crate::i18n::current().indicator.model_load_failed,
+            );
+            finish_transcription(&app_handle, None, duration_ms, test_mode).await;
+            return;
+        }
+        if !was_loaded {
             tracing::info!(
                 "Transcriber initialized for {:?}",
                 settings.active_model_variant

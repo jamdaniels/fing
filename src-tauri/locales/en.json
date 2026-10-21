@@ -12,6 +12,7 @@
     "microphoneUnavailable": "Microphone unavailable",
     "usingMicrophone": "Using {name}",
     "modelLoadFailed": "Couldn't load model",
+    "modelMissing": "Model not downloaded",
     "transcriptionFailed": "Transcription failed"
   }
 }
