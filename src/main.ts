@@ -27,7 +27,10 @@ import {
   Trash2,
   X,
 } from "lucide";
-import { mountLanguageSelect } from "./components/language-select";
+import {
+  mountLanguageSelect,
+  parakeetLanguageHint,
+} from "./components/language-select";
 import { cleanupOnboarding, renderOnboarding } from "./components/onboarding";
 import type { ParsedHotkeyConfig } from "./lib/hotkey";
 import {
@@ -78,6 +81,7 @@ import {
   stopMicTest,
   updateSettings,
 } from "./lib/ipc";
+import { languagesOutsideParakeet } from "./lib/languages";
 import {
   activeMicrophone,
   type MicrophonePicker,
@@ -94,6 +98,7 @@ import type {
   InferenceRuntimeInfo,
   MicrophoneTest,
   MicTestStartResult,
+  ModelEngine,
   ModelInfo,
   ModelVariant,
   PermissionStatus,
@@ -1613,11 +1618,7 @@ function startModelDownloadPolling(variant: ModelVariant): void {
         modelDownloadPollInterval = null;
       }
       modelDownloadProgress = null;
-      // Refresh models and re-render
-      await loadSettings({ force: true, refreshDevices: false });
-      if (currentView === "settings") {
-        renderContent();
-      }
+      await finishModelDownload(variant, progress.status === "complete");
       return;
     }
 
@@ -2157,35 +2158,7 @@ function handleSettingsClick(e: MouseEvent): void {
     ".activate-model-btn"
   ) as HTMLButtonElement | null;
   if (activateModelBtn) {
-    if (modelSwitchVariant) {
-      return;
-    }
-    const variant = activateModelBtn.dataset.variant as ModelVariant;
-    modelSwitchVariant = variant;
-    modelSwitchError = null;
-    // Later full-settings saves must carry the new model while it loads.
-    if (settings) {
-      settings = { ...settings, activeModelVariant: variant };
-    }
-    rerenderModelList();
-
-    // The backend unloads the current model and loads the new one in place;
-    // no restart. It refuses while a recording is being made or transcribed.
-    setActiveModel(variant)
-      .catch((err: unknown) => {
-        console.error("Activate error:", err);
-        modelSwitchError =
-          err === "model_switch_busy"
-            ? t("models.switchBusy")
-            : t("models.switchFailed");
-      })
-      .then(() => loadSettings({ force: true, refreshDevices: false }))
-      .finally(() => {
-        modelSwitchVariant = null;
-        if (currentView === "settings") {
-          renderContent();
-        }
-      });
+    activateModel(activateModelBtn.dataset.variant as ModelVariant);
     return;
   }
 
@@ -2364,6 +2337,61 @@ async function refreshInferenceRuntimeInfo(force = false): Promise<void> {
   }
 }
 
+/**
+ * Makes a downloaded model active. The backend unloads the current model and
+ * loads the new one in place, no restart; it refuses while a recording is
+ * being made or transcribed.
+ */
+function activateModel(variant: ModelVariant): void {
+  if (modelSwitchVariant) {
+    return;
+  }
+  modelSwitchVariant = variant;
+  modelSwitchError = null;
+  // Later full-settings saves must carry the new model while it loads.
+  if (settings) {
+    settings = { ...settings, activeModelVariant: variant };
+  }
+  rerenderModelList();
+
+  setActiveModel(variant)
+    .catch((err: unknown) => {
+      console.error("Activate error:", err);
+      modelSwitchError =
+        err === "model_switch_busy"
+          ? t("models.switchBusy")
+          : t("models.switchFailed");
+    })
+    .then(() => loadSettings({ force: true, refreshDevices: false }))
+    .finally(() => {
+      modelSwitchVariant = null;
+      if (currentView === "settings") {
+        renderContent();
+      }
+    });
+}
+
+async function finishModelDownload(
+  variant: ModelVariant,
+  completed: boolean
+): Promise<void> {
+  // Refresh models and re-render
+  await loadSettings({ force: true, refreshDevices: false });
+  if (currentView === "settings") {
+    renderContent();
+  }
+  // The active model's file was missing and has just been downloaded again:
+  // load it now rather than on the next hotkey press.
+  if (
+    completed &&
+    settings?.activeModelVariant === variant &&
+    !settings.lazyModelLoading &&
+    models.some((m) => m.variant === variant && m.isDownloaded)
+  ) {
+    activateModel(variant);
+  }
+}
+
 function rerenderModelList(): void {
   const modelList = document.querySelector(".model-list");
   if (modelList && currentView === "settings") {
@@ -2410,7 +2438,7 @@ function renderModelList(): string {
           : null;
       let actions = "";
 
-      if (model.isActive) {
+      if (model.isActive && model.isDownloaded) {
         actions = `<span class="model-status-badge active">${t("models.inUse")}</span>`;
       } else if (modelProgress) {
         if (modelProgress.status === "verifying") {
@@ -2422,6 +2450,7 @@ function renderModelList(): string {
       } else if (modelSwitchVariant === model.variant) {
         actions = `<span class="model-download-progress verifying"><span class="loading-spinner" aria-hidden="true">${createIcon(LoaderCircle)}</span><span class="model-download-progress-value">${t("models.activating")}</span></span>`;
       } else if (model.isDownloaded) {
+        // Only inactive models get here (the active one shows "In Use").
         const switching = modelSwitchVariant ? "disabled" : "";
         actions = `
           <button class="btn btn-outline btn-sm activate-model-btn" data-variant="${model.variant}" ${switching}>${t("models.activate")}</button>
@@ -2433,7 +2462,10 @@ function renderModelList(): string {
 
       return `
         <div class="model-row" data-variant="${model.variant}">
-          <span class="model-col-name">${model.displayName}</span>
+          <div class="model-col-name">
+            <div>${escapeHtml(model.displayName)}</div>
+            ${model.engine === "parakeet" ? `<div class="model-note">${t("models.parakeetNote")}</div>` : ""}
+          </div>
           <span class="model-col-desc">${getModelQualityLabel(model.variant)}</span>
           <span class="model-col-size">~${formatModelSize(model.sizeBytes)} / ~${model.memoryEstimateMb} MB</span>
           <span class="model-col-actions">${actions}</span>
@@ -2457,7 +2489,22 @@ function getModelQualityLabel(variant: ModelVariant): string {
       return t("models.quality.small");
     case "large_turbo_q5":
       return t("models.quality.large_turbo_q5");
+    case "parakeet_tdt_v3_q4k":
+      return t("models.quality.parakeet_tdt_v3_q4k");
   }
+}
+
+function activeModelEngine(): ModelEngine | undefined {
+  return models.find((m) => m.variant === settings?.activeModelVariant)?.engine;
+}
+
+/** Note under the language picker while Parakeet is the active model. */
+function renderLanguageEngineHint(languages: readonly string[]): string {
+  if (activeModelEngine() !== "parakeet") {
+    return "";
+  }
+  const warn = languagesOutsideParakeet(languages).length > 0;
+  return `<div class="lang-engine-hint ${warn ? "warn" : ""}">${escapeHtml(parakeetLanguageHint(languages))}</div>`;
 }
 
 function renderDictionary(el: HTMLElement): void {
@@ -2653,6 +2700,7 @@ function renderSettingsUI(el: HTMLElement): void {
           <div>
             <div class="settings-row-label">${t("settings.transcriptionLanguages")}</div>
             <div class="settings-row-desc">${t("settings.transcriptionLanguagesDescription")}</div>
+            <div id="transcription-lang-hint">${renderLanguageEngineHint(settings?.languages ?? ["en"])}</div>
           </div>
           <div id="transcription-langs"></div>
         </div>
@@ -2747,6 +2795,10 @@ function renderSettingsUI(el: HTMLElement): void {
     mountLanguageSelect(langMount, {
       selected: settings?.languages ?? ["en"],
       onChange: (next) => {
+        const hint = el.querySelector("#transcription-lang-hint");
+        if (hint) {
+          hint.innerHTML = renderLanguageEngineHint(next);
+        }
         void handleSettingChange("languages", next);
       },
     });

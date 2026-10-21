@@ -42,6 +42,7 @@ import {
   updateHotkey,
   updateSettings,
 } from "../lib/ipc";
+import { languagesOutsideParakeet } from "../lib/languages";
 import {
   findAudioDevice,
   systemDefaultMicrophoneLabel,
@@ -57,7 +58,7 @@ import type {
   PermissionStatus,
   Settings,
 } from "../lib/types";
-import { mountLanguageSelect } from "./language-select";
+import { mountLanguageSelect, parakeetLanguageHint } from "./language-select";
 
 type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
@@ -80,7 +81,8 @@ interface OnboardingState {
   testText: string;
   modelRepairReason: BootstrapReason | null;
   invalidModelVariant: ModelVariant | null;
-  inferenceAnalysisAttempted: boolean;
+  /** Model the inference analysis ran for; it reruns when another is picked. */
+  inferenceAnalysisVariant: ModelVariant | null;
   inferenceAnalysisFailed: boolean;
   inferenceAnalysisLoading: boolean;
   inferenceRuntimeInfo: InferenceRuntimeInfo | null;
@@ -109,7 +111,7 @@ let state: OnboardingState = {
   models: [],
   modelRepairReason: null,
   invalidModelVariant: null,
-  inferenceAnalysisAttempted: false,
+  inferenceAnalysisVariant: null,
   inferenceAnalysisFailed: false,
   inferenceAnalysisLoading: false,
   inferenceRuntimeInfo: null,
@@ -405,6 +407,7 @@ function renderModelVariantCards(): string {
     { variant: "small_q5" },
     { variant: "small", badge: t("onboarding.recommended") },
     { variant: "large_turbo_q5" },
+    { variant: "parakeet_tdt_v3_q4k" },
   ];
 
   return variants
@@ -417,10 +420,14 @@ function renderModelVariantCards(): string {
       return `
         <button class="model-variant-card ${isSelected ? "selected" : ""}" data-variant="${variant}">
           ${badge ? `<div class="variant-badge">${badge}</div>` : ""}
-          <div class="variant-name">${model.displayName}</div>
-          <div class="variant-desc">${getModelQualityLabel(model.variant)}</div>
+          <div class="variant-head">
+            <span class="variant-name">${escapeHtml(model.displayName)}</span>
+            <span class="variant-desc">${getModelQualityLabel(model.variant)}</span>
+          </div>
+          ${model.engine === "parakeet" ? `<div class="variant-note">${t("models.parakeetNote")}</div>` : ""}
           <div class="variant-stats">
             <span>${t("onboarding.disk", { size: formatModelSize(model.sizeBytes) })}</span>
+            <span aria-hidden="true">·</span>
             <span>${t("onboarding.memory", { size: model.memoryEstimateMb })}</span>
           </div>
         </button>
@@ -437,6 +444,8 @@ function getModelQualityLabel(variant: ModelVariant): string {
       return t("models.quality.small");
     case "large_turbo_q5":
       return t("models.quality.large_turbo_q5");
+    case "parakeet_tdt_v3_q4k":
+      return t("models.quality.parakeet_tdt_v3_q4k");
   }
 }
 
@@ -502,24 +511,31 @@ function renderInferenceAnalysis(): string {
 }
 
 async function analyzeInferenceHardware(): Promise<void> {
-  if (state.inferenceAnalysisAttempted) {
+  const variant = state.selectedModelVariant;
+  if (state.inferenceAnalysisVariant === variant) {
     return;
   }
-  state.inferenceAnalysisAttempted = true;
+  state.inferenceAnalysisVariant = variant;
+  state.inferenceAnalysisFailed = false;
+  state.inferenceRuntimeInfo = null;
   state.inferenceAnalysisLoading = true;
   render();
+  let info: InferenceRuntimeInfo | null = null;
+  let failed = false;
   try {
-    state.inferenceRuntimeInfo = await getInferenceRuntimeInfo(
-      state.selectedModelVariant,
-      true
-    );
+    info = await getInferenceRuntimeInfo(variant, true);
   } catch (error) {
     console.error("Failed to analyze inference hardware:", error);
-    state.inferenceAnalysisFailed = true;
-  } finally {
-    state.inferenceAnalysisLoading = false;
-    render();
+    failed = true;
   }
+  // Another model was picked meanwhile; its own analysis owns the state.
+  if (state.inferenceAnalysisVariant !== variant) {
+    return;
+  }
+  state.inferenceRuntimeInfo = info;
+  state.inferenceAnalysisFailed = failed;
+  state.inferenceAnalysisLoading = false;
+  render();
 }
 
 function getDownloadHeading(
@@ -623,7 +639,7 @@ function renderDownloadModel(): void {
   }
 
   container.innerHTML = `
-    <div class="onboarding">
+    <div class="onboarding onboarding-models">
       <div class="onboarding-header">
         <div class="onboarding-icon">
           ${createIcon(Download)}
@@ -663,7 +679,10 @@ function renderDownloadModel(): void {
     ?.addEventListener("click", handleDownloadContinue);
   attachStepIndicatorListeners();
 
-  if (isComplete && !state.inferenceAnalysisAttempted) {
+  if (
+    isComplete &&
+    state.inferenceAnalysisVariant !== state.selectedModelVariant
+  ) {
     void analyzeInferenceHardware();
   }
 }
@@ -736,6 +755,7 @@ function renderPreferences(): void {
         <div class="onb-section">
           <h3>${t("onboarding.languages")} <span class="meta">${t("onboarding.pickOne")}</span></h3>
           <div id="onb-langs"></div>
+          <div id="onb-lang-hint">${renderLanguageEngineHint(state.selectedLanguages)}</div>
         </div>
         <div class="onb-section">
           <h3>${t("onboarding.history")} <span class="meta">${t("onboarding.storedLocally")}</span></h3>
@@ -760,6 +780,10 @@ function renderPreferences(): void {
       selected: state.selectedLanguages,
       onChange: (next) => {
         state.selectedLanguages = next;
+        const hint = document.getElementById("onb-lang-hint");
+        if (hint) {
+          hint.innerHTML = renderLanguageEngineHint(next);
+        }
       },
     });
   }
@@ -776,6 +800,18 @@ function renderPreferences(): void {
     .getElementById("continue-btn")
     ?.addEventListener("click", handlePreferencesContinue);
   attachStepIndicatorListeners();
+}
+
+/** Note under the language picker when Parakeet was picked in step 2. */
+function renderLanguageEngineHint(languages: readonly string[]): string {
+  const engine = state.models.find(
+    (m) => m.variant === state.selectedModelVariant
+  )?.engine;
+  if (engine !== "parakeet") {
+    return "";
+  }
+  const warn = languagesOutsideParakeet(languages).length > 0;
+  return `<div class="lang-engine-hint ${warn ? "warn" : ""}">${escapeHtml(parakeetLanguageHint(languages))}</div>`;
 }
 
 async function handlePreferencesContinue(): Promise<void> {
@@ -1601,7 +1637,7 @@ export async function renderOnboarding(
     invalidModelVariant: options.modelRepairReason
       ? (savedSettings?.activeModelVariant ?? "small")
       : null,
-    inferenceAnalysisAttempted: false,
+    inferenceAnalysisVariant: null,
     inferenceAnalysisFailed: false,
     inferenceAnalysisLoading: false,
     inferenceRuntimeInfo: null,

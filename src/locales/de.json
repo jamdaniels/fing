@@ -75,6 +75,8 @@
     "updateFailed": "Wörterbuch konnte nicht aktualisiert werden"
   },
   "languageSelect": {
+    "parakeetIgnored": "Parakeet erkennt die Sprache selbst und ignoriert diese Auswahl.",
+    "parakeetUnsupported": "Parakeet unterstützt {languages} nicht. Wähle stattdessen ein Whisper-Modell.",
     "add": "Hinzufügen",
     "search": "Sprachen suchen…",
     "empty": "Keine Sprache gefunden",
@@ -156,6 +158,7 @@
     "accuracy": "Genauigkeit",
     "diskRam": "Speicher / RAM",
     "inUse": "In Verwendung",
+    "parakeetNote": "Am schnellsten · erkennt Sprache selbst",
     "verifying": "Wird überprüft...",
     "activate": "Aktivieren",
     "activating": "Wird aktiviert...",
@@ -167,7 +170,8 @@
     "quality": {
       "small_q5": "Gut",
       "small": "Besser",
-      "large_turbo_q5": "Am besten"
+      "large_turbo_q5": "Am besten",
+      "parakeet_tdt_v3_q4k": "Besser"
     }
   },
   "permissions": {

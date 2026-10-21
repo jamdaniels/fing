@@ -75,6 +75,8 @@
     "updateFailed": "Failed to update dictionary"
   },
   "languageSelect": {
+    "parakeetIgnored": "Parakeet detects the language itself and ignores this selection.",
+    "parakeetUnsupported": "Parakeet doesn't support {languages}. Choose a Whisper model instead.",
     "add": "Add",
     "search": "Search languages…",
     "empty": "No language found",
@@ -156,6 +158,7 @@
     "accuracy": "Accuracy",
     "diskRam": "Disk / RAM",
     "inUse": "In Use",
+    "parakeetNote": "Fastest · detects the language itself",
     "verifying": "Verifying...",
     "activate": "Activate",
     "activating": "Activating...",
@@ -167,7 +170,8 @@
     "quality": {
       "small_q5": "Good",
       "small": "Better",
-      "large_turbo_q5": "Best"
+      "large_turbo_q5": "Best",
+      "parakeet_tdt_v3_q4k": "Better"
     }
   },
   "permissions": {

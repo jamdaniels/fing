@@ -1,11 +1,27 @@
 import { Check, Plus, Search, X } from "lucide";
-import { t } from "../lib/i18n";
+import { getUiLanguage, t } from "../lib/i18n";
 import { createIcon, escapeHtml } from "../lib/icons";
 import {
   languageName,
+  languagesOutsideParakeet,
   WHISPER_LANGUAGES,
   type WhisperLanguage,
 } from "../lib/languages";
+
+/**
+ * Note for a language picker while Parakeet is the chosen model: it ignores
+ * the selection and can't transcribe languages outside its 25.
+ */
+export function parakeetLanguageHint(selected: readonly string[]): string {
+  const unsupported = languagesOutsideParakeet(selected);
+  if (unsupported.length === 0) {
+    return t("languageSelect.parakeetIgnored");
+  }
+  const names = new Intl.ListFormat(getUiLanguage(), {
+    type: "conjunction",
+  }).format(unsupported.map(languageName));
+  return t("languageSelect.parakeetUnsupported", { languages: names });
+}
 
 export interface LanguageSelectOptions {
   selected: string[];

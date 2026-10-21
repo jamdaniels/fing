@@ -8,11 +8,19 @@ export type AppState =
 export type Theme = "system" | "light" | "dark";
 export type UiLanguage = "en" | "de";
 
-export type ModelVariant = "small_q5" | "small" | "large_turbo_q5";
+export type ModelVariant =
+  | "small_q5"
+  | "small"
+  | "large_turbo_q5"
+  | "parakeet_tdt_v3_q4k";
+
+/** Inference engine a model runs on (`ModelEngine` in model.rs). */
+export type ModelEngine = "whisper" | "parakeet";
 
 export interface ModelInfo {
   description: string;
   displayName: string;
+  engine: ModelEngine;
   filename: string;
   isActive: boolean;
   isDownloaded: boolean;
