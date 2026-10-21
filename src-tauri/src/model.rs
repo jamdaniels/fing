@@ -42,16 +42,17 @@ pub struct ModelDefinition {
     pub memory_estimate_mb: u32,
 }
 
-/// Registry of all available models
+/// Registry of all available models. Download URLs are pinned to a Hugging
+/// Face revision so a moved or replaced file can't break downloads.
 pub const MODEL_REGISTRY: &[ModelDefinition] = &[
     ModelDefinition {
         variant: ModelVariant::SmallQ5,
         engine: ModelEngine::Whisper,
         filename: "ggml-small-q5_1.bin",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q5_1.bin",
         sha256: "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
         size_bytes: 190_000_000, // ~190 MB
-        display_name: "Small Q5",
+        display_name: "Whisper Small Q5",
         description: "Good",
         memory_estimate_mb: 300,
     },
@@ -59,10 +60,10 @@ pub const MODEL_REGISTRY: &[ModelDefinition] = &[
         variant: ModelVariant::Small,
         engine: ModelEngine::Whisper,
         filename: "ggml-small.bin",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin",
         sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
         size_bytes: 488_000_000, // ~488 MB
-        display_name: "Small",
+        display_name: "Whisper Small",
         description: "Better",
         memory_estimate_mb: 600,
     },
@@ -70,11 +71,10 @@ pub const MODEL_REGISTRY: &[ModelDefinition] = &[
         variant: ModelVariant::LargeTurboQ5,
         engine: ModelEngine::Whisper,
         filename: "ggml-large-v3-turbo-q5_0.bin",
-        url:
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin",
         sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
         size_bytes: 574_000_000, // ~574 MB
-        display_name: "Large Turbo Q5",
+        display_name: "Whisper Large",
         description: "Best",
         memory_estimate_mb: 750,
     },
@@ -85,8 +85,8 @@ pub const MODEL_REGISTRY: &[ModelDefinition] = &[
         url: "https://huggingface.co/ggml-org/parakeet-GGUF/resolve/35156454d1a39de06863303dd209fd2bed6ee079/ggml-parakeet-tdt-0.6b-v3-q4_k.bin",
         sha256: "8b205b8b39c6535e153de6fb11c51db46125d45c4f16ba496fe41a0fe71b885e",
         size_bytes: 415_611_879,
-        display_name: "Parakeet TDT 0.6B v3 q4_k",
-        description: "25 European languages, auto-detected",
+        display_name: "Parakeet",
+        description: "Better",
         // Measured: ~530 MB process RSS after load on Metal (docs/whisper-cpp.md).
         memory_estimate_mb: 550,
     },
