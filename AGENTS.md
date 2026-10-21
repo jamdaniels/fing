@@ -8,6 +8,7 @@
 ## Commands
 - `bun run dev`, `bun run build`, or `bun run frontend:build`.
 - Checks: `bun run verify`, or individually `bun run typecheck`, `bun run lint` (`lint:fix`), and `bun run test` (`test:ts` / `test:rust`).
+- Rust builds need CMake, libclang (bindgen) and the whisper.cpp submodule (`git submodule update --init --recursive`); Windows also needs the Vulkan SDK. Binding layout, update procedure and rejected features: `docs/whisper-cpp.md`.
 
 ## Guardrails
 - Never read, write, or modify `.env` or `.env.local` directly.
