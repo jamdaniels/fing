@@ -88,6 +88,9 @@ pub fn lang_max_id() -> i32 {
 pub type LogCallback =
     unsafe extern "C" fn(level: sys::ggml_log_level, text: *const c_char, user_data: *mut c_void);
 
+// Used by the log filter outside Windows (Windows observes logs through
+// fing_whisper_sys directly).
+#[cfg_attr(target_os = "windows", allow(unused_imports))]
 pub use sys::{
     ggml_log_level, ggml_log_level_GGML_LOG_LEVEL_ERROR, ggml_log_level_GGML_LOG_LEVEL_WARN,
 };

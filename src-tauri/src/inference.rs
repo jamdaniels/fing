@@ -250,7 +250,8 @@ fn prepare_default_context(model_path: &str) -> Result<PreparedContext, Transcri
 
 #[cfg(not(target_os = "windows"))]
 fn default_device() -> InferenceDevice {
-    if cfg!(target_os = "macos") {
+    // fing-whisper-sys builds Metal for Apple Silicon only.
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         InferenceDevice {
             id: "metal:auto".to_string(),
             name: "Apple GPU".to_string(),
@@ -267,69 +268,137 @@ fn default_device() -> InferenceDevice {
     }
 }
 
-/// Load a Parakeet model on the default device (Metal on macOS) and record it
-/// as the loaded runtime, like `prepare_context` does for Whisper.
+/// Load a Parakeet model and record it as the loaded runtime, like
+/// `prepare_context` does for Whisper: the default device (Metal on Apple
+/// Silicon), or on Windows the best Vulkan device that fits `variant`, with
+/// CPU fallback.
 pub fn prepare_parakeet(
     model_path: &str,
+    variant: ModelVariant,
     preference: InferenceDevicePreference,
 ) -> Result<(ParakeetContext, InferenceDevice), TranscribeError> {
     invalidate_device_catalog();
 
     #[cfg(not(target_os = "windows"))]
-    let (context, device) = {
+    let (context, device, selection_verified, fallback_reason) = {
+        let _ = variant;
         install_log_filter();
         let context = ParakeetContext::new(Path::new(model_path), default_context_params())
             .map_err(|error| TranscribeError::ModelLoadFailed(error.to_string()))?;
-        (context, default_device())
+        (context, default_device(), true, None)
     };
 
-    // Unverified on Windows: try the resolved Vulkan device, then fall back to CPU.
     #[cfg(target_os = "windows")]
-    let (context, device) = {
-        let devices = device_catalog(false);
-        let (device, _) = resolve_preference(&devices, &preference, 0);
-        let gpu = (device.backend != InferenceBackend::Cpu)
-            .then(|| {
-                ParakeetContext::new(
-                    Path::new(model_path),
-                    ContextParams {
-                        use_gpu: true,
-                        gpu_device: device.gpu_device_index.unwrap_or_default(),
-                    },
-                )
-                .ok()
-            })
-            .flatten();
-        match gpu {
-            Some(context) => (context, device),
-            None => (
-                ParakeetContext::new(
-                    Path::new(model_path),
-                    ContextParams {
-                        use_gpu: false,
-                        gpu_device: 0,
-                    },
-                )
-                .map_err(|error| TranscribeError::ModelLoadFailed(error.to_string()))?,
-                InferenceDevice::cpu(),
-            ),
-        }
-    };
+    let (context, device, selection_verified, fallback_reason) =
+        prepare_windows_parakeet(model_path, variant, &preference)?;
 
     let mut loaded = lock_loaded_runtime();
     loaded.preference = Some(preference);
     loaded.resolved_device = Some(device.clone());
-    loaded.selection_verified = true;
-    loaded.fallback_reason = None;
+    loaded.selection_verified = selection_verified;
+    loaded.fallback_reason = fallback_reason;
     drop(loaded);
 
     Ok((context, device))
 }
 
-/// Record a successful run on `device` (engines without a separate state step).
+/// Parakeet creates its state, and so its GPU backend, while loading, so the
+/// backend log markers are observed around `ParakeetContext::new` (Whisper
+/// observes them on `create_state`). Returns the context, the device, whether
+/// the selection was verified, and the fallback reason.
+#[cfg(target_os = "windows")]
+fn prepare_windows_parakeet(
+    model_path: &str,
+    variant: ModelVariant,
+    preference: &InferenceDevicePreference,
+) -> Result<(ParakeetContext, InferenceDevice, bool, Option<String>), TranscribeError> {
+    let devices = device_catalog(false);
+    let required_mb = required_device_memory_mb(variant);
+    let mut fallback_reason = preferred_device_missing(&devices, preference)
+        .then(|| "preferred_device_not_found".to_string());
+
+    for device in candidate_order(&devices, preference, required_mb) {
+        if !probe_device(&device) {
+            tracing::warn!(
+                device = %device.name,
+                ordinal = device.gpu_device_index.unwrap_or_default(),
+                "Vulkan device initialization probe failed"
+            );
+            fallback_reason = Some("device_initialization_failed".to_string());
+            continue;
+        }
+
+        let params = ContextParams {
+            use_gpu: true,
+            gpu_device: device.gpu_device_index.unwrap_or_default(),
+        };
+        let (result, verification) = observe_backend(&device, || {
+            ParakeetContext::new(Path::new(model_path), params)
+        });
+        match (result, verification) {
+            (Ok(context), BackendVerification::Verified) => {
+                tracing::info!(
+                    device = %device.name,
+                    ordinal = device.gpu_device_index.unwrap_or_default(),
+                    "Selected and verified Vulkan device for Parakeet"
+                );
+                return Ok((context, device, true, fallback_reason));
+            }
+            (Ok(context), BackendVerification::Unavailable) => {
+                tracing::warn!(
+                    device = %device.name,
+                    ordinal = device.gpu_device_index.unwrap_or_default(),
+                    "Parakeet backend verification markers were not observed; accepting device as unverified"
+                );
+                return Ok((context, device, false, fallback_reason));
+            }
+            (Ok(context), BackendVerification::GpuFailed) => {
+                drop(context);
+                tracing::warn!(
+                    device = %device.name,
+                    ordinal = device.gpu_device_index.unwrap_or_default(),
+                    "Parakeet reported Vulkan initialization failure"
+                );
+                fallback_reason = Some("device_initialization_failed".to_string());
+            }
+            (Err(error), _) => {
+                tracing::warn!(
+                    device = %device.name,
+                    ordinal = device.gpu_device_index.unwrap_or_default(),
+                    error = %error,
+                    "Failed to load Parakeet on Vulkan device"
+                );
+                fallback_reason = Some("device_initialization_failed".to_string());
+            }
+        }
+    }
+
+    let params = ContextParams {
+        use_gpu: false,
+        gpu_device: 0,
+    };
+    let context = ParakeetContext::new(Path::new(model_path), params).map_err(|error| {
+        tracing::error!(error = %error, "Failed to load Parakeet on the CPU");
+        TranscribeError::ModelLoadFailed(error.to_string())
+    })?;
+    let fallback_reason = fallback_reason.or_else(|| fallback_reason_for(&devices, preference));
+    tracing::warn!(
+        reason = fallback_reason.as_deref().unwrap_or("user_selected_cpu"),
+        "Using CPU inference backend for Parakeet"
+    );
+    Ok((context, InferenceDevice::cpu(), true, fallback_reason))
+}
+
+/// Record a successful run on `device` (engines without a separate state
+/// step); it is as verified as the device selection at load time.
 pub fn mark_executed(device: &InferenceDevice) {
     let mut loaded = lock_loaded_runtime();
-    apply_execution_status(&mut loaded, device, BackendVerification::Verified);
+    let verification = if loaded.selection_verified {
+        BackendVerification::Verified
+    } else {
+        BackendVerification::Unavailable
+    };
+    apply_execution_status(&mut loaded, device, verification);
 }
 
 /// Send whisper.cpp / parakeet / ggml logs through `safe_whisper_diagnostic`
@@ -613,9 +682,13 @@ fn prepare_windows_context(
             }
         };
 
-        match create_state_observed(&context, &device) {
-            Ok((state, BackendVerification::Verified)) => {
-                drop(state);
+        // The state borrows the context: drop it before the context moves out.
+        let verification = create_state_observed(&context, &device).map(|(state, verification)| {
+            drop(state);
+            verification
+        });
+        match verification {
+            Ok(BackendVerification::Verified) => {
                 tracing::info!(
                     device = %device.name,
                     ordinal = device.gpu_device_index.unwrap_or_default(),
@@ -628,8 +701,7 @@ fn prepare_windows_context(
                     fallback_reason,
                 });
             }
-            Ok((state, BackendVerification::Unavailable)) => {
-                drop(state);
+            Ok(BackendVerification::Unavailable) => {
                 tracing::warn!(
                     device = %device.name,
                     ordinal = device.gpu_device_index.unwrap_or_default(),
@@ -643,8 +715,7 @@ fn prepare_windows_context(
                     fallback_reason,
                 });
             }
-            Ok((state, BackendVerification::GpuFailed)) => {
-                drop(state);
+            Ok(BackendVerification::GpuFailed) => {
                 tracing::warn!(
                     device = %device.name,
                     ordinal = device.gpu_device_index.unwrap_or_default(),
@@ -714,24 +785,9 @@ fn discover_devices() -> Vec<InferenceDevice> {
         discover_windows_devices()
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(not(target_os = "windows"))]
     {
-        vec![InferenceDevice {
-            id: "metal:auto".to_string(),
-            name: "Apple GPU".to_string(),
-            backend: InferenceBackend::Metal,
-            device_kind: InferenceDeviceKind::IntegratedGpu,
-            memory_free_mb: None,
-            memory_total_mb: None,
-            gpu_device_index: Some(0),
-            registry_index: None,
-            backend_name: None,
-        }]
-    }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        vec![InferenceDevice::cpu()]
+        vec![default_device()]
     }
 }
 
@@ -946,6 +1002,21 @@ fn create_state_observed<'ctx>(
             .map_err(|error| TranscribeError::InferenceFailed(error.to_string()));
     }
 
+    let (state_result, verification) = observe_backend(device, || context.create_state());
+    Ok((
+        state_result.map_err(|error| TranscribeError::InferenceFailed(error.to_string()))?,
+        verification,
+    ))
+}
+
+/// Run `init` (which creates a backend for `device`) while watching
+/// whisper.cpp's logs for the backend markers. Serialized, since the log
+/// callback is process-wide.
+#[cfg(target_os = "windows")]
+fn observe_backend<T>(
+    device: &InferenceDevice,
+    init: impl FnOnce() -> T,
+) -> (T, BackendVerification) {
     INSTALL_LOG_OBSERVER.call_once(|| unsafe {
         crate::whisper_cpp::set_log_callback(Some(whisper_log_observer), std::ptr::null_mut());
     });
@@ -968,9 +1039,7 @@ fn create_state_observed<'ctx>(
         });
     }
 
-    let state_result = context
-        .create_state()
-        .map_err(|error| TranscribeError::InferenceFailed(error.to_string()));
+    let result = init();
     let observation = match BACKEND_OBSERVATION.lock() {
         Ok(mut observation) => observation.take(),
         Err(poisoned) => poisoned.into_inner().take(),
@@ -983,10 +1052,10 @@ fn create_state_observed<'ctx>(
         tracing::warn!(
             device = %device.name,
             whisper_cpp_version = crate::whisper_cpp::WHISPER_CPP_VERSION,
-            "Whisper backend verification contract was not observed"
+            "Backend verification contract was not observed"
         );
     }
-    Ok((state_result?, verification))
+    (result, verification)
 }
 
 #[cfg(test)]

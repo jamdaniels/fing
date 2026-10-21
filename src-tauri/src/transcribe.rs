@@ -254,7 +254,11 @@ impl ParakeetEngine {
         }
 
         let settings = crate::settings::load_settings_sync();
-        let (ctx, device) = inference::prepare_parakeet(model_path, settings.inference_device)?;
+        let (ctx, device) = inference::prepare_parakeet(
+            model_path,
+            settings.active_model_variant,
+            settings.inference_device,
+        )?;
 
         Ok(Self {
             ctx: Mutex::new(ctx),
