@@ -1,3 +1,5 @@
+import { readSync } from "node:fs";
+
 const PACKAGE_JSON_PATH = "package.json";
 const CARGO_TOML_PATH = "src-tauri/Cargo.toml";
 const CARGO_LOCK_PATH = "src-tauri/Cargo.lock";
@@ -409,12 +411,38 @@ async function updateChangelog(version: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Read one line from the terminal. Bun's `prompt()` returns null for a bare
+ * Enter just like for end of input, so a bare Enter read as "stop". Here null
+ * means end of input only.
+ */
+function ask(question: string): string | null {
+  process.stdout.write(`${question} `);
+
+  const line: number[] = [];
+  const byte = new Uint8Array(1);
+
+  while (readSync(0, byte, 0, 1, null) === 1) {
+    const value = byte[0] ?? 0;
+
+    if (value === 0x0a) {
+      return new TextDecoder().decode(new Uint8Array(line));
+    }
+
+    line.push(value);
+  }
+
+  return line.length > 0
+    ? new TextDecoder().decode(new Uint8Array(line))
+    : null;
+}
+
 function confirm(question: string): boolean {
   if (!process.stdin.isTTY) {
     fail("Not a terminal. Re-run interactively, or pass --yes.");
   }
 
-  const answer = prompt(`${question} [y/N]`);
+  const answer = ask(`${question} [y/N]`);
 
   return answer?.trim().toLowerCase() === "y";
 }
@@ -425,7 +453,7 @@ function waitForEdit(): boolean {
     return false;
   }
 
-  const answer = prompt(
+  const answer = ask(
     `\nEdit ${CHANGELOG_PATH}, then press Enter to review it again (q to stop):`
   );
 

@@ -2,6 +2,11 @@
 
 All notable changes to Fing will be documented in this file.
 
+## 1.3.1 - 2026-10-22
+
+- Added hands-free mode (double-tap hotkey) and increased recording limit to 5 minutes
+- Bugfixes and security updates
+
 ## 1.3.0 - 2026-10-10
 
 - Added preferred microphone setting
