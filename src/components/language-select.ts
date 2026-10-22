@@ -7,20 +7,30 @@ import {
   WHISPER_LANGUAGES,
   type WhisperLanguage,
 } from "../lib/languages";
+import type { ModelEngine } from "../lib/types";
 
 /**
- * Note for a language picker while Parakeet is the chosen model: it ignores
- * the selection and can't transcribe languages outside its 25.
+ * Note under a language picker for the chosen model's engine: Parakeet
+ * ignores the selection and can't transcribe languages outside its 25.
  */
-export function parakeetLanguageHint(selected: readonly string[]): string {
-  const unsupported = languagesOutsideParakeet(selected);
-  if (unsupported.length === 0) {
-    return t("languageSelect.parakeetIgnored");
+export function renderEngineLanguageHint(
+  engine: ModelEngine | undefined,
+  selected: readonly string[]
+): string {
+  if (engine !== "parakeet") {
+    return "";
   }
-  const names = new Intl.ListFormat(getUiLanguage(), {
-    type: "conjunction",
-  }).format(unsupported.map(languageName));
-  return t("languageSelect.parakeetUnsupported", { languages: names });
+  const unsupported = languagesOutsideParakeet(selected);
+  const text =
+    unsupported.length === 0
+      ? t("languageSelect.parakeetIgnored")
+      : t("languageSelect.parakeetUnsupported", {
+          languages: new Intl.ListFormat(getUiLanguage(), {
+            type: "conjunction",
+          }).format(unsupported.map(languageName)),
+        });
+  const warn = unsupported.length > 0 ? "warn" : "";
+  return `<div class="engine-note lang-engine-hint ${warn}">${escapeHtml(text)}</div>`;
 }
 
 export interface LanguageSelectOptions {

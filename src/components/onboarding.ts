@@ -42,23 +42,31 @@ import {
   updateHotkey,
   updateSettings,
 } from "../lib/ipc";
-import { languagesOutsideParakeet } from "../lib/languages";
 import {
   findAudioDevice,
   systemDefaultMicrophoneLabel,
 } from "../lib/microphone";
+import {
+  formatModelSize,
+  modelQualityLabel,
+  renderModelNote,
+} from "../lib/models";
 import type {
   AudioDevice,
   BootstrapReason,
   DownloadProgress,
   HistoryMode,
   InferenceRuntimeInfo,
+  ModelEngine,
   ModelInfo,
   ModelVariant,
   PermissionStatus,
   Settings,
 } from "../lib/types";
-import { mountLanguageSelect, parakeetLanguageHint } from "./language-select";
+import {
+  mountLanguageSelect,
+  renderEngineLanguageHint,
+} from "./language-select";
 
 type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
@@ -398,10 +406,6 @@ function renderWelcome(): void {
   attachStepIndicatorListeners();
 }
 
-function formatModelSize(bytes: number): string {
-  return `${Math.round(bytes / 1_000_000)} MB`;
-}
-
 function renderModelVariantCards(): string {
   const variants: { variant: ModelVariant; badge?: string }[] = [
     { variant: "small_q5" },
@@ -422,9 +426,9 @@ function renderModelVariantCards(): string {
           ${badge ? `<div class="variant-badge">${badge}</div>` : ""}
           <div class="variant-head">
             <span class="variant-name">${escapeHtml(model.displayName)}</span>
-            <span class="variant-desc">${getModelQualityLabel(model.variant)}</span>
+            <span class="variant-desc">${modelQualityLabel(model.variant)}</span>
           </div>
-          ${model.engine === "parakeet" ? `<div class="variant-note">${t("models.parakeetNote")}</div>` : ""}
+          ${renderModelNote(model)}
           <div class="variant-stats">
             <span>${t("onboarding.disk", { size: formatModelSize(model.sizeBytes) })}</span>
             <span aria-hidden="true">·</span>
@@ -434,19 +438,6 @@ function renderModelVariantCards(): string {
       `;
     })
     .join("");
-}
-
-function getModelQualityLabel(variant: ModelVariant): string {
-  switch (variant) {
-    case "small_q5":
-      return t("models.quality.small_q5");
-    case "small":
-      return t("models.quality.small");
-    case "large_turbo_q5":
-      return t("models.quality.large_turbo_q5");
-    case "parakeet_tdt_v3_q4k":
-      return t("models.quality.parakeet_tdt_v3_q4k");
-  }
 }
 
 function renderDownloadFooterButton(
@@ -755,7 +746,7 @@ function renderPreferences(): void {
         <div class="onb-section">
           <h3>${t("onboarding.languages")} <span class="meta">${t("onboarding.pickOne")}</span></h3>
           <div id="onb-langs"></div>
-          <div id="onb-lang-hint">${renderLanguageEngineHint(state.selectedLanguages)}</div>
+          <div id="onb-lang-hint">${renderEngineLanguageHint(selectedModelEngine(), state.selectedLanguages)}</div>
         </div>
         <div class="onb-section">
           <h3>${t("onboarding.history")} <span class="meta">${t("onboarding.storedLocally")}</span></h3>
@@ -782,7 +773,10 @@ function renderPreferences(): void {
         state.selectedLanguages = next;
         const hint = document.getElementById("onb-lang-hint");
         if (hint) {
-          hint.innerHTML = renderLanguageEngineHint(next);
+          hint.innerHTML = renderEngineLanguageHint(
+            selectedModelEngine(),
+            next
+          );
         }
       },
     });
@@ -802,16 +796,10 @@ function renderPreferences(): void {
   attachStepIndicatorListeners();
 }
 
-/** Note under the language picker when Parakeet was picked in step 2. */
-function renderLanguageEngineHint(languages: readonly string[]): string {
-  const engine = state.models.find(
-    (m) => m.variant === state.selectedModelVariant
-  )?.engine;
-  if (engine !== "parakeet") {
-    return "";
-  }
-  const warn = languagesOutsideParakeet(languages).length > 0;
-  return `<div class="lang-engine-hint ${warn ? "warn" : ""}">${escapeHtml(parakeetLanguageHint(languages))}</div>`;
+/** Engine of the model picked in step 2. */
+function selectedModelEngine(): ModelEngine | undefined {
+  return state.models.find((m) => m.variant === state.selectedModelVariant)
+    ?.engine;
 }
 
 async function handlePreferencesContinue(): Promise<void> {
