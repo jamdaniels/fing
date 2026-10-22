@@ -401,15 +401,20 @@ impl AudioCapture {
     }
 }
 
-/// Resample mono audio from `native_sample_rate` to 16 kHz (the stop path
-/// and pre-transcription chunks share this).
+/// Resample mono audio from `native_sample_rate` to 16 kHz; a buffer already
+/// at 16 kHz is returned as is.
 pub fn resample_to_16k(buffer: Vec<f32>, native_sample_rate: u32) -> Vec<f32> {
-    if native_sample_rate == WHISPER_SAMPLE_RATE {
+    if native_sample_rate == WHISPER_SAMPLE_RATE || buffer.is_empty() {
         return buffer;
     }
+    resample_slice_to_16k(&buffer, native_sample_rate)
+}
 
-    if buffer.is_empty() {
-        return buffer;
+/// Like [`resample_to_16k`] for borrowed audio (pre-transcription chunks), so
+/// the input is only copied when it is already at 16 kHz.
+pub fn resample_slice_to_16k(buffer: &[f32], native_sample_rate: u32) -> Vec<f32> {
+    if native_sample_rate == WHISPER_SAMPLE_RATE || buffer.is_empty() {
+        return buffer.to_vec();
     }
 
     // Use rubato for high-quality resampling
@@ -426,16 +431,16 @@ pub fn resample_to_16k(buffer: Vec<f32>, native_sample_rate: u32) -> Vec<f32> {
         Err(e) => {
             tracing::error!("Failed to create resampler: {}", e);
             // Fallback: simple linear interpolation
-            return simple_resample(&buffer, native_sample_rate, WHISPER_SAMPLE_RATE);
+            return simple_resample(buffer, native_sample_rate, WHISPER_SAMPLE_RATE);
         }
     };
 
     let input_frames = buffer.len();
-    let input_adapter = match InterleavedSlice::new(&buffer, 1, input_frames) {
+    let input_adapter = match InterleavedSlice::new(buffer, 1, input_frames) {
         Ok(adapter) => adapter,
         Err(e) => {
             tracing::error!("Failed to create input adapter: {}", e);
-            return simple_resample(&buffer, native_sample_rate, WHISPER_SAMPLE_RATE);
+            return simple_resample(buffer, native_sample_rate, WHISPER_SAMPLE_RATE);
         }
     };
 
@@ -446,7 +451,7 @@ pub fn resample_to_16k(buffer: Vec<f32>, native_sample_rate: u32) -> Vec<f32> {
             Ok(adapter) => adapter,
             Err(e) => {
                 tracing::error!("Failed to create output adapter: {}", e);
-                return simple_resample(&buffer, native_sample_rate, WHISPER_SAMPLE_RATE);
+                return simple_resample(buffer, native_sample_rate, WHISPER_SAMPLE_RATE);
             }
         };
 
@@ -460,7 +465,7 @@ pub fn resample_to_16k(buffer: Vec<f32>, native_sample_rate: u32) -> Vec<f32> {
         }
         Err(e) => {
             tracing::error!("Resampling error: {}", e);
-            simple_resample(&buffer, native_sample_rate, WHISPER_SAMPLE_RATE)
+            simple_resample(buffer, native_sample_rate, WHISPER_SAMPLE_RATE)
         }
     }
 }

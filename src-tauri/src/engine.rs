@@ -60,31 +60,16 @@ impl AbortFlag {
 
 /// Trait for speech-to-text engines (Whisper and Parakeet on whisper.cpp).
 pub trait TranscriptionEngine: Send + Sync {
-    /// Transcribe 16kHz mono f32 audio samples to text.
+    /// Transcribe 16kHz mono f32 audio samples to text. `language` pins the
+    /// language an earlier part of the same recording used, so a short part
+    /// is not re-detected. Returns the text and the language used (`None` for
+    /// engines without a language setting).
     fn transcribe(
-        &self,
-        audio: &[f32],
-        languages: &[String],
-        dictionary_prompt: Option<&str>,
-        abort: &AbortFlag,
-    ) -> Result<String, TranscribeError>;
-
-    /// Transcribe one part of a longer recording. `language` pins the
-    /// language an earlier part used, so a short part is not re-detected.
-    /// Returns the text and the language this part used (`None` for engines
-    /// without a language setting).
-    fn transcribe_part(
         &self,
         audio: &[f32],
         languages: &[String],
         dictionary_prompt: Option<&str>,
         language: Option<&str>,
         abort: &AbortFlag,
-    ) -> Result<(String, Option<String>), TranscribeError> {
-        let _ = language;
-        Ok((
-            self.transcribe(audio, languages, dictionary_prompt, abort)?,
-            None,
-        ))
-    }
+    ) -> Result<(String, Option<String>), TranscribeError>;
 }

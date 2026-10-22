@@ -11,11 +11,11 @@ use std::sync::Mutex;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::audio::{resample_to_16k, AudioTap, WHISPER_SAMPLE_RATE};
+use crate::audio::{resample_slice_to_16k, AudioTap, WHISPER_SAMPLE_RATE};
 use crate::engine::{AbortFlag, TranscribeError};
-use crate::hotkey::{is_blank_audio, is_digital_silence};
 use crate::transcribe::{
-    is_transcriber_loaded, transcribe_audio, transcribe_audio_part, PartTranscript,
+    is_blank_audio, is_digital_silence, is_transcriber_loaded, transcribe_audio,
+    transcribe_audio_part, PartTranscript,
 };
 
 /// Kill switch. Deliberately not a persisted setting: settings load/save is
@@ -375,7 +375,7 @@ pub(crate) fn commit_due_chunks(
             return Flow::Stop;
         }
         let started = Instant::now();
-        let audio = resample_to_16k(pending[..offset].to_vec(), rate);
+        let audio = resample_slice_to_16k(&pending[..offset], rate);
         let part = if is_digital_silence(&audio) {
             None
         } else {

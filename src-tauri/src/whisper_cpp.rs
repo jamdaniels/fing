@@ -81,18 +81,16 @@ pub fn lang_id(language: &str) -> Option<i32> {
 }
 
 /// Largest whisper language id.
-pub fn lang_max_id() -> i32 {
+fn lang_max_id() -> i32 {
     unsafe { sys::whisper_lang_max_id() }
 }
 
 pub type LogCallback =
     unsafe extern "C" fn(level: sys::ggml_log_level, text: *const c_char, user_data: *mut c_void);
 
-// Used by the log filter outside Windows (Windows observes logs through
-// fing_whisper_sys directly).
-#[cfg_attr(target_os = "windows", allow(unused_imports))]
 pub use sys::{
-    ggml_log_level, ggml_log_level_GGML_LOG_LEVEL_ERROR, ggml_log_level_GGML_LOG_LEVEL_WARN,
+    ggml_log_level, ggml_log_level_GGML_LOG_LEVEL_ERROR, ggml_log_level_GGML_LOG_LEVEL_INFO,
+    ggml_log_level_GGML_LOG_LEVEL_WARN,
 };
 
 /// Route whisper.cpp, parakeet and ggml logs to `callback`.
@@ -374,7 +372,9 @@ impl Drop for WhisperState<'_> {
     }
 }
 
-/// Greedy `whisper_full` parameters. Borrows the language and prompt tokens it points at.
+/// Greedy `whisper_full` parameters for dictation: nothing printed, multiple
+/// segments, context kept across windows. Borrows the language and prompt
+/// tokens it points at.
 pub struct FullParams<'a> {
     raw: sys::whisper_full_params,
     _language: Option<CString>,
@@ -387,6 +387,12 @@ impl<'a> FullParams<'a> {
             sys::whisper_full_default_params(sys::whisper_sampling_strategy_WHISPER_SAMPLING_GREEDY)
         };
         raw.greedy.best_of = 1;
+        raw.print_special = false;
+        raw.print_progress = false;
+        raw.print_realtime = false;
+        raw.print_timestamps = false;
+        raw.single_segment = false;
+        raw.no_context = false;
         Self {
             raw,
             _language: None,
@@ -406,30 +412,6 @@ impl<'a> FullParams<'a> {
     pub fn set_tokens(&mut self, tokens: &'a [i32]) {
         self.raw.prompt_tokens = tokens.as_ptr();
         self.raw.prompt_n_tokens = tokens.len() as c_int;
-    }
-
-    pub fn set_print_special(&mut self, value: bool) {
-        self.raw.print_special = value;
-    }
-
-    pub fn set_print_progress(&mut self, value: bool) {
-        self.raw.print_progress = value;
-    }
-
-    pub fn set_print_realtime(&mut self, value: bool) {
-        self.raw.print_realtime = value;
-    }
-
-    pub fn set_print_timestamps(&mut self, value: bool) {
-        self.raw.print_timestamps = value;
-    }
-
-    pub fn set_single_segment(&mut self, value: bool) {
-        self.raw.single_segment = value;
-    }
-
-    pub fn set_no_context(&mut self, value: bool) {
-        self.raw.no_context = value;
     }
 }
 

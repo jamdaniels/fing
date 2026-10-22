@@ -9,11 +9,12 @@ use crate::db::{save_transcript, NewTranscript};
 use crate::engine::{AbortFlag, TranscribeError};
 use crate::indicator::NoticeKind;
 use crate::microphone::{self, MicChoice, OpenedMic};
-use crate::model::ModelVariant;
 use crate::paste::paste_text;
 use crate::settings::{load_settings, load_settings_sync};
 use crate::sounds;
-use crate::transcribe::is_transcriber_loaded;
+use crate::transcribe::{
+    is_blank_audio, is_digital_silence, is_transcriber_loaded, loaded_variant,
+};
 
 // Maximum recording duration; the audio buffer is sized for the same limit.
 const MAX_RECORDING_DURATION: Duration =
@@ -35,44 +36,6 @@ static ONBOARDING_TEST_MODE: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 pub(crate) fn is_onboarding_test_mode() -> bool {
     ONBOARDING_TEST_MODE.load(Ordering::SeqCst)
-}
-
-// Peak amplitude at or below which a recording counts as digital silence.
-// Whisper hallucinates text on such input, so no engine gets to see it.
-const DIGITAL_SILENCE_PEAK: f32 = 0.001;
-
-pub(crate) fn is_digital_silence(samples: &[f32]) -> bool {
-    samples
-        .iter()
-        .all(|sample| sample.abs() <= DIGITAL_SILENCE_PEAK)
-}
-
-/// Check if a transcription has no actual speech: empty, or only markers like
-/// "[BLANK_AUDIO]" or sound annotations like "[swoosh]", "(clicking)" or "♪",
-/// which Whisper writes on room noise.
-pub(crate) fn is_blank_audio(text: &str) -> bool {
-    if text.trim().is_empty() {
-        return true;
-    }
-    let mut depth = 0_usize;
-    let mut annotated = false;
-    for c in text.chars() {
-        match c {
-            '[' | '(' => {
-                depth += 1;
-                annotated = true;
-            }
-            ']' | ')' => match depth.checked_sub(1) {
-                Some(outer) => depth = outer,
-                None => return false,
-            },
-            '♪' | '♫' | '♬' | '♩' => annotated = true,
-            _ if depth > 0 => {}
-            c if c.is_whitespace() || c.is_ascii_punctuation() => {}
-            _ => return false,
-        }
-    }
-    annotated && depth == 0
 }
 
 // Commands sent to the audio thread
@@ -166,7 +129,7 @@ pub(crate) fn is_transcription_cancellable() -> bool {
         && lock_session_abort().is_some()
 }
 
-/// Abort any transcription still running (app exit), including a cancelled
+/// Abort any transcription still running (Escape, app exit), including a
 /// recording's pre-transcription chunk.
 pub fn abort_transcriptions() {
     abort_session();
@@ -337,13 +300,7 @@ fn mark_lazy_activity() -> u64 {
     LAZY_ACTIVITY_TOKEN.fetch_add(1, Ordering::SeqCst) + 1
 }
 
-// Loads go through model_loader so they serialize with model switches,
-// the startup preload and the idle unload.
-async fn init_transcriber_for_variant_async(variant: ModelVariant) -> Result<(), String> {
-    crate::model_loader::ensure_loaded(variant).await
-}
-
-fn spawn_lazy_preload_if_needed(variant: ModelVariant) {
+fn spawn_lazy_preload_if_needed() {
     if is_transcriber_loaded() {
         return;
     }
@@ -355,7 +312,9 @@ fn spawn_lazy_preload_if_needed(variant: ModelVariant) {
     }
 
     tauri::async_runtime::spawn(async move {
-        match init_transcriber_for_variant_async(variant).await {
+        // Loads go through model_loader so they serialize with model
+        // switches, the startup preload and the idle unload.
+        match crate::model_loader::ensure_loaded().await {
             Ok(_) => tracing::info!("Lazy preload completed"),
             Err(err) => tracing::warn!("Lazy preload failed: {}", err),
         }
@@ -415,10 +374,12 @@ pub fn on_key_down(app: &AppHandle) {
 
     // Onboarding and model repair make sure the active model is on disk, but
     // the file can still go missing while the app runs. Don't record audio
-    // that can't be transcribed; Settings > Models offers the download.
+    // that can't be transcribed; Settings > Models offers the download. Only
+    // an existence check here: the load inspects the file fully.
+    let active = settings_snapshot.active_model_variant;
     if !is_test_mode
-        && !is_transcriber_loaded()
-        && !crate::model::is_variant_downloaded(settings_snapshot.active_model_variant)
+        && loaded_variant() != Some(active)
+        && !crate::model::model_path_for_variant(active).exists()
     {
         tracing::warn!(
             "Active {:?} model is not downloaded; not recording",
@@ -435,7 +396,7 @@ pub fn on_key_down(app: &AppHandle) {
     if !is_test_mode && settings_snapshot.lazy_model_loading {
         // Invalidate any pending lazy unload timer from older activity.
         mark_lazy_activity();
-        spawn_lazy_preload_if_needed(settings_snapshot.active_model_variant);
+        spawn_lazy_preload_if_needed();
     }
 
     // Capture frontmost app on a background thread to avoid delaying the UI.
@@ -654,21 +615,24 @@ pub fn on_key_up(app: &AppHandle) {
     let app_handle = app.clone();
     let test_mode = is_test_mode;
     tauri::async_runtime::spawn(async move {
-        let stop_result = if let Some(cmd_tx) = cmd_tx {
-            match tokio::task::spawn_blocking(move || send_stop_recording_command(&cmd_tx)).await {
-                Ok(result) => result,
-                Err(e) => Err(format!("StopRecording task failed: {e}")),
-            }
-        } else {
-            Err("Audio thread unavailable".to_string())
-        };
-        // Wait for a chunk still in flight (the engine runs one call at a time).
+        // Stop the recording while a chunk still in flight finishes (the
+        // engine runs one call at a time): spawned now, awaited after the wait.
+        let stop = cmd_tx.map(|cmd_tx| {
+            tokio::task::spawn_blocking(move || send_stop_recording_command(&cmd_tx))
+        });
         let pretranscribed = match pretranscription {
             Some(stopped) => tokio::task::spawn_blocking(move || stopped.wait())
                 .await
                 .ok()
                 .flatten(),
             None => None,
+        };
+        let stop_result = match stop {
+            Some(task) => match task.await {
+                Ok(result) => result,
+                Err(e) => Err(format!("StopRecording task failed: {e}")),
+            },
+            None => Err("Audio thread unavailable".to_string()),
         };
 
         if abort.is_aborted() {
@@ -701,7 +665,7 @@ pub fn on_key_up(app: &AppHandle) {
         tracing::info!(
             "Processing {} samples ({:.1}s of audio)",
             audio_buffer.len(),
-            audio_buffer.len() as f32 / 16000.0
+            audio_buffer.len() as f32 / crate::audio::WHISPER_SAMPLE_RATE as f32
         );
 
         // Load settings for model variant and language
@@ -710,8 +674,7 @@ pub fn on_key_up(app: &AppHandle) {
         // Make sure the active model is the one loaded. This returns at once
         // when it already is; otherwise it loads it, replacing any other
         // engine (e.g. a model picked again during onboarding after a test).
-        let was_loaded = is_transcriber_loaded();
-        if let Err(e) = init_transcriber_for_variant_async(settings.active_model_variant).await {
+        if let Err(e) = crate::model_loader::ensure_loaded().await {
             tracing::error!("Failed to initialize transcriber: {}", e);
             notify(
                 &app_handle,
@@ -720,12 +683,6 @@ pub fn on_key_up(app: &AppHandle) {
             );
             finish_transcription(&app_handle, None, duration_ms, test_mode).await;
             return;
-        }
-        if !was_loaded {
-            tracing::info!(
-                "Transcriber initialized for {:?}",
-                settings.active_model_variant
-            );
         }
 
         let dictionary_terms = crate::dictionary::sanitize_terms(&settings.dictionary_terms);
@@ -839,8 +796,7 @@ pub fn on_key_cancel(app: &AppHandle) {
     }
 
     tracing::info!("Recording cancelled by Escape");
-    abort_session();
-    crate::pretranscribe::cancel();
+    abort_transcriptions();
 
     let session_id = RECORDING_SESSION_ID.load(Ordering::SeqCst);
     let recording_started = matches!(
@@ -1004,49 +960,9 @@ pub fn disable_onboarding_test_mode() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn blank_markers_and_sound_annotations_are_blank() {
-        for text in [
-            "",
-            "  ",
-            "[BLANK_AUDIO]",
-            "(blank audio)",
-            "[inaudible]",
-            "[Music]",
-            "[swoosh]",
-            "(clicking)",
-            "[waves crashing]",
-            "(clicking) [Music].",
-            "♪ ♪",
-        ] {
-            assert!(is_blank_audio(text), "{text}");
-        }
-    }
-
-    #[test]
-    fn text_with_words_is_not_blank() {
-        for text in [
-            ".",
-            "Thank you.",
-            "Call me (after five).",
-            "[laughs] That works.",
-            "(clicking",
-            "clicking)",
-        ] {
-            assert!(!is_blank_audio(text), "{text}");
-        }
-    }
-
     use super::*;
     use std::sync::mpsc;
     use std::thread;
-
-    #[test]
-    fn digital_silence_is_detected_by_peak() {
-        assert!(is_digital_silence(&[0.0; 48_000]));
-        assert!(is_digital_silence(&[0.001, -0.001, 0.0005]));
-        assert!(!is_digital_silence(&[0.0, 0.0, -0.002, 0.0]));
-    }
 
     #[test]
     fn failed_start_does_not_leak_into_next_stop_response() {

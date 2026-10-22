@@ -95,7 +95,7 @@ fn engine_smoke() {
         );
 
         let started = Instant::now();
-        if let Err(err) = crate::transcribe::init_transcriber(model_path.to_str().unwrap()) {
+        if let Err(err) = crate::transcribe::init_transcriber(def.variant, &model_path) {
             println!("[{name}] LOAD FAILED: {err}");
             continue;
         }
@@ -203,7 +203,7 @@ fn pretranscribe_smoke() {
         };
         let name = def.filename;
         crate::transcribe::unload_transcriber();
-        if let Err(err) = crate::transcribe::init_transcriber(model_path.to_str().unwrap()) {
+        if let Err(err) = crate::transcribe::init_transcriber(def.variant, &model_path) {
             println!("[{name}] LOAD FAILED: {err}");
             continue;
         }
@@ -315,7 +315,7 @@ fn silence_smoke() {
         };
         let name = def.filename;
         crate::transcribe::unload_transcriber();
-        if let Err(err) = crate::transcribe::init_transcriber(model_path.to_str().unwrap()) {
+        if let Err(err) = crate::transcribe::init_transcriber(def.variant, &model_path) {
             println!("[{name}] LOAD FAILED: {err}");
             continue;
         }
@@ -339,7 +339,7 @@ fn silence_smoke() {
                 "[{name}] {clip_name} {:.1}s: {} ms, blank {}: {text}",
                 audio.len() as f32 / 16_000.0,
                 started.elapsed().as_millis(),
-                crate::hotkey::is_blank_audio(&text),
+                crate::transcribe::is_blank_audio(&text),
             );
         }
     }
@@ -388,7 +388,7 @@ fn abort_smoke() {
         };
         let name = def.filename;
         crate::transcribe::unload_transcriber();
-        if let Err(err) = crate::transcribe::init_transcriber(model_path.to_str().unwrap()) {
+        if let Err(err) = crate::transcribe::init_transcriber(def.variant, &model_path) {
             println!("[{name}] LOAD FAILED: {err}");
             continue;
         }

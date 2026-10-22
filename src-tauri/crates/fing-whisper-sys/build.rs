@@ -67,7 +67,6 @@ fn build_native(source: &Path, target: &Target) {
     // and RelWithDebInfo trips the MSVC static CRT config.
     config
         .profile("Release")
-        .define("CMAKE_BUILD_TYPE", "Release")
         .define("BUILD_SHARED_LIBS", "OFF")
         .define("WHISPER_BUILD_IS_DEV", "OFF")
         .define("WHISPER_BUILD_TESTS", "OFF")

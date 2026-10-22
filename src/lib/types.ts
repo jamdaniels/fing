@@ -18,7 +18,6 @@ export type ModelVariant =
 export type ModelEngine = "whisper" | "parakeet";
 
 export interface ModelInfo {
-  description: string;
   displayName: string;
   engine: ModelEngine;
   filename: string;

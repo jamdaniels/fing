@@ -416,9 +416,9 @@ fn stop_mic_test() {
 
 #[tauri::command]
 async fn download_model(variant: model::ModelVariant) -> Result<String, String> {
-    model::download_variant(variant)
-        .await
-        .map(|p| p.to_string_lossy().to_string())
+    let path = model::download_variant(variant).await?;
+    tauri::async_runtime::spawn(model_loader::load_if_active(variant));
+    Ok(path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -566,7 +566,7 @@ async fn update_settings(
         } else if let Err(load_err) =
             // Loads the active model (also one a concurrent model switch just
             // selected); fails for a missing model or a failed load.
-            model_loader::ensure_loaded(updated.active_model_variant).await
+            model_loader::ensure_loaded().await
         {
             let mut rollback = updated.clone();
             rollback.lazy_model_loading = true;
@@ -675,7 +675,7 @@ async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Model verification task failed: {e}"))??;
 
     if !current_settings.lazy_model_loading {
-        model_loader::ensure_loaded(variant)
+        model_loader::ensure_loaded()
             .await
             .map_err(|e| format!("Failed to initialize transcriber: {e}"))?;
     }
@@ -969,9 +969,8 @@ pub fn run() {
                 // the preload waits for it instead of loading twice.
                 if !saved_settings.lazy_model_loading {
                     if available_model_path.is_some() {
-                        let variant = saved_settings.active_model_variant;
                         tauri::async_runtime::spawn(async move {
-                            match model_loader::ensure_loaded(variant).await {
+                            match model_loader::ensure_loaded().await {
                                 Ok(()) => tracing::info!("Transcriber preloaded"),
                                 Err(e) => {
                                     tracing::warn!("Transcriber init deferred to first use: {}", e)

@@ -38,7 +38,6 @@ pub struct ModelDefinition {
     pub sha256: &'static str,
     pub size_bytes: u64,
     pub display_name: &'static str,
-    pub description: &'static str,
     pub memory_estimate_mb: u32,
 }
 
@@ -53,7 +52,6 @@ pub const MODEL_REGISTRY: &[ModelDefinition] = &[
         sha256: "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
         size_bytes: 190_000_000, // ~190 MB
         display_name: "Whisper Small Q5",
-        description: "Good",
         memory_estimate_mb: 300,
     },
     ModelDefinition {
@@ -64,7 +62,6 @@ pub const MODEL_REGISTRY: &[ModelDefinition] = &[
         sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
         size_bytes: 488_000_000, // ~488 MB
         display_name: "Whisper Small",
-        description: "Better",
         memory_estimate_mb: 600,
     },
     ModelDefinition {
@@ -75,7 +72,6 @@ pub const MODEL_REGISTRY: &[ModelDefinition] = &[
         sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
         size_bytes: 574_000_000, // ~574 MB
         display_name: "Whisper Large",
-        description: "Best",
         memory_estimate_mb: 750,
     },
     ModelDefinition {
@@ -86,7 +82,6 @@ pub const MODEL_REGISTRY: &[ModelDefinition] = &[
         sha256: "8b205b8b39c6535e153de6fb11c51db46125d45c4f16ba496fe41a0fe71b885e",
         size_bytes: 415_611_879,
         display_name: "Parakeet",
-        description: "Better",
         // Measured: ~530 MB process RSS after load on Metal (docs/whisper-cpp.md).
         memory_estimate_mb: 550,
     },
@@ -101,6 +96,7 @@ pub fn get_definition(variant: ModelVariant) -> &'static ModelDefinition {
 }
 
 /// Registry entry whose file name matches `path`, if any.
+#[cfg(test)]
 pub fn definition_for_path(path: &Path) -> Option<&'static ModelDefinition> {
     let filename = path.file_name()?.to_str()?;
     MODEL_REGISTRY.iter().find(|m| m.filename == filename)
@@ -144,7 +140,6 @@ pub struct ModelInfo {
     pub engine: ModelEngine,
     pub filename: String,
     pub display_name: String,
-    pub description: String,
     pub size_bytes: u64,
     pub memory_estimate_mb: u32,
     pub is_downloaded: bool,
@@ -160,7 +155,6 @@ pub fn get_all_models(active_variant: ModelVariant) -> Vec<ModelInfo> {
             engine: def.engine,
             filename: def.filename.to_string(),
             display_name: def.display_name.to_string(),
-            description: def.description.to_string(),
             size_bytes: def.size_bytes,
             memory_estimate_mb: def.memory_estimate_mb,
             is_downloaded: is_variant_downloaded(def.variant),

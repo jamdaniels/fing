@@ -1,12 +1,14 @@
 // Transcription engines (Whisper and Parakeet on whisper.cpp) and the global
 // loaded-engine slot.
 
+use crate::audio::WHISPER_SAMPLE_RATE;
 use crate::engine::{AbortFlag, TranscribeError, TranscriptionEngine};
+use crate::inference::InferenceDevicePreference;
 use crate::inference::{self, InferenceDevice};
-use crate::model::{self, ModelEngine};
-use crate::whisper_cpp::{self, FfiError, FullParams, ParakeetContext, WhisperContext};
+use crate::model::{self, ModelDefinition, ModelEngine, ModelVariant};
+use crate::whisper_cpp::{self, lang_id, FfiError, FullParams, ParakeetContext, WhisperContext};
 use once_cell::sync::Lazy;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -14,11 +16,6 @@ use std::time::Instant;
 const DEFAULT_LANGUAGE: &str = "en";
 const MAX_PROMPT_TOKENS: usize = 256;
 const UNSUPPORTED_LANGUAGE: &str = "yue";
-const SAMPLE_RATE: f32 = 16_000.0;
-
-fn get_lang_id(language: &str) -> Option<i32> {
-    whisper_cpp::lang_id(language)
-}
 #[derive(Debug, PartialEq)]
 enum LanguagePlan<'a> {
     Explicit(&'a str),
@@ -30,7 +27,7 @@ fn language_plan(languages: &[String]) -> LanguagePlan<'_> {
         .iter()
         .map(String::as_str)
         .filter(|language| !language.eq_ignore_ascii_case(UNSUPPORTED_LANGUAGE))
-        .filter(|language| get_lang_id(language).is_some())
+        .filter(|language| lang_id(language).is_some())
         .collect::<Vec<_>>();
 
     match candidates.as_slice() {
@@ -46,7 +43,7 @@ fn select_detected_language<'a>(candidates: &[&'a str], probabilities: &[f32]) -
         .copied()
         .filter(|language| !language.eq_ignore_ascii_case(UNSUPPORTED_LANGUAGE))
         .filter_map(|language| {
-            let language_id = usize::try_from(get_lang_id(language)?).ok()?;
+            let language_id = usize::try_from(lang_id(language)?).ok()?;
             let probability = *probabilities.get(language_id)?;
             probability.is_finite().then_some((language, probability))
         })
@@ -84,18 +81,12 @@ pub struct WhisperEngine {
 }
 
 impl WhisperEngine {
-    pub fn new(model_path: &str) -> Result<Self, TranscribeError> {
-        let path = Path::new(model_path);
-        if !path.exists() {
-            return Err(TranscribeError::ModelNotFound);
-        }
-
-        let settings = crate::settings::load_settings_sync();
-        let prepared = inference::prepare_context(
-            model_path,
-            settings.active_model_variant,
-            settings.inference_device,
-        )?;
+    fn new(
+        model_path: &str,
+        variant: ModelVariant,
+        preference: InferenceDevicePreference,
+    ) -> Result<Self, TranscribeError> {
+        let prepared = inference::prepare_context(model_path, variant, preference)?;
 
         Ok(Self {
             ctx: Mutex::new(prepared.context),
@@ -171,12 +162,6 @@ impl WhisperEngine {
 
         let mut params = FullParams::greedy();
         params.set_language(language);
-        params.set_print_special(false);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_timestamps(false);
-        params.set_single_segment(false);
-        params.set_no_context(false);
 
         let prompt_tokens = dictionary_prompt
             .map(str::trim)
@@ -221,17 +206,6 @@ impl TranscriptionEngine for WhisperEngine {
         audio: &[f32],
         languages: &[String],
         dictionary_prompt: Option<&str>,
-        abort: &AbortFlag,
-    ) -> Result<String, TranscribeError> {
-        self.run(audio, languages, dictionary_prompt, None, abort)
-            .map(|(text, _)| text)
-    }
-
-    fn transcribe_part(
-        &self,
-        audio: &[f32],
-        languages: &[String],
-        dictionary_prompt: Option<&str>,
         language: Option<&str>,
         abort: &AbortFlag,
     ) -> Result<(String, Option<String>), TranscribeError> {
@@ -248,21 +222,16 @@ pub struct ParakeetEngine {
 }
 
 impl ParakeetEngine {
-    pub fn new(model_path: &str) -> Result<Self, TranscribeError> {
-        if !Path::new(model_path).exists() {
-            return Err(TranscribeError::ModelNotFound);
-        }
-
-        let settings = crate::settings::load_settings_sync();
-        let (ctx, device) = inference::prepare_parakeet(
-            model_path,
-            settings.active_model_variant,
-            settings.inference_device,
-        )?;
+    fn new(
+        model_path: &str,
+        variant: ModelVariant,
+        preference: InferenceDevicePreference,
+    ) -> Result<Self, TranscribeError> {
+        let prepared = inference::prepare_parakeet(model_path, variant, preference)?;
 
         Ok(Self {
-            ctx: Mutex::new(ctx),
-            device,
+            ctx: Mutex::new(prepared.context),
+            device: prepared.device,
         })
     }
 }
@@ -273,8 +242,9 @@ impl TranscriptionEngine for ParakeetEngine {
         audio: &[f32],
         _languages: &[String],
         _dictionary_prompt: Option<&str>,
+        _language: Option<&str>,
         abort: &AbortFlag,
-    ) -> Result<String, TranscribeError> {
+    ) -> Result<(String, Option<String>), TranscribeError> {
         if audio.is_empty() {
             return Err(TranscribeError::EmptyAudio);
         }
@@ -294,56 +264,81 @@ impl TranscriptionEngine for ParakeetEngine {
             "Parakeet stages"
         );
 
-        Ok(text.trim().to_string())
+        Ok((text.trim().to_string(), None))
     }
+}
+
+// Peak amplitude at or below which a recording counts as digital silence.
+// Whisper hallucinates text on such input, so no engine gets to see it.
+const DIGITAL_SILENCE_PEAK: f32 = 0.001;
+
+pub fn is_digital_silence(samples: &[f32]) -> bool {
+    samples
+        .iter()
+        .all(|sample| sample.abs() <= DIGITAL_SILENCE_PEAK)
+}
+
+/// Check if a transcription has no actual speech: empty, or only markers like
+/// "[BLANK_AUDIO]" or sound annotations like "[swoosh]", "(clicking)" or "♪",
+/// which Whisper writes on room noise.
+pub fn is_blank_audio(text: &str) -> bool {
+    if text.trim().is_empty() {
+        return true;
+    }
+    let mut depth = 0_usize;
+    let mut annotated = false;
+    for c in text.chars() {
+        match c {
+            '[' | '(' => {
+                depth += 1;
+                annotated = true;
+            }
+            ']' | ')' => match depth.checked_sub(1) {
+                Some(outer) => depth = outer,
+                None => return false,
+            },
+            '♪' | '♫' | '♬' | '♩' => annotated = true,
+            _ if depth > 0 => {}
+            c if c.is_whitespace() || c.is_ascii_punctuation() => {}
+            _ => return false,
+        }
+    }
+    annotated && depth == 0
 }
 
 /// The engine currently in memory plus what the timing logs need.
 struct LoadedEngine {
     engine: Arc<dyn TranscriptionEngine>,
-    kind: ModelEngine,
-    model_path: PathBuf,
+    model: &'static ModelDefinition,
     load_ms: u128,
     /// Distinct per load, so parts of one recording can tell whether they all
     /// ran on the same engine.
     generation: u64,
 }
 
-impl LoadedEngine {
-    fn file_name(&self) -> &str {
-        self.model_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("unknown")
-    }
-}
-
-fn engine_kind_for(path: &Path) -> ModelEngine {
-    model::definition_for_path(path)
-        .map(|def| def.engine)
-        .unwrap_or(ModelEngine::Whisper)
-}
-
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
-fn load_engine(model_path: &str) -> Result<LoadedEngine, TranscribeError> {
-    let path = PathBuf::from(model_path);
-    let kind = engine_kind_for(&path);
+fn load_engine(variant: ModelVariant, model_path: &Path) -> Result<LoadedEngine, TranscribeError> {
+    if !model_path.exists() {
+        return Err(TranscribeError::ModelNotFound);
+    }
+    let model = model::get_definition(variant);
+    let path = model_path.to_string_lossy();
+    let preference = crate::settings::load_settings_sync().inference_device;
     let started = Instant::now();
-    let engine: Arc<dyn TranscriptionEngine> = match kind {
-        ModelEngine::Whisper => Arc::new(WhisperEngine::new(model_path)?),
-        ModelEngine::Parakeet => Arc::new(ParakeetEngine::new(model_path)?),
+    let engine: Arc<dyn TranscriptionEngine> = match model.engine {
+        ModelEngine::Whisper => Arc::new(WhisperEngine::new(&path, variant, preference)?),
+        ModelEngine::Parakeet => Arc::new(ParakeetEngine::new(&path, variant, preference)?),
     };
     let loaded = LoadedEngine {
         engine,
-        kind,
-        model_path: path,
+        model,
         load_ms: started.elapsed().as_millis(),
         generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
     };
     tracing::info!(
-        engine = ?loaded.kind,
-        model = loaded.file_name(),
+        engine = ?model.engine,
+        model = model.filename,
         load_ms = loaded.load_ms as u64,
         whisper_cpp = whisper_cpp::WHISPER_CPP_VERSION,
         "Transcription engine loaded"
@@ -351,28 +346,29 @@ fn load_engine(model_path: &str) -> Result<LoadedEngine, TranscribeError> {
     Ok(loaded)
 }
 
-// Global engine instance (can be loaded/unloaded/swapped at runtime).
+// Global engine instance (can be loaded/unloaded/swapped at runtime). The lock
+// is only held to read or swap the slot, never while a model loads, so a
+// hotkey press during a load is not blocked. `model_loader` serializes loads.
 static TRANSCRIBER: Lazy<Mutex<Option<Arc<LoadedEngine>>>> = Lazy::new(|| Mutex::new(None));
 
-/// Initialize the global engine from `model_path`; the engine (Whisper or
-/// Parakeet) follows the model registry entry for that file name. A no-op when
-/// that model is already loaded; replaces a different loaded model.
-pub fn init_transcriber(model_path: &str) -> Result<(), TranscribeError> {
-    let mut guard = TRANSCRIBER
-        .lock()
-        .map_err(|_| TranscribeError::ModelLoadFailed("Transcriber lock poisoned".to_string()))?;
-    if let Some(loaded) = guard.as_ref() {
-        if loaded.model_path == Path::new(model_path) {
-            return Ok(());
-        }
+/// Load `variant` from `model_path` as the global engine (Whisper or Parakeet,
+/// per its registry entry). A no-op when that model is already loaded; a
+/// different loaded model is freed first, so two never share memory.
+pub fn init_transcriber(variant: ModelVariant, model_path: &Path) -> Result<(), TranscribeError> {
+    if loaded_variant() == Some(variant) {
+        return Ok(());
+    }
+    if is_transcriber_loaded() {
         tracing::info!("Replacing loaded transcription engine");
-        *guard = None;
-        inference::mark_unloaded();
+        unload_transcriber();
     }
 
     tracing::info!("Initializing transcriber");
-    *guard = Some(Arc::new(load_engine(model_path)?));
-
+    let loaded = Arc::new(load_engine(variant, model_path)?);
+    let mut guard = TRANSCRIBER
+        .lock()
+        .map_err(|_| TranscribeError::ModelLoadFailed("Transcriber lock poisoned".to_string()))?;
+    *guard = Some(loaded);
     Ok(())
 }
 
@@ -383,12 +379,14 @@ fn get_loaded() -> Option<Arc<LoadedEngine>> {
     }
 }
 
+/// The registry model of the loaded engine, if one is loaded.
+pub fn loaded_variant() -> Option<ModelVariant> {
+    get_loaded().map(|loaded| loaded.model.variant)
+}
+
 /// Whether the global transcriber is currently loaded.
 pub fn is_transcriber_loaded() -> bool {
-    match TRANSCRIBER.lock() {
-        Ok(guard) => guard.is_some(),
-        Err(_) => false,
-    }
+    loaded_variant().is_some()
 }
 
 /// Unload the global transcriber.
@@ -434,14 +432,13 @@ pub fn transcribe_audio_part(
     };
 
     let started = Instant::now();
-    let result =
-        loaded
-            .engine
-            .transcribe_part(audio, languages, dictionary_prompt, language, abort);
+    let result = loaded
+        .engine
+        .transcribe(audio, languages, dictionary_prompt, language, abort);
     tracing::info!(
-        engine = ?loaded.kind,
-        model = loaded.file_name(),
-        audio_s = format!("{:.2}", audio.len() as f32 / SAMPLE_RATE),
+        engine = ?loaded.model.engine,
+        model = loaded.model.filename,
+        audio_s = format!("{:.2}", audio.len() as f32 / WHISPER_SAMPLE_RATE as f32),
         load_ms = loaded.load_ms as u64,
         transcribe_ms = started.elapsed().as_millis() as u64,
         ok = result.is_ok(),
@@ -458,6 +455,47 @@ pub fn transcribe_audio_part(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blank_markers_and_sound_annotations_are_blank() {
+        for text in [
+            "",
+            "  ",
+            "[BLANK_AUDIO]",
+            "(blank audio)",
+            "[inaudible]",
+            "[Music]",
+            "[swoosh]",
+            "(clicking)",
+            "[waves crashing]",
+            "(clicking) [Music].",
+            "♪ ♪",
+        ] {
+            assert!(is_blank_audio(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn text_with_words_is_not_blank() {
+        for text in [
+            ".",
+            "Thank you.",
+            "Call me (after five).",
+            "[laughs] That works.",
+            "(clicking",
+            "clicking)",
+        ] {
+            assert!(!is_blank_audio(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn digital_silence_is_detected_by_peak() {
+        assert!(is_digital_silence(&[0.0; 48_000]));
+        assert!(is_digital_silence(&[0.001, -0.001, 0.0005]));
+        assert!(!is_digital_silence(&[0.0, 0.0, -0.002, 0.0]));
+    }
+
     use std::time::{SystemTime, UNIX_EPOCH};
 
     static TRANSCRIBE_TEST_MUTEX: Mutex<()> = Mutex::new(());
@@ -485,13 +523,13 @@ mod tests {
     fn probabilities_with(values: &[(&str, f32)]) -> Vec<f32> {
         let max_language_id = values
             .iter()
-            .filter_map(|(language, _)| get_lang_id(language))
+            .filter_map(|(language, _)| lang_id(language))
             .max()
             .unwrap_or_default();
         let mut probabilities = vec![0.0; usize::try_from(max_language_id + 1).unwrap_or(0)];
 
         for (language, probability) in values {
-            if let Some(language_id) = get_lang_id(language) {
+            if let Some(language_id) = lang_id(language) {
                 probabilities[usize::try_from(language_id).expect("language id should be valid")] =
                     *probability;
             }
@@ -565,7 +603,7 @@ mod tests {
         let missing_path = missing_model_path();
 
         assert!(matches!(
-            init_transcriber(&missing_path),
+            init_transcriber(ModelVariant::Small, Path::new(&missing_path)),
             Err(TranscribeError::ModelNotFound)
         ));
         assert!(!is_transcriber_loaded());
