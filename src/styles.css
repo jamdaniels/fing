@@ -3142,6 +3142,13 @@ body[data-platform="windows"] .titlebar {
   color: var(--warning-text);
 }
 
+/* Quieter on the onboarding cards; the card's gap already spaces it */
+.model-variant-card .engine-note {
+  margin-top: 0;
+  line-height: 1.3;
+  color: var(--text-tertiary);
+}
+
 .model-col-desc {
   flex-shrink: 0;
   width: 72px;

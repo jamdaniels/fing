@@ -211,15 +211,20 @@ pub fn prepare_context(
     prepare(variant, preference, &|params, device| {
         let context =
             WhisperContext::new(Path::new(model_path), params).map_err(|e| e.to_string())?;
-        // Whisper creates its backend with each state: probe one (the state
-        // borrows the context, so it is dropped before the context moves).
+        // Whisper creates its backend with each state: probe one on a GPU
+        // (the state borrows the context, so it is dropped before the context
+        // moves). The CPU needs no probe.
         #[cfg(target_os = "windows")]
-        let verification = create_state_observed(&context, device)
-            .map(|(state, verification)| {
-                drop(state);
-                verification
-            })
-            .map_err(|e| e.to_string())?;
+        let verification = if device.backend == InferenceBackend::Cpu {
+            BackendVerification::Verified
+        } else {
+            create_state_observed(&context, device)
+                .map(|(state, verification)| {
+                    drop(state);
+                    verification
+                })
+                .map_err(|e| e.to_string())?
+        };
         #[cfg(not(target_os = "windows"))]
         let verification = {
             let _ = device;
