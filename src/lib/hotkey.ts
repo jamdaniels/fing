@@ -1,6 +1,6 @@
 import { IS_MAC } from "./platform";
 
-const DEFAULT_HOTKEY = "F9";
+export const DEFAULT_HOTKEY = IS_MAC ? "MetaRight" : "ControlRight";
 const FUNCTION_KEY_REGEX = /^F(?:[1-9]|1\d|2[0-4])$/;
 const KEY_TOKEN_REGEX = /^Key[A-Z]$/;
 const DIGIT_TOKEN_REGEX = /^Digit\d$/;

@@ -14,6 +14,7 @@ import {
 } from "lucide";
 import {
   createHotkeyCapture,
+  DEFAULT_HOTKEY,
   eventToHotkeyToken,
   matchesHotkey,
   matchesHotkeyRelease,
@@ -123,7 +124,7 @@ let state: OnboardingState = {
   audioDevices: [],
   selectedDeviceId: null,
   selectedLanguages: ["en"],
-  selectedHotkey: "F9",
+  selectedHotkey: DEFAULT_HOTKEY,
   capturedHotkey: null,
   testText: "",
   selectedModelVariant: "small",

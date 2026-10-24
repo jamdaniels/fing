@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   capturedTokensToHotkey,
   createHotkeyCapture,
+  DEFAULT_HOTKEY,
   eventToHotkeyToken,
   formatHotkeyForDisplay,
   hotkeyUsesFn,
@@ -53,7 +54,7 @@ describe("parseHotkeyString", () => {
   it("rejects the Fn key outside macOS", () => {
     expect(parseHotkeyString("Function")).toBeNull();
     expect(parseHotkeyString("Function+Space")).toBeNull();
-    expect(normalizeStoredHotkey("Function")).toBe("F9");
+    expect(normalizeStoredHotkey("Function")).toBe(DEFAULT_HOTKEY);
   });
 });
 
@@ -184,7 +185,7 @@ describe("formatHotkeyForDisplay", () => {
 describe("normalizeStoredHotkey", () => {
   it("preserves valid values and falls back for invalid ones", () => {
     expect(normalizeStoredHotkey("ControlLeft+KeyK")).toBe("ControlLeft+KeyK");
-    expect(normalizeStoredHotkey("Cmd+Space")).toBe("F9");
-    expect(normalizeStoredHotkey(null)).toBe("F9");
+    expect(normalizeStoredHotkey("Cmd+Space")).toBe(DEFAULT_HOTKEY);
+    expect(normalizeStoredHotkey(null)).toBe(DEFAULT_HOTKEY);
   });
 });

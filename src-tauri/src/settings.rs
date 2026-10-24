@@ -174,7 +174,12 @@ fn merge_settings_update(latest: Settings, incoming: Settings) -> Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            hotkey: "F9".to_string(),
+            hotkey: if cfg!(target_os = "macos") {
+                "MetaRight"
+            } else {
+                "ControlRight"
+            }
+            .to_string(),
             model_path: String::new(),
             selected_microphone_id: None,
             selected_microphone_name: None,

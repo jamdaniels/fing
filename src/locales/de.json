@@ -165,7 +165,7 @@
       "small_q5": "Am kleinsten, sehr schnell",
       "small": "Gute Standardwahl",
       "large_turbo_q5": "Am größten, am genauesten",
-      "parakeet_tdt_v3_q4k": "Am schnellsten · erkennt Sprache"
+      "parakeet_tdt_v3_q4k": "Am schnellsten, erkennt Sprache"
     },
     "parakeetNoDictionary": "Nutzt keine Wörterbuch-Begriffe",
     "verifying": "Wird überprüft...",

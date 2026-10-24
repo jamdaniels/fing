@@ -165,7 +165,7 @@
       "small_q5": "Smallest size, very fast",
       "small": "Good default",
       "large_turbo_q5": "Biggest footprint, most accurate",
-      "parakeet_tdt_v3_q4k": "Fastest · auto-detects language"
+      "parakeet_tdt_v3_q4k": "Fastest, auto-detects language"
     },
     "parakeetNoDictionary": "Doesn't use dictionary terms",
     "verifying": "Verifying...",
