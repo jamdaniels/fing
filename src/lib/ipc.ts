@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppInfo,
   AppState,
@@ -224,4 +225,15 @@ export async function updateHotkey(hotkey: string): Promise<void> {
 
 export async function setHotkeySuppressed(suppressed: boolean): Promise<void> {
   return await invoke("set_hotkey_suppressed", { suppressed });
+}
+
+/** Fn presses (true) and releases (false) seen by the macOS listener while
+ * the hotkey is suppressed for capture; WebKit never delivers them as key
+ * events. */
+export function onHotkeyCaptureFn(
+  handler: (pressed: boolean) => void
+): Promise<UnlistenFn> {
+  return listen<boolean>("hotkey-capture-fn", (event) =>
+    handler(event.payload)
+  );
 }

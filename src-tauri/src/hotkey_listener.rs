@@ -73,7 +73,8 @@ const SLEEP_DETECTION_THRESHOLD_NS: u64 = 2_000_000_000;
 /// Pass-through still occurs so the modal can capture the keys; the listener
 /// just stops dispatching press/release events and clears any in-flight state.
 /// Any recording is cancelled too, since its stop press could no longer reach
-/// it, and the hands-free gesture starts over.
+/// it, and the hands-free gesture starts over. Meanwhile macOS forwards Fn
+/// transitions to the capture UI, since WebKit never delivers Fn key events.
 pub fn set_suppressed(suppressed: bool) {
     SUPPRESSED.store(suppressed, Ordering::SeqCst);
     if suppressed {
@@ -341,6 +342,7 @@ fn onboarding_test_mode() -> bool {
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) fn handle_key_event(event: KeyEvent) -> bool {
     if SUPPRESSED.load(Ordering::SeqCst) {
+        forward_capture_key(event);
         return false;
     }
 
@@ -367,6 +369,24 @@ pub(crate) fn handle_key_event(event: KeyEvent) -> bool {
 
     outcome.swallow && !test_mode
 }
+
+/// Send an Fn press or release to the hotkey capture UI.
+#[cfg(target_os = "macos")]
+fn forward_capture_key(event: KeyEvent) {
+    use tauri::Emitter;
+
+    if event.token != "Function" {
+        return;
+    }
+    if let Some(app) = APP_HANDLE.get() {
+        if let Err(error) = app.emit("hotkey-capture-fn", event.is_press) {
+            tracing::warn!("Failed to forward Fn key to hotkey capture: {}", error);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn forward_capture_key(_event: KeyEvent) {}
 
 /// Called by a backend when it detects that the system woke from sleep.
 #[cfg(any(target_os = "macos", target_os = "windows"))]

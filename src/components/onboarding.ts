@@ -13,6 +13,7 @@ import {
   Sliders,
 } from "lucide";
 import {
+  capturedTokensToHotkey,
   eventToHotkeyToken,
   matchesHotkey,
   matchesHotkeyRelease,
@@ -34,10 +35,12 @@ import {
   getSettings,
   hotkeyPress,
   hotkeyRelease,
+  onHotkeyCaptureFn,
   relaunchApp,
   requestAccessibilityPermission,
   requestMicrophonePermission,
   requestPermissions,
+  setHotkeySuppressed,
   setMicrophone,
   updateHotkey,
   updateSettings,
@@ -131,6 +134,7 @@ let downloadPollInterval: number | null = null;
 let hotkeyKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 let hotkeyKeyupHandler: ((e: KeyboardEvent) => void) | null = null;
 let hotkeyBlurHandler: (() => void) | null = null;
+let hotkeyFnUnlisten: Promise<UnlistenFn> | null = null;
 const hotkeyCaptureTokens = new Set<string>();
 const hotkeyCaptureOrder: string[] = [];
 let testResultUnlisten: UnlistenFn | null = null;
@@ -154,6 +158,11 @@ function cleanupHotkeyCaptureListeners(): void {
   if (hotkeyBlurHandler) {
     window.removeEventListener("blur", hotkeyBlurHandler);
     hotkeyBlurHandler = null;
+  }
+  if (hotkeyFnUnlisten) {
+    hotkeyFnUnlisten.then((unlisten) => unlisten()).catch(console.error);
+    hotkeyFnUnlisten = null;
+    setHotkeySuppressed(false).catch(console.error);
   }
   hotkeyCaptureTokens.clear();
   hotkeyCaptureOrder.length = 0;
@@ -912,19 +921,30 @@ async function handleRestartForPermissions(): Promise<void> {
   await relaunchApp();
 }
 
+function pressCaptureToken(token: string): void {
+  // Starting a fresh press session — clear the previously captured chord
+  // so this new keypress begins a new binding attempt.
+  if (hotkeyCaptureTokens.size === 0) {
+    hotkeyCaptureOrder.length = 0;
+  }
+  hotkeyCaptureTokens.add(token);
+  if (!hotkeyCaptureOrder.includes(token)) {
+    hotkeyCaptureOrder.push(token);
+  }
+  state.capturedHotkey = capturedTokensToHotkey(hotkeyCaptureOrder);
+  render();
+}
+
+function releaseCaptureToken(token: string): void {
+  // Release order doesn't matter; the captured chord stays put until the
+  // next fresh press session (when no keys are held).
+  hotkeyCaptureTokens.delete(token);
+}
+
 function renderHotkeyStep(): void {
   if (!container) {
     return;
   }
-
-  const syncCapturedHotkey = () => {
-    if (hotkeyCaptureOrder.length > 0) {
-      state.capturedHotkey = hotkeyCaptureOrder.join("+");
-    } else {
-      state.capturedHotkey = null;
-    }
-    render();
-  };
 
   const displayKey = state.capturedHotkey ?? state.selectedHotkey;
   const hasNewKey =
@@ -943,11 +963,6 @@ function renderHotkeyStep(): void {
         <div class="hotkey-capture-area">
           <div class="hotkey-preview">
             ${renderHotkeyChips(displayKey, { chipClass: "hotkey-key", extraChipClass: hasNewKey ? "captured" : "" })}
-          </div>
-          <div class="hotkey-fn-inline">
-            ${t("onboarding.orUse")}
-            <button class="hotkey-modal-key hotkey-fn-chip" type="button" id="use-fn-btn" aria-label="${t("dialogs.useFn")}">fn</button>
-            ${t("onboarding.onMacLaptops")}
           </div>
         </div>
       </div>
@@ -978,20 +993,9 @@ function renderHotkeyStep(): void {
       }
 
       const token = eventToHotkeyToken(e);
-      if (!token) {
-        return;
+      if (token) {
+        pressCaptureToken(token);
       }
-
-      // Starting a fresh press session — clear the previously captured chord
-      // so this new keypress begins a new binding attempt.
-      if (hotkeyCaptureTokens.size === 0) {
-        hotkeyCaptureOrder.length = 0;
-      }
-      hotkeyCaptureTokens.add(token);
-      if (!hotkeyCaptureOrder.includes(token)) {
-        hotkeyCaptureOrder.push(token);
-      }
-      syncCapturedHotkey();
     };
     document.addEventListener("keydown", hotkeyKeyHandler);
   }
@@ -1001,13 +1005,9 @@ function renderHotkeyStep(): void {
       e.stopPropagation();
 
       const token = eventToHotkeyToken(e);
-      if (!token) {
-        return;
+      if (token) {
+        releaseCaptureToken(token);
       }
-
-      // Release order doesn't matter; the captured chord stays put until the
-      // next fresh press session (when no keys are held).
-      hotkeyCaptureTokens.delete(token);
     };
     document.addEventListener("keyup", hotkeyKeyupHandler);
   }
@@ -1017,13 +1017,14 @@ function renderHotkeyStep(): void {
     };
     window.addEventListener("blur", hotkeyBlurHandler);
   }
-
-  document.getElementById("use-fn-btn")?.addEventListener("click", () => {
-    state.capturedHotkey = "Function";
-    hotkeyCaptureTokens.clear();
-    hotkeyCaptureOrder.length = 0;
-    render();
-  });
+  if (!hotkeyFnUnlisten) {
+    // macOS only: WebKit never delivers Fn as a key event, so the suppressed
+    // global listener forwards it.
+    setHotkeySuppressed(true).catch(console.error);
+    hotkeyFnUnlisten = onHotkeyCaptureFn((pressed) =>
+      pressed ? pressCaptureToken("Function") : releaseCaptureToken("Function")
+    );
+  }
 
   document
     .getElementById("continue-btn")

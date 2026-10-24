@@ -3,6 +3,9 @@ const FUNCTION_KEY_REGEX = /^F(?:[1-9]|1\d|2[0-4])$/;
 const KEY_TOKEN_REGEX = /^Key[A-Z]$/;
 const DIGIT_TOKEN_REGEX = /^Digit\d$/;
 const NUMPAD_TOKEN_REGEX = /^Numpad\d$/;
+// Only macOS reports the Fn key; elsewhere keyboard firmware handles it.
+const FUNCTION_TOKEN_SUPPORTED =
+  typeof navigator !== "undefined" && navigator.userAgent.includes("Mac");
 
 const EVENT_CODE_ALIASES: Record<string, string> = {
   AltLeft: "Alt",
@@ -311,6 +314,18 @@ export function matchesHotkeyRelease(
   return token !== null && config.keySet.has(token);
 }
 
+/** Join captured tokens into a hotkey string. macOS also reports Fn for an
+ * F-key pressed with it (to get F5 instead of a media key), so Fn is dropped
+ * from chords with an F-key, as the listener ignores it there too. */
+export function capturedTokensToHotkey(
+  tokens: readonly string[]
+): string | null {
+  const keys = tokens.some((token) => FUNCTION_KEY_REGEX.test(token))
+    ? tokens.filter((token) => token !== "Function")
+    : tokens;
+  return keys.length > 0 ? keys.join("+") : null;
+}
+
 export function normalizeStoredHotkey(hotkey?: string | null): string {
   if (hotkey) {
     const parsed = parseHotkeyString(hotkey);
@@ -336,7 +351,11 @@ export function parseHotkeyString(hotkey: string): ParsedHotkeyConfig | null {
   const keySet = new Set<string>();
   for (const key of keys) {
     const token = key.trim();
-    if (!VALID_HOTKEY_TOKENS.has(token) || keySet.has(token)) {
+    if (
+      !VALID_HOTKEY_TOKENS.has(token) ||
+      keySet.has(token) ||
+      (token === "Function" && !FUNCTION_TOKEN_SUPPORTED)
+    ) {
       return null;
     }
     keySet.add(token);

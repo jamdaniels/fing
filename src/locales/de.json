@@ -183,7 +183,6 @@
   "dialogs": {
     "hotkeyTitle": "Aufnahme-Tastenkürzel festlegen",
     "hotkeyPrompt": "Drücke eine Taste oder Tastenkombination",
-    "useFn": "Fn-Taste verwenden",
     "setting": "Wird festgelegt...",
     "hotkeyFailed": "Tastenkürzel konnte nicht festgelegt werden. Versuche eine andere Taste.",
     "micTitle": "Mikrofon testen",
@@ -283,8 +282,6 @@
     "restartApply": "Zum Anwenden neu starten",
     "hotkeyTitle": "Tastenkürzel festlegen",
     "hotkeySubtitle": "Drücke eine Taste oder Tastenkombination.",
-    "orUse": "oder verwende",
-    "onMacLaptops": "auf Mac-Laptops",
     "microphoneTitle": "Mikrofon auswählen",
     "microphoneSubtitle": "Wähle dein Eingabegerät.",
     "microphoneHint": "Du kannst das Mikrofon jederzeit in den Einstellungen wechseln.",

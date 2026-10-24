@@ -2099,18 +2099,6 @@ body[data-platform="windows"] .titlebar {
   justify-content: flex-end;
 }
 
-.hotkey-fn-pick {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-right: auto;
-}
-
-.hotkey-fn-chip:hover {
-  background-color: var(--accent-10);
-  border-color: var(--accent);
-}
-
 /* Mic Test Dialog */
 .mic-test-dialog {
   min-width: 380px;
@@ -2255,39 +2243,6 @@ body[data-platform="windows"] .titlebar {
 
 .hotkey-modal-actions {
   margin-bottom: 16px;
-}
-
-/* Fn key option button */
-.hotkey-fn-option {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 10px 16px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  background-color: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.hotkey-fn-option:hover {
-  color: var(--text-primary);
-  background-color: var(--bg-secondary);
-}
-
-.hotkey-fn-key {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  padding: 4px 8px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
-  font-size: 11px;
-  font-weight: 600;
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  box-shadow: 0 1px 0 var(--border);
 }
 
 /* Step Indicator */
@@ -2708,22 +2663,6 @@ body[data-platform="windows"] .titlebar {
   background-color: color-mix(in srgb, var(--bg-primary) 70%, transparent);
   border: 1px solid color-mix(in srgb, var(--text-primary) 5%, transparent);
   border-radius: 10px;
-}
-
-.hotkey-fn-inline {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  margin-top: auto;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.hotkey-fn-inline .hotkey-fn-chip {
-  height: 22px;
-  min-width: 22px;
-  padding: 0 8px;
-  font-size: 11px;
 }
 
 .hotkey-preview {

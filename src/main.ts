@@ -34,6 +34,7 @@ import {
 import { cleanupOnboarding, renderOnboarding } from "./components/onboarding";
 import type { ParsedHotkeyConfig } from "./lib/hotkey";
 import {
+  capturedTokensToHotkey,
   eventToHotkeyToken,
   matchesHotkey,
   matchesHotkeyRelease,
@@ -66,6 +67,7 @@ import {
   hotkeyPress,
   hotkeyRelease,
   MODEL_SWITCH_BUSY,
+  onHotkeyCaptureFn,
   presentMainWindow,
   refreshAudioDevices,
   relaunchApp,
@@ -1251,8 +1253,7 @@ function showHotkeyModal(): void {
   modal.className = "dialog-overlay";
 
   const syncCapturedHotkey = () => {
-    capturedHotkey =
-      capturedTokens.length > 0 ? capturedTokens.join("+") : null;
+    capturedHotkey = capturedTokensToHotkey(capturedTokens);
     renderModal();
   };
 
@@ -1270,9 +1271,6 @@ function showHotkeyModal(): void {
           </div>
         </div>
         <div class="dialog-footer hotkey-dialog-footer">
-          <div class="hotkey-fn-pick">
-            <button class="hotkey-modal-key hotkey-fn-chip" type="button" aria-label="${t("dialogs.useFn")}">fn</button>
-          </div>
           <button class="btn btn-accent hotkey-confirm-btn" ${capturedHotkey ? "" : "disabled"}>${t("settings.setHotkey")}</button>
         </div>
       </div>
@@ -1282,14 +1280,6 @@ function showHotkeyModal(): void {
     modal
       .querySelector(".dialog-close")
       ?.addEventListener("click", closeHotkeyModal);
-
-    modal.querySelector(".hotkey-fn-chip")?.addEventListener("click", () => {
-      capturedHotkey = "Function";
-      pressedTokens.clear();
-      capturedTokens.length = 0;
-      capturedTokens.push("Function");
-      renderModal();
-    });
 
     modal
       .querySelector(".hotkey-confirm-btn")
@@ -1321,6 +1311,25 @@ function showHotkeyModal(): void {
   renderModal();
   document.body.appendChild(modal);
 
+  const pressToken = (token: string) => {
+    // Starting a fresh press session — clear the previously captured chord
+    // so the new keypress begins a new binding attempt.
+    if (pressedTokens.size === 0) {
+      capturedTokens.length = 0;
+    }
+    pressedTokens.add(token);
+    if (!capturedTokens.includes(token)) {
+      capturedTokens.push(token);
+    }
+    syncCapturedHotkey();
+  };
+
+  const releaseToken = (token: string) => {
+    // Release order doesn't matter; capturedTokens stays put until the next
+    // fresh press session (when pressedTokens is empty on keydown).
+    pressedTokens.delete(token);
+  };
+
   const keydownHandler = (e: KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1334,20 +1343,9 @@ function showHotkeyModal(): void {
     }
 
     const token = eventToHotkeyToken(e);
-    if (!token) {
-      return;
+    if (token) {
+      pressToken(token);
     }
-
-    // Starting a fresh press session — clear the previously captured chord
-    // so the new keypress begins a new binding attempt.
-    if (pressedTokens.size === 0) {
-      capturedTokens.length = 0;
-    }
-    pressedTokens.add(token);
-    if (!capturedTokens.includes(token)) {
-      capturedTokens.push(token);
-    }
-    syncCapturedHotkey();
   };
 
   const keyupHandler = (e: KeyboardEvent) => {
@@ -1355,13 +1353,9 @@ function showHotkeyModal(): void {
     e.stopPropagation();
 
     const token = eventToHotkeyToken(e);
-    if (!token) {
-      return;
+    if (token) {
+      releaseToken(token);
     }
-
-    // Release order doesn't matter; capturedTokens stays put until the next
-    // fresh press session (when pressedTokens is empty on keydown).
-    pressedTokens.delete(token);
   };
 
   const blurHandler = () => {
@@ -1378,8 +1372,13 @@ function showHotkeyModal(): void {
   document.addEventListener("keyup", keyupHandler);
   window.addEventListener("blur", blurHandler);
   modal.addEventListener("click", clickHandler);
+  // macOS only: WebKit never delivers Fn as a key event.
+  const fnUnlisten = onHotkeyCaptureFn((pressed) =>
+    pressed ? pressToken("Function") : releaseToken("Function")
+  );
 
   hotkeyModalCleanup = () => {
+    fnUnlisten.then((unlisten) => unlisten()).catch(console.error);
     document.removeEventListener("keydown", keydownHandler);
     document.removeEventListener("keyup", keyupHandler);
     window.removeEventListener("blur", blurHandler);

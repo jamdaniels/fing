@@ -183,7 +183,6 @@
   "dialogs": {
     "hotkeyTitle": "Set recording hotkey",
     "hotkeyPrompt": "Press a key or combination",
-    "useFn": "Use Fn key",
     "setting": "Setting...",
     "hotkeyFailed": "Failed to set hotkey. Try another key.",
     "micTitle": "Test Microphone",
@@ -283,8 +282,6 @@
     "restartApply": "Restart to apply",
     "hotkeyTitle": "Set your hotkey",
     "hotkeySubtitle": "Press any key or combination.",
-    "orUse": "or use",
-    "onMacLaptops": "on Mac laptops",
     "microphoneTitle": "Pick a microphone",
     "microphoneSubtitle": "Choose your input device.",
     "microphoneHint": "You can switch microphones any time from the settings.",

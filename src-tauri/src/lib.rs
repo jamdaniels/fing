@@ -626,8 +626,19 @@ fn update_hotkey(hotkey: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn set_hotkey_suppressed(suppressed: bool) {
+fn set_hotkey_suppressed(app: tauri::AppHandle, suppressed: bool) {
     hotkey_listener::set_suppressed(suppressed);
+
+    // Hotkey capture reads Fn from the listener, and onboarding captures
+    // before setup has started it.
+    #[cfg(target_os = "macos")]
+    if suppressed {
+        if let Err(error) = hotkey::register_hotkey(&app) {
+            tracing::warn!("Hotkey listener unavailable for Fn capture: {}", error);
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
 }
 
 fn apply_saved_hotkey(app: &tauri::AppHandle, hotkey: &str, warning: &str) {

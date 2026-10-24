@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  capturedTokensToHotkey,
   eventToHotkeyToken,
   formatHotkeyForDisplay,
   matchesHotkey,
@@ -45,6 +46,32 @@ describe("parseHotkeyString", () => {
     expect(parseHotkeyString("ControlLeft+Escape")).toBeNull();
     expect(parseHotkeyString("KeyA+KeyA")).toBeNull();
     expect(parseHotkeyString("")).toBeNull();
+  });
+
+  it("rejects the Fn key outside macOS", () => {
+    expect(parseHotkeyString("Function")).toBeNull();
+    expect(parseHotkeyString("Function+Space")).toBeNull();
+    expect(normalizeStoredHotkey("Function")).toBe("F9");
+  });
+});
+
+describe("capturedTokensToHotkey", () => {
+  it("joins captured tokens in press order", () => {
+    expect(capturedTokensToHotkey(["ControlLeft", "KeyK"])).toBe(
+      "ControlLeft+KeyK"
+    );
+    expect(capturedTokensToHotkey(["Function"])).toBe("Function");
+    expect(capturedTokensToHotkey(["Function", "Space"])).toBe(
+      "Function+Space"
+    );
+    expect(capturedTokensToHotkey([])).toBeNull();
+  });
+
+  it("drops Fn from chords with an F-key", () => {
+    expect(capturedTokensToHotkey(["Function", "F9"])).toBe("F9");
+    expect(capturedTokensToHotkey(["ShiftLeft", "Function", "F5"])).toBe(
+      "ShiftLeft+F5"
+    );
   });
 });
 
