@@ -8,10 +8,10 @@ Whisper (three registry models) and Parakeet TDT 0.6B v3.
 
 Three layers, from upstream to app:
 
-1. **Upstream source:** `src-tauri/crates/fing-whisper-sys/whisper.cpp` is a
+1. **Upstream source:** `src-tauri/crates/whisper-sys/whisper.cpp` is a
    git submodule pinned to a release tag (`v1.9.5`, commit `d1be6fde`). It is
    unmodified upstream code; Fing carries no patches.
-2. **`fing-whisper-sys`** (`build.rs`):
+2. **`whisper-sys`** (`build.rs`):
    - Builds whisper.cpp with CMake as static libraries, always the Release
      config (a debug ggml is far too slow, and RelWithDebInfo breaks the MSVC
      static CRT link).
@@ -72,7 +72,7 @@ UI; the kill switch is `PRETRANSCRIBE_ENABLED`.
 - **Worker:** started with the level meter, bound to that recording's
   `AudioTap` and session id. Every 500 ms it copies the new native-rate
   samples, runs the planner, resamples each chunk with
-  `audio::resample_to_16k` and transcribes it. Digitally silent chunks are
+  `audio::resample_slice_to_16k` and transcribes it. Digitally silent chunks are
   committed without transcription. It never loads or unloads a model.
 - **Release:** `on_key_up` stops the worker before `StopRecording`, the task
   joins it, transcribes only the tail and joins the texts. Empty and
@@ -161,10 +161,10 @@ clip named `de_*` also runs with `[de]`, `[en]` and `[en, de]`.
 ## Updating whisper.cpp
 
 ```bash
-git -C src-tauri/crates/fing-whisper-sys/whisper.cpp fetch --tags
-git -C src-tauri/crates/fing-whisper-sys/whisper.cpp checkout v1.9.6   # new tag
+git -C src-tauri/crates/whisper-sys/whisper.cpp fetch --tags
+git -C src-tauri/crates/whisper-sys/whisper.cpp checkout v1.9.6   # new tag
 bun run verify
-git add src-tauri/crates/fing-whisper-sys/whisper.cpp
+git add src-tauri/crates/whisper-sys/whisper.cpp
 git commit -m "chore(deps): whisper.cpp v1.9.6"
 ```
 

@@ -20,7 +20,7 @@ if (process.platform === "darwin") {
     env.PATH = [...rustPathEntries, ...pathEntries].join(":");
   }
 
-  // fing-whisper-sys's build.rs sets the whisper.cpp CMake options per target
+  // whisper-sys's build.rs sets the whisper.cpp CMake options per target
   // architecture itself (no ccache, no native CPU tuning, Metal on arm64).
   if (target === "universal-apple-darwin") {
     env.CARGO_BUILD_JOBS ??= "1";

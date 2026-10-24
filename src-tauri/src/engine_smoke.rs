@@ -9,32 +9,57 @@
 // FING_SMOKE_TERMS is an optional comma-separated dictionary. Output is what
 // the hotkey path would type; it prints transcripts, so only use your own audio.
 
+use crate::audio::WHISPER_SAMPLE_RATE;
 use crate::engine::{AbortFlag, TranscribeError};
-use crate::model::{self, ModelEngine};
+use crate::model::{self, ModelDefinition, ModelEngine};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 fn read_wav_16k_mono(path: &Path) -> Vec<f32> {
-    let bytes = std::fs::read(path).expect("read wav");
-    assert_eq!(&bytes[0..4], b"RIFF");
-    let mut offset = 12;
-    while offset + 8 <= bytes.len() {
-        let id = &bytes[offset..offset + 4];
-        let len = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap()) as usize;
-        let body = offset + 8;
-        if id == b"data" {
-            return bytes[body..body + len]
-                .chunks_exact(2)
-                .map(|s| f32::from(i16::from_le_bytes([s[0], s[1]])) / 32768.0)
-                .collect();
-        }
-        offset = body + len + (len & 1);
-    }
-    panic!("no data chunk in {}", path.display());
+    use rodio::Source;
+    let decoder = rodio::Decoder::try_from(std::fs::File::open(path).expect("open wav"))
+        .expect("decodable wav");
+    assert_eq!(decoder.channels().get(), 1, "mono: {}", path.display());
+    assert_eq!(
+        decoder.sample_rate().get(),
+        WHISPER_SAMPLE_RATE,
+        "16 kHz: {}",
+        path.display()
+    );
+    decoder.collect()
 }
 
 fn env_dir(name: &str) -> Option<PathBuf> {
     std::env::var_os(name).map(PathBuf::from)
+}
+
+/// The models and clips dirs, or None (with a hint) when they are not set.
+fn smoke_dirs() -> Option<(PathBuf, PathBuf)> {
+    let dirs = env_dir("FING_SMOKE_MODELS").zip(env_dir("FING_SMOKE_CLIPS"));
+    if dirs.is_none() {
+        eprintln!("set FING_SMOKE_MODELS and FING_SMOKE_CLIPS");
+    }
+    dirs
+}
+
+/// Replace the loaded engine with `def`; prints and returns false on failure.
+fn reload(def: &ModelDefinition, model_path: &Path) -> bool {
+    crate::transcribe::unload_transcriber();
+    if let Err(err) = crate::transcribe::init_transcriber(def.variant, model_path) {
+        println!("[{}] LOAD FAILED: {err}", def.filename);
+        return false;
+    }
+    true
+}
+
+/// The language a single-language run uses for a clip: [de] for `de_*`, else [en].
+fn clip_language(clip_name: &str) -> Vec<String> {
+    let language = if clip_name.starts_with("de_") {
+        "de"
+    } else {
+        "en"
+    };
+    vec![language.to_string()]
 }
 
 fn sorted_files(dir: &Path, extension: &str) -> Vec<PathBuf> {
@@ -62,10 +87,7 @@ fn rss_mb() -> u64 {
 #[test]
 #[ignore = "needs real model files and clips"]
 fn engine_smoke() {
-    let (Some(models_dir), Some(clips_dir)) =
-        (env_dir("FING_SMOKE_MODELS"), env_dir("FING_SMOKE_CLIPS"))
-    else {
-        eprintln!("set FING_SMOKE_MODELS and FING_SMOKE_CLIPS");
+    let Some((models_dir, clips_dir)) = smoke_dirs() else {
         return;
     };
 
@@ -132,7 +154,7 @@ fn engine_smoke() {
                             crate::dictionary::apply_dictionary_corrections(text.trim(), &terms);
                         println!(
                             "[{name}] {clip_name} {:.1}s {languages:?} {ms} ms: {corrected}",
-                            audio.len() as f32 / 16_000.0
+                            audio.len() as f32 / WHISPER_SAMPLE_RATE as f32
                         );
                     }
                     Err(err) => println!("[{name}] {clip_name} {languages:?} FAILED: {err}"),
@@ -180,13 +202,10 @@ fn word_edits(left: &str, right: &str) -> usize {
 fn pretranscribe_smoke() {
     use crate::pretranscribe::{commit_due_chunks, transcribe_recording, Committed, Flow};
 
-    let (Some(models_dir), Some(clips_dir)) =
-        (env_dir("FING_SMOKE_MODELS"), env_dir("FING_SMOKE_CLIPS"))
-    else {
-        eprintln!("set FING_SMOKE_MODELS and FING_SMOKE_CLIPS");
+    let Some((models_dir, clips_dir)) = smoke_dirs() else {
         return;
     };
-    const RATE: u32 = 16_000;
+    const RATE: u32 = WHISPER_SAMPLE_RATE;
     const TICK_S: f64 = 0.5;
     let clips: Vec<(String, Vec<f32>)> = sorted_files(&clips_dir, "wav")
         .iter()
@@ -202,9 +221,7 @@ fn pretranscribe_smoke() {
             continue;
         };
         let name = def.filename;
-        crate::transcribe::unload_transcriber();
-        if let Err(err) = crate::transcribe::init_transcriber(def.variant, &model_path) {
-            println!("[{name}] LOAD FAILED: {err}");
+        if !reload(def, &model_path) {
             continue;
         }
         // Warm-up, so the first measured call does not pay for it.
@@ -300,10 +317,7 @@ fn pretranscribe_smoke() {
 #[test]
 #[ignore = "needs real model files and clips"]
 fn silence_smoke() {
-    let (Some(models_dir), Some(clips_dir)) =
-        (env_dir("FING_SMOKE_MODELS"), env_dir("FING_SMOKE_CLIPS"))
-    else {
-        eprintln!("set FING_SMOKE_MODELS and FING_SMOKE_CLIPS");
+    let Some((models_dir, clips_dir)) = smoke_dirs() else {
         return;
     };
     let _ = tracing_subscriber::fmt::try_init();
@@ -314,19 +328,13 @@ fn silence_smoke() {
             continue;
         };
         let name = def.filename;
-        crate::transcribe::unload_transcriber();
-        if let Err(err) = crate::transcribe::init_transcriber(def.variant, &model_path) {
-            println!("[{name}] LOAD FAILED: {err}");
+        if !reload(def, &model_path) {
             continue;
         }
         for clip in &clips {
             let clip_name = clip.file_name().unwrap().to_string_lossy();
             let audio = read_wav_16k_mono(clip);
-            let languages: Vec<String> = if clip_name.starts_with("de_") {
-                vec!["de".into()]
-            } else {
-                vec!["en".into()]
-            };
+            let languages = clip_language(&clip_name);
             let started = Instant::now();
             let text = crate::transcribe::transcribe_audio(
                 &audio,
@@ -337,7 +345,7 @@ fn silence_smoke() {
             .unwrap_or_else(|err| format!("FAILED: {err}"));
             println!(
                 "[{name}] {clip_name} {:.1}s: {} ms, blank {}: {text}",
-                audio.len() as f32 / 16_000.0,
+                audio.len() as f32 / WHISPER_SAMPLE_RATE as f32,
                 started.elapsed().as_millis(),
                 crate::transcribe::is_blank_audio(&text),
             );
@@ -357,10 +365,7 @@ fn silence_smoke() {
 #[test]
 #[ignore = "needs real model files and clips"]
 fn abort_smoke() {
-    let (Some(models_dir), Some(clips_dir)) =
-        (env_dir("FING_SMOKE_MODELS"), env_dir("FING_SMOKE_CLIPS"))
-    else {
-        eprintln!("set FING_SMOKE_MODELS and FING_SMOKE_CLIPS");
+    let Some((models_dir, clips_dir)) = smoke_dirs() else {
         return;
     };
     let Some((clip_name, audio)) = sorted_files(&clips_dir, "wav")
@@ -374,11 +379,7 @@ fn abort_smoke() {
         eprintln!("no clips");
         return;
     };
-    let languages: Vec<String> = if clip_name.starts_with("de_") {
-        vec!["de".into()]
-    } else {
-        vec!["en".into()]
-    };
+    let languages = clip_language(&clip_name);
     let transcribe =
         |abort: &AbortFlag| crate::transcribe::transcribe_audio(&audio, &languages, None, abort);
 
@@ -387,9 +388,7 @@ fn abort_smoke() {
             continue;
         };
         let name = def.filename;
-        crate::transcribe::unload_transcriber();
-        if let Err(err) = crate::transcribe::init_transcriber(def.variant, &model_path) {
-            println!("[{name}] LOAD FAILED: {err}");
+        if !reload(def, &model_path) {
             continue;
         }
 
@@ -433,7 +432,7 @@ fn abort_smoke() {
         println!(
             "[{name}] {clip_name} {:.1}s: full {full_ms} ms, preset abort {preset_ms} ms, \
              same text after aborts: {}",
-            audio.len() as f32 / 16_000.0,
+            audio.len() as f32 / WHISPER_SAMPLE_RATE as f32,
             after == baseline
         );
         assert_eq!(after, baseline, "engine still works after an abort");

@@ -134,6 +134,9 @@ export async function deleteModel(variant: ModelVariant): Promise<void> {
 }
 
 /** Activates a downloaded model; the backend swaps the engine in place. */
+/** `setActiveModel` rejection while recording or transcribing. */
+export const MODEL_SWITCH_BUSY = "model_switch_busy";
+
 export async function setActiveModel(variant: ModelVariant): Promise<void> {
   return await invoke("set_active_model", { variant });
 }

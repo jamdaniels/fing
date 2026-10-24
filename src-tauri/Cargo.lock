@@ -1339,7 +1339,6 @@ dependencies = [
  "cc",
  "cpal",
  "enigo",
- "fing-whisper-sys",
  "futures-util",
  "lazy_static",
  "once_cell",
@@ -1363,16 +1362,9 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "whisper-sys",
  "windows 0.62.2",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "fing-whisper-sys"
-version = "0.1.0"
-dependencies = [
- "bindgen",
- "cmake",
 ]
 
 [[package]]
@@ -5978,6 +5970,14 @@ dependencies = [
  "thiserror 2.0.20",
  "windows 0.61.3",
  "windows-core 0.61.2",
+]
+
+[[package]]
+name = "whisper-sys"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "cmake",
 ]
 
 [[package]]

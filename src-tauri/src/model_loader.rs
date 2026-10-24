@@ -97,6 +97,15 @@ pub async fn unload_if_idle(still_idle: impl FnOnce() -> bool) -> bool {
     true
 }
 
+/// Full SHA-256 check of `variant` (cached per file), kept off the runtime.
+/// The error can name the models folder, so callers return it, not log it.
+pub async fn verify(variant: ModelVariant) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || model::ensure_variant_verified(variant))
+        .await
+        .map_err(|e| format!("Model verification task failed: {e}"))??;
+    Ok(())
+}
+
 fn ensure_not_busy() -> Result<(), String> {
     match state::get_state() {
         AppState::Recording | AppState::Processing => Err(MODEL_SWITCH_BUSY.to_string()),
@@ -112,11 +121,7 @@ fn ensure_not_busy() -> Result<(), String> {
 pub async fn switch_active_model(variant: ModelVariant) -> Result<(), String> {
     ensure_not_busy()?;
 
-    // Full SHA-256 check (cached per file); hashing stays off the runtime.
-    // The error can name the models folder, so it is returned, not logged.
-    tauri::async_runtime::spawn_blocking(move || model::ensure_variant_verified(variant))
-        .await
-        .map_err(|e| format!("Model verification task failed: {e}"))??;
+    verify(variant).await?;
 
     let _guard = LOADER.lock().await;
     // A recording may have started while this waited for the lock.
@@ -129,8 +134,9 @@ pub async fn switch_active_model(variant: ModelVariant) -> Result<(), String> {
     })
     .await?;
 
-    let engine_loaded = loaded_variant().is_some();
-    if loaded_variant() == Some(variant) {
+    let loaded = loaded_variant();
+    let engine_loaded = loaded.is_some();
+    if loaded == Some(variant) {
         tracing::info!("Model {:?} is already active and loaded", variant);
         return Ok(());
     }

@@ -670,9 +670,7 @@ async fn complete_setup(app: tauri::AppHandle) -> Result<(), String> {
     let current_settings = settings::load_settings().await;
     let variant = current_settings.active_model_variant;
 
-    tauri::async_runtime::spawn_blocking(move || model::ensure_variant_verified(variant))
-        .await
-        .map_err(|e| format!("Model verification task failed: {e}"))??;
+    model_loader::verify(variant).await?;
 
     if !current_settings.lazy_model_loading {
         model_loader::ensure_loaded()

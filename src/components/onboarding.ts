@@ -48,6 +48,7 @@ import {
 } from "../lib/microphone";
 import {
   formatModelSize,
+  modelEngine,
   modelQualityLabel,
   renderModelNote,
 } from "../lib/models";
@@ -798,8 +799,7 @@ function renderPreferences(): void {
 
 /** Engine of the model picked in step 2. */
 function selectedModelEngine(): ModelEngine | undefined {
-  return state.models.find((m) => m.variant === state.selectedModelVariant)
-    ?.engine;
+  return modelEngine(state.models, state.selectedModelVariant);
 }
 
 async function handlePreferencesContinue(): Promise<void> {

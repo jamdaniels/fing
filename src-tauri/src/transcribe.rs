@@ -3,8 +3,7 @@
 
 use crate::audio::WHISPER_SAMPLE_RATE;
 use crate::engine::{AbortFlag, TranscribeError, TranscriptionEngine};
-use crate::inference::InferenceDevicePreference;
-use crate::inference::{self, InferenceDevice};
+use crate::inference::{self, InferenceDevice, InferenceDevicePreference};
 use crate::model::{self, ModelDefinition, ModelEngine, ModelVariant};
 use crate::whisper_cpp::{self, lang_id, FfiError, FullParams, ParakeetContext, WhisperContext};
 use once_cell::sync::Lazy;
@@ -105,18 +104,18 @@ fn pinned_candidate<'a>(candidates: &[&'a str], pinned: Option<&str>) -> Option<
         .find(|candidate| *candidate == pinned)
 }
 
-impl WhisperEngine {
+impl TranscriptionEngine for WhisperEngine {
     /// One `whisper_full` pass. `pinned` replaces detection with the language
     /// an earlier part of the same recording used. Returns the text and the
     /// language used.
-    fn run(
+    fn transcribe(
         &self,
         audio: &[f32],
         languages: &[String],
         dictionary_prompt: Option<&str>,
         pinned: Option<&str>,
         abort: &AbortFlag,
-    ) -> Result<(String, String), TranscribeError> {
+    ) -> Result<(String, Option<String>), TranscribeError> {
         if audio.is_empty() {
             return Err(TranscribeError::EmptyAudio);
         }
@@ -128,37 +127,28 @@ impl WhisperEngine {
         aborted(abort)?;
         let mut state = inference::create_state(&ctx, &self.device)?;
 
-        let mut detecting = false;
-        let mut pinning = false;
         let detect_started = Instant::now();
-        let language = match language_plan(languages) {
-            LanguagePlan::Explicit(language) => language,
+        let (language, source) = match language_plan(languages) {
+            LanguagePlan::Explicit(language) => (language, "explicit"),
             LanguagePlan::Detect(candidates) => match pinned_candidate(&candidates, pinned) {
-                Some(language) => {
-                    pinning = true;
-                    language
-                }
+                Some(language) => (language, "pinned"),
                 None => {
-                    detecting = true;
                     let threads = detection_threads();
                     state
                         .pcm_to_mel(audio, threads)
                         .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
-                    let (_, probabilities) = state
-                        .lang_detect(0, threads)
+                    let probabilities = state
+                        .lang_probabilities(threads)
                         .map_err(|e| TranscribeError::InferenceFailed(e.to_string()))?;
-                    select_detected_language(&candidates, &probabilities)
+                    (
+                        select_detected_language(&candidates, &probabilities),
+                        "detected",
+                    )
                 }
             },
         };
         let detect_ms = detect_started.elapsed().as_millis() as u64;
-        tracing::info!(
-            configured = ?languages,
-            language,
-            detected = detecting,
-            pinned = pinning,
-            "Whisper language"
-        );
+        tracing::info!(configured = ?languages, language, source, "Whisper language");
 
         let mut params = FullParams::greedy();
         params.set_language(language);
@@ -196,21 +186,7 @@ impl WhisperEngine {
             "Whisper stages"
         );
 
-        Ok((text.trim().to_string(), language.to_string()))
-    }
-}
-
-impl TranscriptionEngine for WhisperEngine {
-    fn transcribe(
-        &self,
-        audio: &[f32],
-        languages: &[String],
-        dictionary_prompt: Option<&str>,
-        language: Option<&str>,
-        abort: &AbortFlag,
-    ) -> Result<(String, Option<String>), TranscribeError> {
-        self.run(audio, languages, dictionary_prompt, language, abort)
-            .map(|(text, language)| (text, Some(language)))
+        Ok((text.trim().to_string(), Some(language.to_string())))
     }
 }
 
@@ -266,16 +242,6 @@ impl TranscriptionEngine for ParakeetEngine {
 
         Ok((text.trim().to_string(), None))
     }
-}
-
-// Peak amplitude at or below which a recording counts as digital silence.
-// Whisper hallucinates text on such input, so no engine gets to see it.
-const DIGITAL_SILENCE_PEAK: f32 = 0.001;
-
-pub fn is_digital_silence(samples: &[f32]) -> bool {
-    samples
-        .iter()
-        .all(|sample| sample.abs() <= DIGITAL_SILENCE_PEAK)
 }
 
 /// Check if a transcription has no actual speech: empty, or only markers like
@@ -355,10 +321,11 @@ static TRANSCRIBER: Lazy<Mutex<Option<Arc<LoadedEngine>>>> = Lazy::new(|| Mutex:
 /// per its registry entry). A no-op when that model is already loaded; a
 /// different loaded model is freed first, so two never share memory.
 pub fn init_transcriber(variant: ModelVariant, model_path: &Path) -> Result<(), TranscribeError> {
-    if loaded_variant() == Some(variant) {
+    let current = loaded_variant();
+    if current == Some(variant) {
         return Ok(());
     }
-    if is_transcriber_loaded() {
+    if current.is_some() {
         tracing::info!("Replacing loaded transcription engine");
         unload_transcriber();
     }
@@ -487,13 +454,6 @@ mod tests {
         ] {
             assert!(!is_blank_audio(text), "{text}");
         }
-    }
-
-    #[test]
-    fn digital_silence_is_detected_by_peak() {
-        assert!(is_digital_silence(&[0.0; 48_000]));
-        assert!(is_digital_silence(&[0.001, -0.001, 0.0005]));
-        assert!(!is_digital_silence(&[0.0, 0.0, -0.002, 0.0]));
     }
 
     use std::time::{SystemTime, UNIX_EPOCH};

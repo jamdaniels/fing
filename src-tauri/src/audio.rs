@@ -369,8 +369,12 @@ impl AudioCapture {
         tracing::debug!("Audio capture closed");
     }
 
+    /// Resample to 16 kHz; a buffer already at 16 kHz is returned as is.
     pub fn resample_to_16k(&self, buffer: Vec<f32>) -> Vec<f32> {
-        resample_to_16k(buffer, self.native_sample_rate)
+        if self.native_sample_rate == WHISPER_SAMPLE_RATE || buffer.is_empty() {
+            return buffer;
+        }
+        resample_slice_to_16k(&buffer, self.native_sample_rate)
     }
 
     /// Get current audio level during mic test and clear old samples
@@ -386,7 +390,7 @@ impl AudioCapture {
 
         // Calculate peak from all samples
         let peak_level = buf.iter().map(|&s| s.abs()).fold(0.0f32, f32::max);
-        let is_receiving_audio = buf_len > 0 && peak_level > 0.001;
+        let is_receiving_audio = buf_len > 0 && peak_level > DIGITAL_SILENCE_PEAK;
 
         // Clear buffer for next reading
         buf.clear();
@@ -401,17 +405,19 @@ impl AudioCapture {
     }
 }
 
-/// Resample mono audio from `native_sample_rate` to 16 kHz; a buffer already
-/// at 16 kHz is returned as is.
-pub fn resample_to_16k(buffer: Vec<f32>, native_sample_rate: u32) -> Vec<f32> {
-    if native_sample_rate == WHISPER_SAMPLE_RATE || buffer.is_empty() {
-        return buffer;
-    }
-    resample_slice_to_16k(&buffer, native_sample_rate)
+// Peak amplitude at or below which a recording counts as digital silence.
+// Whisper hallucinates text on such input, so no engine gets to see it.
+const DIGITAL_SILENCE_PEAK: f32 = 0.001;
+
+pub fn is_digital_silence(samples: &[f32]) -> bool {
+    samples
+        .iter()
+        .all(|sample| sample.abs() <= DIGITAL_SILENCE_PEAK)
 }
 
-/// Like [`resample_to_16k`] for borrowed audio (pre-transcription chunks), so
-/// the input is only copied when it is already at 16 kHz.
+/// Like [`AudioCapture::resample_to_16k`] for borrowed audio
+/// (pre-transcription chunks), so the input is only copied when it is
+/// already at 16 kHz.
 pub fn resample_slice_to_16k(buffer: &[f32], native_sample_rate: u32) -> Vec<f32> {
     if native_sample_rate == WHISPER_SAMPLE_RATE || buffer.is_empty() {
         return buffer.to_vec();
@@ -840,5 +846,12 @@ mod tests {
                 "resampled output out of range at {rate} Hz"
             );
         }
+    }
+
+    #[test]
+    fn digital_silence_is_detected_by_peak() {
+        assert!(is_digital_silence(&[0.0; 48_000]));
+        assert!(is_digital_silence(&[0.001, -0.001, 0.0005]));
+        assert!(!is_digital_silence(&[0.0, 0.0, -0.002, 0.0]));
     }
 }

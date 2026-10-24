@@ -1,5 +1,5 @@
 [package]
-name = "fing-whisper-sys"
+name = "whisper-sys"
 version = "0.1.0"
 edition = "2021"
 description = "Raw bindings to the pinned whisper.cpp (whisper + parakeet) for Fing"

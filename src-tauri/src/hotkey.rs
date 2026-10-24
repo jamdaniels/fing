@@ -4,7 +4,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
-use crate::audio::{AudioCapture, AudioTap};
+use crate::audio::{is_digital_silence, AudioCapture, AudioTap};
 use crate::db::{save_transcript, NewTranscript};
 use crate::engine::{AbortFlag, TranscribeError};
 use crate::indicator::NoticeKind;
@@ -12,9 +12,7 @@ use crate::microphone::{self, MicChoice, OpenedMic};
 use crate::paste::paste_text;
 use crate::settings::{load_settings, load_settings_sync};
 use crate::sounds;
-use crate::transcribe::{
-    is_blank_audio, is_digital_silence, is_transcriber_loaded, loaded_variant,
-};
+use crate::transcribe::{is_blank_audio, is_transcriber_loaded, loaded_variant};
 
 // Maximum recording duration; the audio buffer is sized for the same limit.
 const MAX_RECORDING_DURATION: Duration =
@@ -329,28 +327,18 @@ fn schedule_lazy_unload_if_idle() {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_secs(LAZY_MODEL_IDLE_UNLOAD_SECS)).await;
 
-        if LAZY_ACTIVITY_TOKEN.load(Ordering::SeqCst) != token {
-            return;
-        }
-        if RECORDING_ACTIVE.load(Ordering::SeqCst) {
-            return;
-        }
-        if crate::state::get_state() != crate::state::AppState::Ready {
-            return;
-        }
-
-        let settings = load_settings().await;
-        if !settings.lazy_model_loading {
-            return;
-        }
-
-        // Re-checked under the model lock, so a load in flight (e.g. a model
-        // switch) completes first and is not unloaded mid-load.
         let still_idle = move || {
             LAZY_ACTIVITY_TOKEN.load(Ordering::SeqCst) == token
                 && !RECORDING_ACTIVE.load(Ordering::SeqCst)
                 && crate::state::get_state() == crate::state::AppState::Ready
         };
+        if !still_idle() {
+            return;
+        }
+
+        // Re-checked under the model lock (with the lazy-loading setting), so
+        // a load in flight (e.g. a model switch) completes first and is not
+        // unloaded mid-load.
         if !crate::model_loader::unload_if_idle(still_idle).await {
             return;
         }
@@ -381,10 +369,7 @@ pub fn on_key_down(app: &AppHandle) {
         && loaded_variant() != Some(active)
         && !crate::model::model_path_for_variant(active).exists()
     {
-        tracing::warn!(
-            "Active {:?} model is not downloaded; not recording",
-            settings_snapshot.active_model_variant
-        );
+        tracing::warn!("Active {:?} model is not downloaded; not recording", active);
         notify(
             app,
             NoticeKind::Error,

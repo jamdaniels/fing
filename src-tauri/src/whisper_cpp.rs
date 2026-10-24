@@ -1,13 +1,13 @@
-// Thin safe wrapper over fing-whisper-sys: only the parts of whisper.cpp
+// Thin safe wrapper over whisper-sys: only the parts of whisper.cpp
 // (whisper + parakeet) that Fing uses.
 
-use fing_whisper_sys as sys;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::fmt;
 use std::path::Path;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use whisper_sys as sys;
 
 pub use sys::WHISPER_CPP_VERSION;
 
@@ -301,19 +301,15 @@ impl WhisperState<'_> {
         Ok(())
     }
 
-    /// Detect the language of the mel already in the state. Returns the best
-    /// language id and the per-language probabilities (indexed by id).
-    pub fn lang_detect(
-        &mut self,
-        offset_ms: usize,
-        threads: usize,
-    ) -> Result<(i32, Vec<f32>), FfiError> {
+    /// Per-language probabilities (indexed by language id) for the start of
+    /// the mel already in the state.
+    pub fn lang_probabilities(&mut self, threads: usize) -> Result<Vec<f32>, FfiError> {
         let mut probabilities = vec![0.0_f32; (lang_max_id() + 1).max(0) as usize];
         let id = unsafe {
             sys::whisper_lang_auto_detect_with_state(
                 self.ctx.ptr.as_ptr(),
                 self.ptr.as_ptr(),
-                offset_ms as c_int,
+                0,
                 threads as c_int,
                 probabilities.as_mut_ptr(),
             )
@@ -321,7 +317,7 @@ impl WhisperState<'_> {
         if id < 0 {
             return Err(err(format!("whisper_lang_auto_detect failed ({id})")));
         }
-        Ok((id, probabilities))
+        Ok(probabilities)
     }
 
     /// Run `whisper_full`. Setting `abort` stops it after the current

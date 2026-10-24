@@ -11,11 +11,10 @@ use std::sync::Mutex;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::audio::{resample_slice_to_16k, AudioTap, WHISPER_SAMPLE_RATE};
+use crate::audio::{is_digital_silence, resample_slice_to_16k, AudioTap, WHISPER_SAMPLE_RATE};
 use crate::engine::{AbortFlag, TranscribeError};
 use crate::transcribe::{
-    is_blank_audio, is_digital_silence, is_transcriber_loaded, transcribe_audio,
-    transcribe_audio_part, PartTranscript,
+    is_blank_audio, is_transcriber_loaded, transcribe_audio, transcribe_audio_part, PartTranscript,
 };
 
 /// Kill switch. Deliberately not a persisted setting: settings load/save is

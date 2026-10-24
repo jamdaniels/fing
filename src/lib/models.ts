@@ -1,5 +1,5 @@
 import { t } from "./i18n";
-import type { ModelInfo, ModelVariant } from "./types";
+import type { ModelEngine, ModelInfo, ModelVariant } from "./types";
 
 export function formatModelSize(bytes: number): string {
   return `${Math.round(bytes / 1_000_000)} MB`;
@@ -7,6 +7,13 @@ export function formatModelSize(bytes: number): string {
 
 export function modelQualityLabel(variant: ModelVariant): string {
   return t(`models.quality.${variant}`);
+}
+
+export function modelEngine(
+  models: readonly ModelInfo[],
+  variant: ModelVariant | undefined
+): ModelEngine | undefined {
+  return models.find((m) => m.variant === variant)?.engine;
 }
 
 /** One-line note under a model's name (only Parakeet has one). */

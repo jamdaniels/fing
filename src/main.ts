@@ -65,6 +65,7 @@ import {
   getUpdateStatus,
   hotkeyPress,
   hotkeyRelease,
+  MODEL_SWITCH_BUSY,
   presentMainWindow,
   refreshAudioDevices,
   relaunchApp,
@@ -89,6 +90,7 @@ import {
 } from "./lib/microphone";
 import {
   formatModelSize,
+  modelEngine,
   modelQualityLabel,
   renderModelNote,
 } from "./lib/models";
@@ -2361,7 +2363,7 @@ function activateModel(variant: ModelVariant): void {
     .catch((err: unknown) => {
       console.error("Activate error:", err);
       modelSwitchError =
-        err === "model_switch_busy"
+        err === MODEL_SWITCH_BUSY
           ? t("models.switchBusy")
           : t("models.switchFailed");
     })
@@ -2460,7 +2462,7 @@ function renderModelList(): string {
 }
 
 function activeModelEngine(): ModelEngine | undefined {
-  return models.find((m) => m.variant === settings?.activeModelVariant)?.engine;
+  return modelEngine(models, settings?.activeModelVariant);
 }
 
 function renderDictionary(el: HTMLElement): void {

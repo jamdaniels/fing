@@ -67,7 +67,7 @@ jobs:
           git fetch --tags --force
           git rev-parse --verify --quiet "refs/tags/$TAG^{commit}" >/dev/null
           git checkout --detach "refs/tags/$TAG"
-          # whisper.cpp is a submodule (fing-whisper-sys); match the tag's pin.
+          # whisper.cpp is a submodule (whisper-sys); match the tag's pin.
           git submodule update --init --recursive
 
       - name: Resolve release type
@@ -184,10 +184,10 @@ jobs:
         shell: pwsh
         run: |
           # Keep Cargo's output path short enough for MSBuild's FileTracker in
-          # fing-whisper-sys's nested Vulkan shader build.
+          # whisper-sys's nested Vulkan shader build.
           New-Item -ItemType Directory -Force -Path 'D:\t' | Out-Null
           echo "CARGO_TARGET_DIR=D:\t" >> $env:GITHUB_ENV
-          # bindgen (fing-whisper-sys) needs libclang; the runner image ships LLVM.
+          # bindgen (whisper-sys) needs libclang; the runner image ships LLVM.
           $llvm = 'C:\Program Files\LLVM\bin'
           if (-not (Test-Path "$llvm\libclang.dll")) {
             throw "libclang.dll not found in $llvm"

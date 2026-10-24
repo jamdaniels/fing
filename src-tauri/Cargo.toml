@@ -21,7 +21,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
-fing-whisper-sys = { path = "crates/fing-whisper-sys" }
+whisper-sys = { path = "crates/whisper-sys" }
 cpal = "0.17"
 rubato = "1.0"
 realfft = "3"
@@ -75,10 +75,6 @@ strip = true
 lto = true
 codegen-units = 1
 panic = "abort"
-
-# fing-whisper-sys always builds whisper.cpp as CMake Release (see its build.rs):
-# a RelWithDebInfo build breaks the MSVC static CRT link (/MD vs /MT) and a
-# debug ggml is far too slow to transcribe with.
 
 # Model activation hashes the whole model file (SHA-256, ~0.5 GB); unoptimized
 # sha2 makes that take seconds in dev builds.

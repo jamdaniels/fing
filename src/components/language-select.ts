@@ -1,5 +1,5 @@
 import { Check, Plus, Search, X } from "lucide";
-import { getUiLanguage, t } from "../lib/i18n";
+import { formatList, t } from "../lib/i18n";
 import { createIcon, escapeHtml } from "../lib/icons";
 import {
   languageName,
@@ -25,9 +25,7 @@ export function renderEngineLanguageHint(
     unsupported.length === 0
       ? t("languageSelect.parakeetIgnored")
       : t("languageSelect.parakeetUnsupported", {
-          languages: new Intl.ListFormat(getUiLanguage(), {
-            type: "conjunction",
-          }).format(unsupported.map(languageName)),
+          languages: formatList(unsupported.map(languageName)),
         });
   const warn = unsupported.length > 0 ? "warn" : "";
   return `<div class="engine-note lang-engine-hint ${warn}">${escapeHtml(text)}</div>`;

@@ -311,7 +311,7 @@ fn default_context_params() -> ContextParams {
 
 #[cfg(not(target_os = "windows"))]
 fn default_device() -> InferenceDevice {
-    // fing-whisper-sys builds Metal for Apple Silicon only.
+    // whisper-sys builds Metal for Apple Silicon only.
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         InferenceDevice {
             id: "metal:auto".to_string(),
@@ -705,8 +705,8 @@ fn discover_devices() -> Vec<InferenceDevice> {
 
 #[cfg(target_os = "windows")]
 fn discover_windows_devices() -> Vec<InferenceDevice> {
-    use fing_whisper_sys as sys;
     use std::ffi::CStr;
+    use whisper_sys as sys;
 
     let mut devices = Vec::new();
     let mut gpu_device_index = 0_i32;
@@ -797,7 +797,7 @@ fn c_string(pointer: *const std::os::raw::c_char) -> Option<String> {
 
 #[cfg(target_os = "windows")]
 fn probe_device(device: &InferenceDevice) -> bool {
-    use fing_whisper_sys as sys;
+    use whisper_sys as sys;
 
     unsafe extern "C" {
         fn fing_probe_ggml_backend(device: *mut std::ffi::c_void) -> i32;
