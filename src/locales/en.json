@@ -72,9 +72,14 @@
     "full": "Dictionary is full ({count} terms)",
     "duplicate": "That term is already in your dictionary",
     "saveFailed": "Failed to save term",
-    "updateFailed": "Failed to update dictionary"
+    "updateFailed": "Failed to update dictionary",
+    "parakeetIgnored": "Parakeet doesn't use dictionary terms. Switch to a Whisper model to use them.",
+    "parakeetBadge": "Ignored by Parakeet"
   },
   "languageSelect": {
+    "parakeetIgnored": "Parakeet supports {supported}, detects the language itself and ignores this selection.",
+    "parakeetSupported": "{count} European languages",
+    "parakeetUnsupported": "Parakeet doesn't support {languages}. Choose a Whisper model instead.",
     "add": "Add",
     "search": "Search languages…",
     "empty": "No language found",
@@ -156,16 +161,26 @@
     "accuracy": "Accuracy",
     "diskRam": "Disk / RAM",
     "inUse": "In Use",
+    "note": {
+      "small_q5": "Smallest size, very fast",
+      "small": "Good default",
+      "large_turbo_q5": "Biggest footprint, most accurate",
+      "parakeet_tdt_v3_q4k": "Fastest · auto-detects language"
+    },
+    "parakeetNoDictionary": "Doesn't use dictionary terms",
     "verifying": "Verifying...",
     "activate": "Activate",
     "activating": "Activating...",
+    "switchBusy": "Can't switch models while recording or transcribing. Try again in a moment.",
+    "switchFailed": "Couldn't load this model. The previous model is still in use.",
     "deleting": "Deleting...",
     "deleteTitle": "Delete {model}",
     "deleteBody": "You can download it again later.",
     "quality": {
       "small_q5": "Good",
       "small": "Better",
-      "large_turbo_q5": "Best"
+      "large_turbo_q5": "Best",
+      "parakeet_tdt_v3_q4k": "Better"
     }
   },
   "permissions": {
@@ -177,9 +192,10 @@
   "dialogs": {
     "hotkeyTitle": "Set recording hotkey",
     "hotkeyPrompt": "Press a key or combination",
-    "useFn": "Use Fn key",
     "setting": "Setting...",
     "hotkeyFailed": "Failed to set hotkey. Try another key.",
+    "fnSystemAction": "macOS also reacts to fn. In Keyboard settings, set “Press 🌐 key to” to “Do Nothing”.",
+    "openKeyboardSettings": "Open Keyboard Settings",
     "micTitle": "Test Microphone",
     "device": "Device:",
     "deviceFallback": "Selected device not found. Using fallback device.",
@@ -187,7 +203,6 @@
     "audioDetected": "Audio detected",
     "saySomething": "Say something to test...",
     "restartTitle": "Restart Required",
-    "restartBody": "Fing needs to restart to load the new model.",
     "inferenceRestartBody": "Fing needs to restart to apply the new processing device.",
     "restartNow": "Restart Now"
   },
@@ -241,8 +256,6 @@
     "downloadingSubtitle": "This usually takes under a minute on a fast connection.",
     "modelReady": "Model ready",
     "modelReadySubtitle": "{model} downloaded and verified.",
-    "analyzingSystem": "Analyzing this system…",
-    "analyzingSystemDescription": "Fing is choosing the fastest suitable way to run Whisper.",
     "analysisUnavailable": "Processing device analysis unavailable",
     "analysisUnavailableDescription": "Setup can continue. Fing will choose a safe processing device when the model loads.",
     "processorSelected": "Selected {device} for transcription.",
@@ -256,8 +269,7 @@
     "chooseModel": "Choose a speech model",
     "chooseModelSubtitle": "Pick what fits your needs.",
     "modelFallback": "Model",
-    "disk": "~{size} disk",
-    "memory": "~{size} MB memory",
+    "modelFootprint": "~{size} download · ~{memory} MB RAM",
     "saveModelFailed": "Could not save the selected model. Please try again.",
     "repairFailed": "Model repair did not finish. Download the model again and retry.",
     "preferencesTitle": "Your preferences",
@@ -278,8 +290,8 @@
     "restartApply": "Restart to apply",
     "hotkeyTitle": "Set your hotkey",
     "hotkeySubtitle": "Press any key or combination.",
-    "orUse": "or use",
-    "onMacLaptops": "on Mac laptops",
+    "hotkeyHint": "Suggestions: Fn, Right ⌘ or Right Ctrl on an external keyboard.",
+    "hotkeyHintWindows": "Single keys work best, like Right Ctrl.",
     "microphoneTitle": "Pick a microphone",
     "microphoneSubtitle": "Choose your input device.",
     "microphoneHint": "You can switch microphones any time from the settings.",

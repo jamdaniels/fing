@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import {
+  capturedTokensToHotkey,
+  createHotkeyCapture,
   eventToHotkeyToken,
   formatHotkeyForDisplay,
+  hotkeyUsesFn,
   matchesHotkey,
   matchesHotkeyRelease,
   normalizeStoredHotkey,
@@ -45,6 +48,64 @@ describe("parseHotkeyString", () => {
     expect(parseHotkeyString("ControlLeft+Escape")).toBeNull();
     expect(parseHotkeyString("KeyA+KeyA")).toBeNull();
     expect(parseHotkeyString("")).toBeNull();
+  });
+
+  it("rejects the Fn key outside macOS", () => {
+    expect(parseHotkeyString("Function")).toBeNull();
+    expect(parseHotkeyString("Function+Space")).toBeNull();
+    expect(normalizeStoredHotkey("Function")).toBe("F9");
+  });
+});
+
+describe("createHotkeyCapture", () => {
+  it("builds a chord in press order and keeps it after release", () => {
+    const capture = createHotkeyCapture();
+    expect(capture.press("ControlLeft")).toBe("ControlLeft");
+    expect(capture.press("KeyK")).toBe("ControlLeft+KeyK");
+    expect(capture.press("ControlLeft")).toBe("ControlLeft+KeyK");
+    capture.release("KeyK");
+    expect(capture.press("ShiftLeft")).toBe("ControlLeft+KeyK+ShiftLeft");
+  });
+
+  it("starts a new chord once every key was released", () => {
+    const capture = createHotkeyCapture();
+    capture.press("ControlLeft");
+    capture.press("KeyK");
+    capture.release("KeyK");
+    capture.release("ControlLeft");
+    expect(capture.press("F9")).toBe("F9");
+
+    capture.releaseAll();
+    expect(capture.press("Function")).toBe("Function");
+  });
+});
+
+describe("capturedTokensToHotkey", () => {
+  it("joins captured tokens in press order", () => {
+    expect(capturedTokensToHotkey(["ControlLeft", "KeyK"])).toBe(
+      "ControlLeft+KeyK"
+    );
+    expect(capturedTokensToHotkey(["Function"])).toBe("Function");
+    expect(capturedTokensToHotkey(["Function", "Space"])).toBe(
+      "Function+Space"
+    );
+    expect(capturedTokensToHotkey([])).toBeNull();
+  });
+
+  it("drops Fn from chords with an F-key", () => {
+    expect(capturedTokensToHotkey(["Function", "F9"])).toBe("F9");
+    expect(capturedTokensToHotkey(["ShiftLeft", "Function", "F5"])).toBe(
+      "ShiftLeft+F5"
+    );
+  });
+});
+
+describe("hotkeyUsesFn", () => {
+  it("detects the Fn key alone or in a chord", () => {
+    expect(hotkeyUsesFn("Function")).toBe(true);
+    expect(hotkeyUsesFn("Function+Space")).toBe(true);
+    expect(hotkeyUsesFn("F9")).toBe(false);
+    expect(hotkeyUsesFn("ControlLeft+KeyF")).toBe(false);
   });
 });
 

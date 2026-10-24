@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppInfo,
   AppState,
@@ -133,8 +134,12 @@ export async function deleteModel(variant: ModelVariant): Promise<void> {
   return await invoke("delete_model", { variant });
 }
 
-export async function setActiveModel(variant: ModelVariant): Promise<boolean> {
-  return await invoke<boolean>("set_active_model", { variant });
+/** `setActiveModel` rejection while recording or transcribing. */
+export const MODEL_SWITCH_BUSY = "model_switch_busy";
+
+/** Activates a downloaded model; the backend swaps the engine in place. */
+export async function setActiveModel(variant: ModelVariant): Promise<void> {
+  return await invoke("set_active_model", { variant });
 }
 
 export async function completeSetup(): Promise<void> {
@@ -220,4 +225,25 @@ export async function updateHotkey(hotkey: string): Promise<void> {
 
 export async function setHotkeySuppressed(suppressed: boolean): Promise<void> {
   return await invoke("set_hotkey_suppressed", { suppressed });
+}
+
+/** Whether macOS also runs its own action (emoji picker, input source,
+ * dictation) when Fn is pressed. Always false outside macOS. */
+export async function fnKeyHasSystemAction(): Promise<boolean> {
+  return await invoke<boolean>("fn_key_has_system_action");
+}
+
+export async function openKeyboardSettings(): Promise<void> {
+  return await invoke("open_keyboard_settings");
+}
+
+/** Fn presses (true) and releases (false) seen by the macOS listener while
+ * the hotkey is suppressed for capture; WebKit never delivers them as key
+ * events. */
+export function onHotkeyCaptureFn(
+  handler: (pressed: boolean) => void
+): Promise<UnlistenFn> {
+  return listen<boolean>("hotkey-capture-fn", (event) =>
+    handler(event.payload)
+  );
 }

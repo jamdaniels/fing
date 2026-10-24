@@ -27,17 +27,26 @@ import {
   Trash2,
   X,
 } from "lucide";
-import { mountLanguageSelect } from "./components/language-select";
+import {
+  mountLanguageSelect,
+  renderEngineLanguageHint,
+} from "./components/language-select";
 import { cleanupOnboarding, renderOnboarding } from "./components/onboarding";
 import type { ParsedHotkeyConfig } from "./lib/hotkey";
 import {
+  createHotkeyCapture,
   eventToHotkeyToken,
   matchesHotkey,
   matchesHotkeyRelease,
   normalizeStoredHotkey,
   parseHotkeyString,
 } from "./lib/hotkey";
-import { renderHotkeyChips } from "./lib/hotkey-display";
+import {
+  bindFnSystemActionNote,
+  renderFnSystemActionNote,
+  renderHotkeyChips,
+  watchFnSystemAction,
+} from "./lib/hotkey-display";
 import { formatDateTime, formatNumber, setUiLanguage, t, tp } from "./lib/i18n";
 import { createIcon, escapeHtml } from "./lib/icons";
 import {
@@ -62,6 +71,8 @@ import {
   getUpdateStatus,
   hotkeyPress,
   hotkeyRelease,
+  MODEL_SWITCH_BUSY,
+  onHotkeyCaptureFn,
   presentMainWindow,
   refreshAudioDevices,
   relaunchApp,
@@ -84,6 +95,13 @@ import {
   microphonePicker,
   systemDefaultMicrophoneLabel,
 } from "./lib/microphone";
+import {
+  formatModelSize,
+  modelEngine,
+  modelQualityLabel,
+  renderModelNote,
+} from "./lib/models";
+import { IS_MAC } from "./lib/platform";
 import type {
   AppInfo,
   AppState,
@@ -94,6 +112,7 @@ import type {
   InferenceRuntimeInfo,
   MicrophoneTest,
   MicTestStartResult,
+  ModelEngine,
   ModelInfo,
   ModelVariant,
   PermissionStatus,
@@ -176,6 +195,9 @@ const MAX_DICTIONARY_TERMS = 100;
 const MAX_DICTIONARY_WORDS_PER_TERM = 3;
 let dictionaryError: string | null = null;
 let lazyModelToggleBusy = false;
+// Model being activated (the engine swap can take seconds on first load)
+let modelSwitchVariant: ModelVariant | null = null;
+let modelSwitchError: string | null = null;
 let updateCheckInProgress = false;
 let updateStatus: UpdateStatus = {
   updateAvailable: false,
@@ -1224,23 +1246,15 @@ function showHotkeyModal(): void {
   closeHotkeyModal();
 
   let capturedHotkey: string | null = null;
-  // Currently held keys; once this is empty, the next keypress starts a fresh chord.
-  const pressedTokens = new Set<string>();
-  // The chord being built. Releases do NOT remove from this — only a fresh
-  // press session (after full release) clears and restarts it.
-  const capturedTokens: string[] = [];
+  const capture = createHotkeyCapture();
   const currentHotkey = normalizeStoredHotkey(settings?.hotkey);
+  // macOS also runs its own Fn action; read on open and on refocus.
+  let fnHasSystemAction = false;
 
   setHotkeySuppressed(true).catch(console.error);
 
   const modal = document.createElement("div");
   modal.className = "dialog-overlay";
-
-  const syncCapturedHotkey = () => {
-    capturedHotkey =
-      capturedTokens.length > 0 ? capturedTokens.join("+") : null;
-    renderModal();
-  };
 
   const renderModal = () => {
     modal.innerHTML = `
@@ -1254,11 +1268,9 @@ function showHotkeyModal(): void {
           <div class="hotkey-modal-preview">
             ${renderHotkeyChips(capturedHotkey ?? currentHotkey, { chipClass: "hotkey-modal-key", extraChipClass: capturedHotkey ? "captured" : "" })}
           </div>
+          ${renderFnSystemActionNote(capturedHotkey ?? currentHotkey, fnHasSystemAction)}
         </div>
         <div class="dialog-footer hotkey-dialog-footer">
-          <div class="hotkey-fn-pick">
-            <button class="hotkey-modal-key hotkey-fn-chip" type="button" aria-label="${t("dialogs.useFn")}">fn</button>
-          </div>
           <button class="btn btn-accent hotkey-confirm-btn" ${capturedHotkey ? "" : "disabled"}>${t("settings.setHotkey")}</button>
         </div>
       </div>
@@ -1269,13 +1281,7 @@ function showHotkeyModal(): void {
       .querySelector(".dialog-close")
       ?.addEventListener("click", closeHotkeyModal);
 
-    modal.querySelector(".hotkey-fn-chip")?.addEventListener("click", () => {
-      capturedHotkey = "Function";
-      pressedTokens.clear();
-      capturedTokens.length = 0;
-      capturedTokens.push("Function");
-      renderModal();
-    });
+    bindFnSystemActionNote(modal);
 
     modal
       .querySelector(".hotkey-confirm-btn")
@@ -1307,6 +1313,11 @@ function showHotkeyModal(): void {
   renderModal();
   document.body.appendChild(modal);
 
+  const pressToken = (token: string) => {
+    capturedHotkey = capture.press(token);
+    renderModal();
+  };
+
   const keydownHandler = (e: KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1320,20 +1331,9 @@ function showHotkeyModal(): void {
     }
 
     const token = eventToHotkeyToken(e);
-    if (!token) {
-      return;
+    if (token) {
+      pressToken(token);
     }
-
-    // Starting a fresh press session — clear the previously captured chord
-    // so the new keypress begins a new binding attempt.
-    if (pressedTokens.size === 0) {
-      capturedTokens.length = 0;
-    }
-    pressedTokens.add(token);
-    if (!capturedTokens.includes(token)) {
-      capturedTokens.push(token);
-    }
-    syncCapturedHotkey();
   };
 
   const keyupHandler = (e: KeyboardEvent) => {
@@ -1341,17 +1341,13 @@ function showHotkeyModal(): void {
     e.stopPropagation();
 
     const token = eventToHotkeyToken(e);
-    if (!token) {
-      return;
+    if (token) {
+      capture.release(token);
     }
-
-    // Release order doesn't matter; capturedTokens stays put until the next
-    // fresh press session (when pressedTokens is empty on keydown).
-    pressedTokens.delete(token);
   };
 
   const blurHandler = () => {
-    pressedTokens.clear();
+    capture.releaseAll();
   };
 
   const clickHandler = (e: MouseEvent) => {
@@ -1364,11 +1360,21 @@ function showHotkeyModal(): void {
   document.addEventListener("keyup", keyupHandler);
   window.addEventListener("blur", blurHandler);
   modal.addEventListener("click", clickHandler);
+  const stopFnWatch = watchFnSystemAction((hasSystemAction) => {
+    fnHasSystemAction = hasSystemAction;
+    renderModal();
+  });
+  // macOS only: WebKit never delivers Fn as a key event.
+  const fnUnlisten = onHotkeyCaptureFn((pressed) =>
+    pressed ? pressToken("Function") : capture.release("Function")
+  );
 
   hotkeyModalCleanup = () => {
+    fnUnlisten.then((unlisten) => unlisten()).catch(console.error);
     document.removeEventListener("keydown", keydownHandler);
     document.removeEventListener("keyup", keyupHandler);
     window.removeEventListener("blur", blurHandler);
+    stopFnWatch();
     modal.removeEventListener("click", clickHandler);
     modal.remove();
     hotkeyModalCleanup = null;
@@ -1596,10 +1602,7 @@ function startModelDownloadPolling(variant: ModelVariant): void {
   modelDownloadProgress = { variant, percentage: 0, status: "downloading" };
 
   // Immediately update UI to show 0%
-  const modelList = document.querySelector(".model-list");
-  if (modelList && currentView === "settings") {
-    modelList.innerHTML = renderModelList();
-  }
+  rerenderModelList();
 
   modelDownloadPollInterval = window.setInterval(async () => {
     const progress = await getDownloadProgress();
@@ -1610,7 +1613,8 @@ function startModelDownloadPolling(variant: ModelVariant): void {
         modelDownloadPollInterval = null;
       }
       modelDownloadProgress = null;
-      // Refresh models and re-render
+      // Refresh models and re-render. The backend loads a re-downloaded
+      // active model itself.
       await loadSettings({ force: true, refreshDevices: false });
       if (currentView === "settings") {
         renderContent();
@@ -1638,17 +1642,11 @@ function startModelDownloadPolling(variant: ModelVariant): void {
       return;
     }
 
-    const modelList = document.querySelector(".model-list");
-    if (modelList && currentView === "settings") {
-      modelList.innerHTML = renderModelList();
-    }
+    rerenderModelList();
   }, 500);
 }
 
-function showRestartDialog(
-  previousVariant?: ModelVariant,
-  body = t("dialogs.restartBody")
-): void {
+function showRestartDialog(body: string): void {
   const modal = document.createElement("div");
   modal.className = "dialog-overlay";
   modal.innerHTML = `
@@ -1668,11 +1666,8 @@ function showRestartDialog(
 
   document
     .getElementById("restart-later-btn")
-    ?.addEventListener("click", async () => {
+    ?.addEventListener("click", () => {
       modal.remove();
-      if (previousVariant) {
-        await setActiveModel(previousVariant);
-      }
       loadSettings({ force: true, refreshDevices: false }).then(() =>
         renderContent()
       );
@@ -2160,26 +2155,7 @@ function handleSettingsClick(e: MouseEvent): void {
     ".activate-model-btn"
   ) as HTMLButtonElement | null;
   if (activateModelBtn) {
-    const variant = activateModelBtn.dataset.variant as ModelVariant;
-    const previousVariant = settings?.activeModelVariant;
-    activateModelBtn.disabled = true;
-    activateModelBtn.textContent = t("models.activating");
-
-    setActiveModel(variant)
-      .then((needsRestart) => {
-        if (needsRestart) {
-          showRestartDialog(previousVariant);
-        } else {
-          loadSettings({ force: true, refreshDevices: false }).then(() =>
-            renderContent()
-          );
-        }
-      })
-      .catch((err) => {
-        console.error("Activate error:", err);
-        activateModelBtn.disabled = false;
-        activateModelBtn.textContent = t("models.activate");
-      });
+    activateModel(activateModelBtn.dataset.variant as ModelVariant);
     return;
   }
 
@@ -2235,7 +2211,7 @@ function handleSettingsChange(e: Event): void {
         await refreshInferenceRuntimeInfo(true);
         renderContent();
         if (inferenceRuntimeInfo?.restartRequired) {
-          showRestartDialog(undefined, t("dialogs.inferenceRestartBody"));
+          showRestartDialog(t("dialogs.inferenceRestartBody"));
         }
       })
       .catch((error) => {
@@ -2358,8 +2334,50 @@ async function refreshInferenceRuntimeInfo(force = false): Promise<void> {
   }
 }
 
-function formatModelSize(bytes: number): string {
-  return `${Math.round(bytes / 1_000_000)} MB`;
+/**
+ * Makes a downloaded model active. The backend unloads the current model and
+ * loads the new one in place, no restart; it refuses while a recording is
+ * being made or transcribed.
+ */
+function activateModel(variant: ModelVariant): void {
+  if (modelSwitchVariant) {
+    return;
+  }
+  modelSwitchVariant = variant;
+  modelSwitchError = null;
+  // Later full-settings saves must carry the new model while it loads.
+  if (settings) {
+    settings = { ...settings, activeModelVariant: variant };
+  }
+  rerenderModelList();
+
+  setActiveModel(variant)
+    .catch((err: unknown) => {
+      console.error("Activate error:", err);
+      modelSwitchError =
+        err === MODEL_SWITCH_BUSY
+          ? t("models.switchBusy")
+          : t("models.switchFailed");
+    })
+    .then(() => loadSettings({ force: true, refreshDevices: false }))
+    .finally(() => {
+      modelSwitchVariant = null;
+      if (currentView === "settings") {
+        renderContent();
+      }
+    });
+}
+
+function rerenderModelList(): void {
+  const modelList = document.querySelector(".model-list");
+  if (modelList && currentView === "settings") {
+    modelList.innerHTML = renderModelList();
+  }
+}
+
+/** Spinner badge for a model download, its verification or its activation. */
+function renderModelProgress(label: string, verifying: boolean): string {
+  return `<span class="model-download-progress${verifying ? " verifying" : ""}"><span class="loading-spinner" aria-hidden="true">${createIcon(LoaderCircle)}</span><span class="model-download-progress-value">${label}</span></span>`;
 }
 
 function renderModelList(): string {
@@ -2397,19 +2415,24 @@ function renderModelList(): string {
           : null;
       let actions = "";
 
-      if (model.isActive) {
+      if (model.isActive && model.isDownloaded) {
         actions = `<span class="model-status-badge active">${t("models.inUse")}</span>`;
       } else if (modelProgress) {
-        if (modelProgress.status === "verifying") {
-          actions = `<span class="model-download-progress verifying"><span class="loading-spinner" aria-hidden="true">${createIcon(LoaderCircle)}</span><span class="model-download-progress-value">${t("models.verifying")}</span></span>`;
-        } else {
-          const pct = Math.round(modelProgress.percentage);
-          actions = `<span class="model-download-progress"><span class="loading-spinner" aria-hidden="true">${createIcon(LoaderCircle)}</span><span class="model-download-progress-value">${pct}%</span></span>`;
-        }
+        const verifying = modelProgress.status === "verifying";
+        actions = renderModelProgress(
+          verifying
+            ? t("models.verifying")
+            : `${Math.round(modelProgress.percentage)}%`,
+          verifying
+        );
+      } else if (modelSwitchVariant === model.variant) {
+        actions = renderModelProgress(t("models.activating"), true);
       } else if (model.isDownloaded) {
+        // Only inactive models get here (the active one shows "In Use").
+        const switching = modelSwitchVariant ? "disabled" : "";
         actions = `
-          <button class="btn btn-outline btn-sm activate-model-btn" data-variant="${model.variant}">${t("models.activate")}</button>
-          <button class="btn btn-outline btn-sm delete-model-btn" data-variant="${model.variant}">${t("common.delete")}</button>
+          <button class="btn btn-outline btn-sm activate-model-btn" data-variant="${model.variant}" ${switching}>${t("models.activate")}</button>
+          <button class="btn btn-outline btn-sm delete-model-btn" data-variant="${model.variant}" ${switching}>${t("common.delete")}</button>
         `;
       } else {
         actions = `<button class="btn btn-outline btn-sm download-model-btn" data-variant="${model.variant}">${t("common.download")}</button>`;
@@ -2417,8 +2440,12 @@ function renderModelList(): string {
 
       return `
         <div class="model-row" data-variant="${model.variant}">
-          <span class="model-col-name">${model.displayName}</span>
-          <span class="model-col-desc">${getModelQualityLabel(model.variant)}</span>
+          <div class="model-col-name">
+            <div>${escapeHtml(model.displayName)}</div>
+            ${renderModelNote(model)}
+            ${model.engine === "parakeet" ? `<div class="engine-note warn">${t("models.parakeetNoDictionary")}</div>` : ""}
+          </div>
+          <span class="model-col-desc">${modelQualityLabel(model.variant)}</span>
           <span class="model-col-size">~${formatModelSize(model.sizeBytes)} / ~${model.memoryEstimateMb} MB</span>
           <span class="model-col-actions">${actions}</span>
         </div>
@@ -2426,18 +2453,15 @@ function renderModelList(): string {
     })
     .join("");
 
-  return header + rows + lazyModelRow;
+  const switchError = modelSwitchError
+    ? `<div class="model-error" role="alert">${escapeHtml(modelSwitchError)}</div>`
+    : "";
+
+  return header + rows + switchError + lazyModelRow;
 }
 
-function getModelQualityLabel(variant: ModelVariant): string {
-  switch (variant) {
-    case "small_q5":
-      return t("models.quality.small_q5");
-    case "small":
-      return t("models.quality.small");
-    case "large_turbo_q5":
-      return t("models.quality.large_turbo_q5");
-  }
+function activeModelEngine(): ModelEngine | undefined {
+  return modelEngine(models, settings?.activeModelVariant);
 }
 
 function renderDictionary(el: HTMLElement): void {
@@ -2473,11 +2497,18 @@ function renderDictionary(el: HTMLElement): void {
           <button class="btn btn-accent dictionary-add-btn" ${atCapacity ? "disabled" : ""} title="${t("common.add")}" aria-label="${t("common.add")}">${createIcon(Plus)}</button>
         </div>
         <div class="dictionary-hint">
-          ${t("dictionary.usage", {
-            used: terms.length,
-            maximum: MAX_DICTIONARY_TERMS,
-            words: MAX_DICTIONARY_WORDS_PER_TERM,
-          })}
+          <span>
+            ${t("dictionary.usage", {
+              used: terms.length,
+              maximum: MAX_DICTIONARY_TERMS,
+              words: MAX_DICTIONARY_WORDS_PER_TERM,
+            })}
+          </span>
+          ${
+            activeModelEngine() === "parakeet"
+              ? `<span class="dictionary-engine-badge" title="${t("dictionary.parakeetIgnored")}">${t("dictionary.parakeetBadge")}</span>`
+              : ""
+          }
         </div>
         ${
           dictionaryError
@@ -2633,6 +2664,7 @@ function renderSettingsUI(el: HTMLElement): void {
           <div>
             <div class="settings-row-label">${t("settings.transcriptionLanguages")}</div>
             <div class="settings-row-desc">${t("settings.transcriptionLanguagesDescription")}</div>
+            <div id="transcription-lang-hint">${renderEngineLanguageHint(activeModelEngine(), settings?.languages ?? ["en"])}</div>
           </div>
           <div id="transcription-langs"></div>
         </div>
@@ -2727,6 +2759,10 @@ function renderSettingsUI(el: HTMLElement): void {
     mountLanguageSelect(langMount, {
       selected: settings?.languages ?? ["en"],
       onChange: (next) => {
+        const hint = el.querySelector("#transcription-lang-hint");
+        if (hint) {
+          hint.innerHTML = renderEngineLanguageHint(activeModelEngine(), next);
+        }
         void handleSettingChange("languages", next);
       },
     });
@@ -3052,7 +3088,7 @@ let hotkeyPressed = false;
 const pressedHotkeyTokens = new Set<string>();
 
 async function setupHotkeyListener(): Promise<void> {
-  if (navigator.userAgent.includes("Mac")) {
+  if (IS_MAC) {
     return;
   }
 
@@ -3202,8 +3238,7 @@ async function showInvalidHotkeyDialog(
 
 async function init(): Promise<void> {
   // Platform detection for platform-specific UI (e.g., hide custom titlebar on Windows)
-  const isMac = navigator.userAgent.includes("Mac");
-  document.body.dataset.platform = isMac ? "darwin" : "windows";
+  document.body.dataset.platform = IS_MAC ? "darwin" : "windows";
 
   await loadSettings({ loadDevices: false });
   const settingsHasCompletedOnboarding = settings?.onboardingCompleted === true;

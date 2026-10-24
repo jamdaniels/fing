@@ -72,9 +72,14 @@
     "full": "Das Wörterbuch ist voll ({count} Begriffe)",
     "duplicate": "Dieser Begriff ist bereits im Wörterbuch",
     "saveFailed": "Begriff konnte nicht gespeichert werden",
-    "updateFailed": "Wörterbuch konnte nicht aktualisiert werden"
+    "updateFailed": "Wörterbuch konnte nicht aktualisiert werden",
+    "parakeetIgnored": "Parakeet nutzt keine Wörterbuch-Begriffe. Wechsle zu einem Whisper-Modell, um sie zu verwenden.",
+    "parakeetBadge": "Von Parakeet ignoriert"
   },
   "languageSelect": {
+    "parakeetIgnored": "Parakeet unterstützt {supported}, erkennt die Sprache selbst und ignoriert diese Auswahl.",
+    "parakeetSupported": "{count} europäische Sprachen",
+    "parakeetUnsupported": "Parakeet unterstützt {languages} nicht. Wähle stattdessen ein Whisper-Modell.",
     "add": "Hinzufügen",
     "search": "Sprachen suchen…",
     "empty": "Keine Sprache gefunden",
@@ -156,16 +161,26 @@
     "accuracy": "Genauigkeit",
     "diskRam": "Speicher / RAM",
     "inUse": "In Verwendung",
+    "note": {
+      "small_q5": "Am kleinsten, sehr schnell",
+      "small": "Gute Standardwahl",
+      "large_turbo_q5": "Am größten, am genauesten",
+      "parakeet_tdt_v3_q4k": "Am schnellsten · erkennt Sprache"
+    },
+    "parakeetNoDictionary": "Nutzt keine Wörterbuch-Begriffe",
     "verifying": "Wird überprüft...",
     "activate": "Aktivieren",
     "activating": "Wird aktiviert...",
+    "switchBusy": "Während einer Aufnahme oder Transkription kann das Modell nicht gewechselt werden. Versuche es gleich noch einmal.",
+    "switchFailed": "Dieses Modell konnte nicht geladen werden. Das bisherige Modell bleibt aktiv.",
     "deleting": "Wird gelöscht...",
     "deleteTitle": "{model} löschen",
     "deleteBody": "Du kannst es später erneut herunterladen.",
     "quality": {
       "small_q5": "Gut",
       "small": "Besser",
-      "large_turbo_q5": "Am besten"
+      "large_turbo_q5": "Am besten",
+      "parakeet_tdt_v3_q4k": "Besser"
     }
   },
   "permissions": {
@@ -177,9 +192,10 @@
   "dialogs": {
     "hotkeyTitle": "Aufnahme-Tastenkürzel festlegen",
     "hotkeyPrompt": "Drücke eine Taste oder Tastenkombination",
-    "useFn": "Fn-Taste verwenden",
     "setting": "Wird festgelegt...",
     "hotkeyFailed": "Tastenkürzel konnte nicht festgelegt werden. Versuche eine andere Taste.",
+    "fnSystemAction": "macOS reagiert auch selbst auf fn. Stelle die Aktion der 🌐-Taste in den Tastatur-Einstellungen ab.",
+    "openKeyboardSettings": "Tastatur-Einstellungen öffnen",
     "micTitle": "Mikrofon testen",
     "device": "Gerät:",
     "deviceFallback": "Das ausgewählte Gerät wurde nicht gefunden. Ein Ersatzgerät wird verwendet.",
@@ -187,7 +203,6 @@
     "audioDetected": "Audio erkannt",
     "saySomething": "Sprich etwas zum Testen...",
     "restartTitle": "Neustart erforderlich",
-    "restartBody": "Fing muss neu gestartet werden, um das neue Modell zu laden.",
     "inferenceRestartBody": "Fing muss neu gestartet werden, um das neue Verarbeitungsgerät zu verwenden.",
     "restartNow": "Jetzt neu starten"
   },
@@ -241,8 +256,6 @@
     "downloadingSubtitle": "Mit einer schnellen Verbindung dauert dies normalerweise weniger als eine Minute.",
     "modelReady": "Modell bereit",
     "modelReadySubtitle": "{model} wurde heruntergeladen und überprüft.",
-    "analyzingSystem": "System wird analysiert…",
-    "analyzingSystemDescription": "Fing wählt die schnellste geeignete Ausführung für Whisper.",
     "analysisUnavailable": "Analyse des Verarbeitungsgeräts nicht verfügbar",
     "analysisUnavailableDescription": "Die Einrichtung kann fortgesetzt werden. Fing wählt beim Laden des Modells ein sicheres Verarbeitungsgerät.",
     "processorSelected": "{device} für die Transkription ausgewählt.",
@@ -256,8 +269,7 @@
     "chooseModel": "Sprachmodell auswählen",
     "chooseModelSubtitle": "Wähle das passende Modell für dich.",
     "modelFallback": "Modell",
-    "disk": "~{size} Speicher",
-    "memory": "~{size} MB RAM",
+    "modelFootprint": "~{size} Download · ~{memory} MB RAM",
     "saveModelFailed": "Das ausgewählte Modell konnte nicht gespeichert werden. Versuche es erneut.",
     "repairFailed": "Die Modellreparatur wurde nicht abgeschlossen. Lade das Modell erneut herunter und versuche es noch einmal.",
     "preferencesTitle": "Deine Einstellungen",
@@ -278,8 +290,8 @@
     "restartApply": "Zum Anwenden neu starten",
     "hotkeyTitle": "Tastenkürzel festlegen",
     "hotkeySubtitle": "Drücke eine Taste oder Tastenkombination.",
-    "orUse": "oder verwende",
-    "onMacLaptops": "auf Mac-Laptops",
+    "hotkeyHint": "Vorschläge: Fn, rechte ⌘-Taste oder rechte Ctrl-Taste auf einer externen Tastatur.",
+    "hotkeyHintWindows": "Einzelne Tasten funktionieren am besten, etwa die rechte Strg-Taste.",
     "microphoneTitle": "Mikrofon auswählen",
     "microphoneSubtitle": "Wähle dein Eingabegerät.",
     "microphoneHint": "Du kannst das Mikrofon jederzeit in den Einstellungen wechseln.",

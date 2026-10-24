@@ -1,0 +1,20 @@
+[package]
+name = "whisper-sys"
+version = "0.1.0"
+edition = "2021"
+description = "Raw bindings to the pinned whisper.cpp (whisper + parakeet) for Fing"
+license = "MIT"
+publish = false
+links = "whisper"
+build = "build.rs"
+exclude = [
+    "whisper.cpp/bindings",
+    "whisper.cpp/examples",
+    "whisper.cpp/models",
+    "whisper.cpp/samples",
+    "whisper.cpp/tests",
+]
+
+[build-dependencies]
+bindgen = "0.72"
+cmake = "0.1"

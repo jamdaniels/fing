@@ -2,6 +2,7 @@
 // Uses native APIs instead of AppleScript to avoid Automation permission
 
 use enigo::{Enigo, Keyboard, Settings};
+use std::ffi::c_char;
 use std::ffi::c_int;
 use std::ffi::c_void;
 
@@ -42,6 +43,17 @@ extern "C" {
         value_callbacks: *const CFDictionaryValueCallBacks,
     ) -> *const c_void;
     fn CFRelease(cf: *const c_void);
+    fn CFStringCreateWithCString(
+        allocator: *const c_void,
+        c_str: *const c_char,
+        encoding: u32,
+    ) -> *const c_void;
+    fn CFPreferencesAppSynchronize(app_id: *const c_void) -> u8;
+    fn CFPreferencesGetAppIntegerValue(
+        key: *const c_void,
+        app_id: *const c_void,
+        key_exists_and_has_valid_format: *mut u8,
+    ) -> isize;
     static kCFBooleanTrue: *const c_void;
     static kCFTypeDictionaryKeyCallBacks: CFDictionaryKeyCallBacks;
     static kCFTypeDictionaryValueCallBacks: CFDictionaryValueCallBacks;
@@ -115,9 +127,52 @@ pub fn request_microphone_permission() {
         return;
     }
 
+    open_system_settings("com.apple.preference.security?Privacy_Microphone");
+}
+
+fn open_system_settings(pane: &str) {
     let _ = std::process::Command::new("open")
-        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        .arg(format!("x-apple.systempreferences:{pane}"))
         .spawn();
+}
+
+const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
+
+/// Whether macOS runs its own Fn action ("Press 🌐 key to": emoji picker,
+/// input source switch or dictation). It fires alongside an Fn hotkey because
+/// the event tap can't suppress it, so only "Do Nothing" (0) is conflict-free.
+/// An unset value means the system default, which is an action.
+pub fn fn_key_has_system_action() -> bool {
+    unsafe {
+        let app_id = CFStringCreateWithCString(
+            std::ptr::null(),
+            c"com.apple.HIToolbox".as_ptr(),
+            CF_STRING_ENCODING_UTF8,
+        );
+        let key = CFStringCreateWithCString(
+            std::ptr::null(),
+            c"AppleFnUsageType".as_ptr(),
+            CF_STRING_ENCODING_UTF8,
+        );
+        let has_action = !app_id.is_null() && !key.is_null() && {
+            // Re-read: the user may have just changed it in System Settings.
+            CFPreferencesAppSynchronize(app_id);
+            let mut valid = 0u8;
+            let usage = CFPreferencesGetAppIntegerValue(key, app_id, &mut valid);
+            valid == 0 || usage != 0
+        };
+        for cf in [app_id, key] {
+            if !cf.is_null() {
+                CFRelease(cf);
+            }
+        }
+        has_action
+    }
+}
+
+/// Open System Settings to Keyboard, where the Fn key's action is set.
+pub fn open_keyboard_settings() {
+    open_system_settings("com.apple.preference.keyboard");
 }
 
 /// Check microphone permission without opening the audio device.

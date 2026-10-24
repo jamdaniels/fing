@@ -113,3 +113,40 @@ const LANGUAGE_BY_CODE = new Map(WHISPER_LANGUAGES.map((l) => [l.code, l]));
 export function languageName(code: string): string {
   return LANGUAGE_BY_CODE.get(code)?.nativeName ?? code;
 }
+
+/**
+ * The 25 European languages Parakeet TDT 0.6B v3 transcribes. It detects the
+ * spoken one itself and ignores the language settings.
+ */
+export const PARAKEET_LANGUAGE_CODES: ReadonlySet<string> = new Set([
+  "bg",
+  "cs",
+  "da",
+  "de",
+  "el",
+  "en",
+  "es",
+  "et",
+  "fi",
+  "fr",
+  "hr",
+  "hu",
+  "it",
+  "lt",
+  "lv",
+  "mt",
+  "nl",
+  "pl",
+  "pt",
+  "ro",
+  "ru",
+  "sk",
+  "sl",
+  "sv",
+  "uk",
+]);
+
+/** Selected languages that Parakeet can't transcribe. */
+export function languagesOutsideParakeet(codes: readonly string[]): string[] {
+  return codes.filter((code) => !PARAKEET_LANGUAGE_CODES.has(code));
+}

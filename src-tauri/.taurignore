@@ -1,0 +1,3 @@
+# whisper.cpp's CMake configure rewrites files in its own source tree
+# (bindings/javascript/package.json); watching it makes `tauri dev` rebuild forever.
+crates/whisper-sys/whisper.cpp/

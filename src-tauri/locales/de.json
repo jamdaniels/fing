@@ -12,6 +12,7 @@
     "microphoneUnavailable": "Mikrofon nicht verfügbar",
     "usingMicrophone": "Verwende {name}",
     "modelLoadFailed": "Modell ließ sich nicht laden",
+    "modelMissing": "Modell nicht heruntergeladen",
     "transcriptionFailed": "Transkription fehlgeschlagen"
   }
 }

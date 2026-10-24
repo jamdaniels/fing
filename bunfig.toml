@@ -1,2 +1,6 @@
 [install]
 auto-install-peers = true
+
+[test]
+# The whisper.cpp submodule ships its own JS tests; they are not ours.
+pathIgnorePatterns = ["src-tauri/crates/**"]

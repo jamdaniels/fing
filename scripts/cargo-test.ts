@@ -1,9 +1,8 @@
 const env = { ...process.env };
 
 if (process.platform === "win32") {
-  // Keep whisper-rs-sys's nested Vulkan helper build below Windows' path limit.
+  // Keep the nested whisper.cpp Vulkan helper build below Windows' path limit.
   env.CARGO_TARGET_DIR ??= "C:\\t";
-  env.GGML_CCACHE ??= "OFF";
 }
 
 const proc = Bun.spawn(

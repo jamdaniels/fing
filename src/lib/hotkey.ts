@@ -1,8 +1,12 @@
+import { IS_MAC } from "./platform";
+
 const DEFAULT_HOTKEY = "F9";
 const FUNCTION_KEY_REGEX = /^F(?:[1-9]|1\d|2[0-4])$/;
 const KEY_TOKEN_REGEX = /^Key[A-Z]$/;
 const DIGIT_TOKEN_REGEX = /^Digit\d$/;
 const NUMPAD_TOKEN_REGEX = /^Numpad\d$/;
+// Only macOS reports the Fn key; elsewhere keyboard firmware handles it.
+const FUNCTION_TOKEN_SUPPORTED = IS_MAC;
 
 const EVENT_CODE_ALIASES: Record<string, string> = {
   AltLeft: "Alt",
@@ -311,6 +315,61 @@ export function matchesHotkeyRelease(
   return token !== null && config.keySet.has(token);
 }
 
+/** Join captured tokens into a hotkey string. macOS also reports Fn for an
+ * F-key pressed with it (to get F5 instead of a media key), so Fn is dropped
+ * from chords with an F-key, as the listener ignores it there too. */
+export function capturedTokensToHotkey(
+  tokens: readonly string[]
+): string | null {
+  const keys = tokens.some((token) => FUNCTION_KEY_REGEX.test(token))
+    ? tokens.filter((token) => token !== "Function")
+    : tokens;
+  return keys.length > 0 ? keys.join("+") : null;
+}
+
+export interface HotkeyCapture {
+  /** Add a pressed key; returns the captured hotkey. */
+  press(token: string): string | null;
+  release(token: string): void;
+  /** Forget the held keys (window blur), keeping the captured chord. */
+  releaseAll(): void;
+  /** Forget the held keys and the captured chord. */
+  reset(): void;
+}
+
+/** Chord capture for the hotkey pickers. Releases keep the captured chord;
+ * the first press after all keys were released starts a new one. */
+export function createHotkeyCapture(): HotkeyCapture {
+  const pressed = new Set<string>();
+  const order: string[] = [];
+  return {
+    press(token) {
+      if (pressed.size === 0) {
+        order.length = 0;
+      }
+      pressed.add(token);
+      if (!order.includes(token)) {
+        order.push(token);
+      }
+      return capturedTokensToHotkey(order);
+    },
+    release(token) {
+      pressed.delete(token);
+    },
+    releaseAll() {
+      pressed.clear();
+    },
+    reset() {
+      pressed.clear();
+      order.length = 0;
+    },
+  };
+}
+
+export function hotkeyUsesFn(hotkey: string): boolean {
+  return hotkey.split("+").includes("Function");
+}
+
 export function normalizeStoredHotkey(hotkey?: string | null): string {
   if (hotkey) {
     const parsed = parseHotkeyString(hotkey);
@@ -336,7 +395,11 @@ export function parseHotkeyString(hotkey: string): ParsedHotkeyConfig | null {
   const keySet = new Set<string>();
   for (const key of keys) {
     const token = key.trim();
-    if (!VALID_HOTKEY_TOKENS.has(token) || keySet.has(token)) {
+    if (
+      !VALID_HOTKEY_TOKENS.has(token) ||
+      keySet.has(token) ||
+      (token === "Function" && !FUNCTION_TOKEN_SUPPORTED)
+    ) {
       return null;
     }
     keySet.add(token);

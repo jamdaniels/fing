@@ -13,13 +13,19 @@ import {
   Sliders,
 } from "lucide";
 import {
+  createHotkeyCapture,
   eventToHotkeyToken,
   matchesHotkey,
   matchesHotkeyRelease,
   normalizeStoredHotkey,
   parseHotkeyString,
 } from "../lib/hotkey";
-import { renderHotkeyChips } from "../lib/hotkey-display";
+import {
+  bindFnSystemActionNote,
+  renderFnSystemActionNote,
+  renderHotkeyChips,
+  watchFnSystemAction,
+} from "../lib/hotkey-display";
 import { t } from "../lib/i18n";
 import { createIcon, escapeHtml } from "../lib/icons";
 import {
@@ -34,10 +40,12 @@ import {
   getSettings,
   hotkeyPress,
   hotkeyRelease,
+  onHotkeyCaptureFn,
   relaunchApp,
   requestAccessibilityPermission,
   requestMicrophonePermission,
   requestPermissions,
+  setHotkeySuppressed,
   setMicrophone,
   updateHotkey,
   updateSettings,
@@ -46,18 +54,29 @@ import {
   findAudioDevice,
   systemDefaultMicrophoneLabel,
 } from "../lib/microphone";
+import {
+  formatModelSize,
+  modelEngine,
+  modelQualityLabel,
+  renderModelNote,
+} from "../lib/models";
+import { IS_MAC } from "../lib/platform";
 import type {
   AudioDevice,
   BootstrapReason,
   DownloadProgress,
   HistoryMode,
   InferenceRuntimeInfo,
+  ModelEngine,
   ModelInfo,
   ModelVariant,
   PermissionStatus,
   Settings,
 } from "../lib/types";
-import { mountLanguageSelect } from "./language-select";
+import {
+  mountLanguageSelect,
+  renderEngineLanguageHint,
+} from "./language-select";
 
 type OnboardingStep = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
@@ -67,6 +86,8 @@ interface OnboardingState {
   completeError: string | null;
   downloadError: string | null;
   downloadProgress: DownloadProgress | null;
+  /** macOS also runs its own Fn action, so an Fn hotkey needs a note. */
+  fnKeyHasSystemAction: boolean;
   isCompleting: boolean;
   micError: string | null;
   models: ModelInfo[];
@@ -80,9 +101,9 @@ interface OnboardingState {
   testText: string;
   modelRepairReason: BootstrapReason | null;
   invalidModelVariant: ModelVariant | null;
-  inferenceAnalysisAttempted: boolean;
+  /** Model the inference analysis ran for; it reruns when another is picked. */
+  inferenceAnalysisVariant: ModelVariant | null;
   inferenceAnalysisFailed: boolean;
-  inferenceAnalysisLoading: boolean;
   inferenceRuntimeInfo: InferenceRuntimeInfo | null;
 }
 
@@ -95,6 +116,7 @@ let state: OnboardingState = {
   downloadProgress: null,
   downloadError: null,
   completeError: null,
+  fnKeyHasSystemAction: false,
   isCompleting: false,
   micError: null,
   permissions: null,
@@ -109,9 +131,8 @@ let state: OnboardingState = {
   models: [],
   modelRepairReason: null,
   invalidModelVariant: null,
-  inferenceAnalysisAttempted: false,
+  inferenceAnalysisVariant: null,
   inferenceAnalysisFailed: false,
-  inferenceAnalysisLoading: false,
   inferenceRuntimeInfo: null,
 };
 
@@ -120,8 +141,9 @@ let downloadPollInterval: number | null = null;
 let hotkeyKeyHandler: ((e: KeyboardEvent) => void) | null = null;
 let hotkeyKeyupHandler: ((e: KeyboardEvent) => void) | null = null;
 let hotkeyBlurHandler: (() => void) | null = null;
-const hotkeyCaptureTokens = new Set<string>();
-const hotkeyCaptureOrder: string[] = [];
+let hotkeyFnWatchStop: (() => void) | null = null;
+let hotkeyFnUnlisten: Promise<UnlistenFn> | null = null;
+const hotkeyCapture = createHotkeyCapture();
 let testResultUnlisten: UnlistenFn | null = null;
 // Frontend hotkey handling for test step (WebView2 workaround)
 let testHotkeyPressed = false;
@@ -144,8 +166,16 @@ function cleanupHotkeyCaptureListeners(): void {
     window.removeEventListener("blur", hotkeyBlurHandler);
     hotkeyBlurHandler = null;
   }
-  hotkeyCaptureTokens.clear();
-  hotkeyCaptureOrder.length = 0;
+  if (hotkeyFnWatchStop) {
+    hotkeyFnWatchStop();
+    hotkeyFnWatchStop = null;
+  }
+  if (hotkeyFnUnlisten) {
+    hotkeyFnUnlisten.then((unlisten) => unlisten()).catch(console.error);
+    hotkeyFnUnlisten = null;
+    setHotkeySuppressed(false).catch(console.error);
+  }
+  hotkeyCapture.reset();
 }
 
 function renderStepIndicator(currentStep: OnboardingStep): string {
@@ -396,15 +426,12 @@ function renderWelcome(): void {
   attachStepIndicatorListeners();
 }
 
-function formatModelSize(bytes: number): string {
-  return `${Math.round(bytes / 1_000_000)} MB`;
-}
-
 function renderModelVariantCards(): string {
   const variants: { variant: ModelVariant; badge?: string }[] = [
     { variant: "small_q5" },
     { variant: "small", badge: t("onboarding.recommended") },
     { variant: "large_turbo_q5" },
+    { variant: "parakeet_tdt_v3_q4k" },
   ];
 
   return variants
@@ -417,27 +444,15 @@ function renderModelVariantCards(): string {
       return `
         <button class="model-variant-card ${isSelected ? "selected" : ""}" data-variant="${variant}">
           ${badge ? `<div class="variant-badge">${badge}</div>` : ""}
-          <div class="variant-name">${model.displayName}</div>
-          <div class="variant-desc">${getModelQualityLabel(model.variant)}</div>
-          <div class="variant-stats">
-            <span>${t("onboarding.disk", { size: formatModelSize(model.sizeBytes) })}</span>
-            <span>${t("onboarding.memory", { size: model.memoryEstimateMb })}</span>
+          <div class="variant-head">
+            <span class="variant-name">${escapeHtml(model.displayName)}</span>
+            <span class="variant-desc">${modelQualityLabel(model.variant)}</span>
           </div>
+          ${renderModelNote(model)}
         </button>
       `;
     })
     .join("");
-}
-
-function getModelQualityLabel(variant: ModelVariant): string {
-  switch (variant) {
-    case "small_q5":
-      return t("models.quality.small_q5");
-    case "small":
-      return t("models.quality.small");
-    case "large_turbo_q5":
-      return t("models.quality.large_turbo_q5");
-  }
 }
 
 function renderDownloadFooterButton(
@@ -476,16 +491,7 @@ function renderInferenceAnalysis(): string {
         </div>
       </div>`;
   }
-  if (!info && state.inferenceAnalysisLoading) {
-    return `
-      <div class="inference-analysis-card">
-        <span class="loading-spinner inference-analysis-leading" aria-hidden="true">${createIcon(LoaderCircle)}</span>
-        <div>
-          <div class="inference-analysis-title">${t("onboarding.analyzingSystem")}</div>
-          <div class="inference-analysis-desc">${t("onboarding.analyzingSystemDescription")}</div>
-        </div>
-      </div>`;
-  }
+  // Still analyzing: nothing, so no placeholder flashes before the result.
   if (!info) {
     return "";
   }
@@ -501,25 +507,32 @@ function renderInferenceAnalysis(): string {
     </div>`;
 }
 
+/** Pick the processing device for the selected model. Started with its
+ * download (it only needs the variant), so the result is usually ready when
+ * the download completes. */
 async function analyzeInferenceHardware(): Promise<void> {
-  if (state.inferenceAnalysisAttempted) {
+  const variant = state.selectedModelVariant;
+  if (state.inferenceAnalysisVariant === variant) {
     return;
   }
-  state.inferenceAnalysisAttempted = true;
-  state.inferenceAnalysisLoading = true;
-  render();
+  state.inferenceAnalysisVariant = variant;
+  state.inferenceAnalysisFailed = false;
+  state.inferenceRuntimeInfo = null;
+  let info: InferenceRuntimeInfo | null = null;
+  let failed = false;
   try {
-    state.inferenceRuntimeInfo = await getInferenceRuntimeInfo(
-      state.selectedModelVariant,
-      true
-    );
+    info = await getInferenceRuntimeInfo(variant, true);
   } catch (error) {
     console.error("Failed to analyze inference hardware:", error);
-    state.inferenceAnalysisFailed = true;
-  } finally {
-    state.inferenceAnalysisLoading = false;
-    render();
+    failed = true;
   }
+  // Another model was picked meanwhile; its own analysis owns the state.
+  if (state.inferenceAnalysisVariant !== variant) {
+    return;
+  }
+  state.inferenceRuntimeInfo = info;
+  state.inferenceAnalysisFailed = failed;
+  render();
 }
 
 function getDownloadHeading(
@@ -604,6 +617,7 @@ function renderDownloadModel(): void {
 
   // Body content - either selection or progress
   let bodyContent: string;
+  let footHint = "";
   if (
     isDownloading ||
     isVerifying ||
@@ -617,13 +631,19 @@ function renderDownloadModel(): void {
         ${renderModelVariantCards()}
       </div>
     `;
+    if (selectedModel) {
+      footHint = t("onboarding.modelFootprint", {
+        size: formatModelSize(selectedModel.sizeBytes),
+        memory: selectedModel.memoryEstimateMb,
+      });
+    }
   }
   if (isComplete) {
     bodyContent += renderInferenceAnalysis();
   }
 
   container.innerHTML = `
-    <div class="onboarding">
+    <div class="onboarding onboarding-models">
       <div class="onboarding-header">
         <div class="onboarding-icon">
           ${createIcon(Download)}
@@ -636,6 +656,7 @@ function renderDownloadModel(): void {
         ${bodyContent}
       </div>
       <div class="onboarding-footer">
+        ${footHint ? `<p class="onboarding-foot-hint">${footHint}</p>` : ""}
         ${footerButton}
         ${state.modelRepairReason ? "" : renderStepIndicator(2)}
       </div>
@@ -663,7 +684,10 @@ function renderDownloadModel(): void {
     ?.addEventListener("click", handleDownloadContinue);
   attachStepIndicatorListeners();
 
-  if (isComplete && !state.inferenceAnalysisAttempted) {
+  if (
+    (isComplete || isDownloading || isVerifying) &&
+    state.inferenceAnalysisVariant !== state.selectedModelVariant
+  ) {
     void analyzeInferenceHardware();
   }
 }
@@ -736,6 +760,7 @@ function renderPreferences(): void {
         <div class="onb-section">
           <h3>${t("onboarding.languages")} <span class="meta">${t("onboarding.pickOne")}</span></h3>
           <div id="onb-langs"></div>
+          <div id="onb-lang-hint">${renderEngineLanguageHint(selectedModelEngine(), state.selectedLanguages)}</div>
         </div>
         <div class="onb-section">
           <h3>${t("onboarding.history")} <span class="meta">${t("onboarding.storedLocally")}</span></h3>
@@ -760,6 +785,13 @@ function renderPreferences(): void {
       selected: state.selectedLanguages,
       onChange: (next) => {
         state.selectedLanguages = next;
+        const hint = document.getElementById("onb-lang-hint");
+        if (hint) {
+          hint.innerHTML = renderEngineLanguageHint(
+            selectedModelEngine(),
+            next
+          );
+        }
       },
     });
   }
@@ -776,6 +808,11 @@ function renderPreferences(): void {
     .getElementById("continue-btn")
     ?.addEventListener("click", handlePreferencesContinue);
   attachStepIndicatorListeners();
+}
+
+/** Engine of the model picked in step 2. */
+function selectedModelEngine(): ModelEngine | undefined {
+  return modelEngine(state.models, state.selectedModelVariant);
 }
 
 async function handlePreferencesContinue(): Promise<void> {
@@ -799,16 +836,15 @@ function renderPermissions(): void {
   }
 
   const perms = state.permissions;
-  const isMac = navigator.userAgent.includes("Mac");
 
   // Windows only gates the microphone (Store builds), and consent takes
   // effect immediately, so no accessibility row and no restart there.
   const allGranted =
     perms?.microphone === "granted" &&
-    (!isMac || perms?.accessibility === "granted");
-  const micDeniedOnWindows = !isMac && perms?.microphone === "denied";
+    (!IS_MAC || perms?.accessibility === "granted");
+  const micDeniedOnWindows = !IS_MAC && perms?.microphone === "denied";
 
-  const accessibilityRow = isMac
+  const accessibilityRow = IS_MAC
     ? `<div class="permission-row">
             <div class="permission-info">
               <span class="onb-ibox onb-ibox-lg">${createIcon(PersonStanding)}</span>
@@ -824,12 +860,12 @@ function renderPermissions(): void {
   let footHint = "";
   if (micDeniedOnWindows) {
     footHint = t("onboarding.microphoneDeniedWindows");
-  } else if (!allGranted && isMac) {
+  } else if (!allGranted && IS_MAC) {
     footHint = t("onboarding.grantRemaining");
   }
 
   const footButton =
-    !allGranted && isMac
+    !allGranted && IS_MAC
       ? `<button class="btn btn-accent btn-lg btn-block" id="restart-btn">${t("onboarding.restartApply")}</button>`
       : `<button class="btn btn-accent btn-lg btn-block" id="continue-btn" ${allGranted ? "" : "disabled"}>${t("common.continue")}</button>`;
 
@@ -837,10 +873,10 @@ function renderPermissions(): void {
     <div class="onboarding">
       <div class="onboarding-header">
         <div class="onboarding-icon">
-          ${createIcon(isMac ? PersonStanding : Mic)}
+          ${createIcon(IS_MAC ? PersonStanding : Mic)}
         </div>
         <h1 class="onboarding-title">${t("onboarding.permissionsTitle")}</h1>
-        <p class="onboarding-desc">${t(isMac ? "onboarding.permissionsSubtitle" : "onboarding.permissionsSubtitleWindows")}</p>
+        <p class="onboarding-desc">${t(IS_MAC ? "onboarding.permissionsSubtitle" : "onboarding.permissionsSubtitleWindows")}</p>
       </div>
       <div class="onboarding-body">
         <div class="permissions-list">
@@ -888,19 +924,15 @@ async function handleRestartForPermissions(): Promise<void> {
   await relaunchApp();
 }
 
+function pressCaptureToken(token: string): void {
+  state.capturedHotkey = hotkeyCapture.press(token);
+  render();
+}
+
 function renderHotkeyStep(): void {
   if (!container) {
     return;
   }
-
-  const syncCapturedHotkey = () => {
-    if (hotkeyCaptureOrder.length > 0) {
-      state.capturedHotkey = hotkeyCaptureOrder.join("+");
-    } else {
-      state.capturedHotkey = null;
-    }
-    render();
-  };
 
   const displayKey = state.capturedHotkey ?? state.selectedHotkey;
   const hasNewKey =
@@ -920,14 +952,11 @@ function renderHotkeyStep(): void {
           <div class="hotkey-preview">
             ${renderHotkeyChips(displayKey, { chipClass: "hotkey-key", extraChipClass: hasNewKey ? "captured" : "" })}
           </div>
-          <div class="hotkey-fn-inline">
-            ${t("onboarding.orUse")}
-            <button class="hotkey-modal-key hotkey-fn-chip" type="button" id="use-fn-btn" aria-label="${t("dialogs.useFn")}">fn</button>
-            ${t("onboarding.onMacLaptops")}
-          </div>
+          ${renderFnSystemActionNote(displayKey, state.fnKeyHasSystemAction)}
         </div>
       </div>
       <div class="onboarding-footer">
+        <p class="onboarding-foot-hint">${t(IS_MAC ? "onboarding.hotkeyHint" : "onboarding.hotkeyHintWindows")}</p>
         <button class="btn btn-accent btn-lg btn-block" id="continue-btn">
           ${t("common.continue")}
         </button>
@@ -944,8 +973,7 @@ function renderHotkeyStep(): void {
 
       if (e.key === "Escape") {
         state.capturedHotkey = null;
-        hotkeyCaptureTokens.clear();
-        hotkeyCaptureOrder.length = 0;
+        hotkeyCapture.reset();
         render();
         return;
       }
@@ -954,20 +982,9 @@ function renderHotkeyStep(): void {
       }
 
       const token = eventToHotkeyToken(e);
-      if (!token) {
-        return;
+      if (token) {
+        pressCaptureToken(token);
       }
-
-      // Starting a fresh press session — clear the previously captured chord
-      // so this new keypress begins a new binding attempt.
-      if (hotkeyCaptureTokens.size === 0) {
-        hotkeyCaptureOrder.length = 0;
-      }
-      hotkeyCaptureTokens.add(token);
-      if (!hotkeyCaptureOrder.includes(token)) {
-        hotkeyCaptureOrder.push(token);
-      }
-      syncCapturedHotkey();
     };
     document.addEventListener("keydown", hotkeyKeyHandler);
   }
@@ -977,30 +994,38 @@ function renderHotkeyStep(): void {
       e.stopPropagation();
 
       const token = eventToHotkeyToken(e);
-      if (!token) {
-        return;
+      if (token) {
+        hotkeyCapture.release(token);
       }
-
-      // Release order doesn't matter; the captured chord stays put until the
-      // next fresh press session (when no keys are held).
-      hotkeyCaptureTokens.delete(token);
     };
     document.addEventListener("keyup", hotkeyKeyupHandler);
   }
   if (!hotkeyBlurHandler) {
     hotkeyBlurHandler = () => {
-      hotkeyCaptureTokens.clear();
+      hotkeyCapture.releaseAll();
     };
     window.addEventListener("blur", hotkeyBlurHandler);
   }
+  if (!hotkeyFnWatchStop) {
+    hotkeyFnWatchStop = watchFnSystemAction((hasSystemAction) => {
+      state.fnKeyHasSystemAction = hasSystemAction;
+      if (state.step === 5) {
+        render();
+      }
+    });
+  }
+  if (!hotkeyFnUnlisten) {
+    // macOS only: WebKit never delivers Fn as a key event, so the suppressed
+    // global listener forwards it.
+    setHotkeySuppressed(true).catch(console.error);
+    hotkeyFnUnlisten = onHotkeyCaptureFn((pressed) =>
+      pressed
+        ? pressCaptureToken("Function")
+        : hotkeyCapture.release("Function")
+    );
+  }
 
-  document.getElementById("use-fn-btn")?.addEventListener("click", () => {
-    state.capturedHotkey = "Function";
-    hotkeyCaptureTokens.clear();
-    hotkeyCaptureOrder.length = 0;
-    render();
-  });
-
+  bindFnSystemActionNote(container);
   document
     .getElementById("continue-btn")
     ?.addEventListener("click", handleHotkeyContinue);
@@ -1214,6 +1239,8 @@ async function goToStep(step: OnboardingStep): Promise<void> {
 
   if (step === 5) {
     state.capturedHotkey = null;
+    // The watcher set up on render reports the current value.
+    state.fnKeyHasSystemAction = false;
   }
 
   if (step === 6) {
@@ -1239,7 +1266,7 @@ async function goToStep(step: OnboardingStep): Promise<void> {
       }
     );
 
-    if (!navigator.userAgent.includes("Mac")) {
+    if (!IS_MAC) {
       // WebView2 only: Windows needs a frontend fallback while the onboarding
       // window is focused. macOS uses the native listener directly.
       const hotkey = state.selectedHotkey;
@@ -1323,9 +1350,7 @@ function handleStartDownload(): void {
 // microphone (the backend reports "granted" when there is no consent gate).
 async function enterPermissionsStep(): Promise<boolean> {
   state.permissions = await requestPermissions();
-  const needed =
-    navigator.userAgent.includes("Mac") ||
-    state.permissions.microphone !== "granted";
+  const needed = IS_MAC || state.permissions.microphone !== "granted";
   if (needed) {
     window.addEventListener("focus", handlePermissionsFocus);
   }
@@ -1585,6 +1610,7 @@ export async function renderOnboarding(
     downloadProgress: null,
     downloadError: null,
     completeError: null,
+    fnKeyHasSystemAction: false,
     isCompleting: false,
     micError: null,
     permissions: null,
@@ -1601,9 +1627,8 @@ export async function renderOnboarding(
     invalidModelVariant: options.modelRepairReason
       ? (savedSettings?.activeModelVariant ?? "small")
       : null,
-    inferenceAnalysisAttempted: false,
+    inferenceAnalysisVariant: null,
     inferenceAnalysisFailed: false,
-    inferenceAnalysisLoading: false,
     inferenceRuntimeInfo: null,
   };
 

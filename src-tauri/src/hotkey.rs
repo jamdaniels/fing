@@ -4,17 +4,15 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
-use crate::audio::{AudioCapture, AudioTap};
+use crate::audio::{is_digital_silence, AudioCapture, AudioTap, Recording};
 use crate::db::{save_transcript, NewTranscript};
+use crate::engine::{AbortFlag, TranscribeError};
 use crate::indicator::NoticeKind;
 use crate::microphone::{self, MicChoice, OpenedMic};
-use crate::model::{ensure_variant_available, model_path_for_variant, ModelVariant};
 use crate::paste::paste_text;
 use crate::settings::{load_settings, load_settings_sync};
 use crate::sounds;
-use crate::transcribe::{
-    init_transcriber, is_transcriber_loaded, transcribe_audio, unload_transcriber,
-};
+use crate::transcribe::{is_blank_audio, is_transcriber_loaded, loaded_variant};
 
 // Maximum recording duration; the audio buffer is sized for the same limit.
 const MAX_RECORDING_DURATION: Duration =
@@ -38,21 +36,6 @@ pub(crate) fn is_onboarding_test_mode() -> bool {
     ONBOARDING_TEST_MODE.load(Ordering::SeqCst)
 }
 
-/// Check if transcription contains only blank audio markers (no actual speech)
-fn is_blank_audio(text: &str) -> bool {
-    let normalized = text.to_lowercase();
-    matches!(
-        normalized.as_str(),
-        "[blank_audio]"
-            | "(blank audio)"
-            | "[silence]"
-            | "(silence)"
-            | "[no speech]"
-            | "(no speech)"
-            | "[inaudible]"
-    )
-}
-
 // Commands sent to the audio thread
 enum AudioCommand {
     StartRecording {
@@ -60,9 +43,9 @@ enum AudioCommand {
         reply_tx: Sender<Result<(AudioTap, OpenedMic), String>>,
     },
     StopRecording {
-        reply_tx: Sender<Result<Vec<f32>, String>>,
+        reply_tx: Sender<Result<Recording, String>>,
     },
-    /// Stop capturing and drop the audio without resampling it.
+    /// Stop capturing and drop the audio (no reply).
     Discard,
 }
 
@@ -97,6 +80,59 @@ static RECORDING_START: Mutex<Option<Instant>> = Mutex::new(None);
 // Frontmost app when recording started (to restore focus before paste)
 #[cfg(target_os = "macos")]
 static FRONTMOST_APP: Mutex<Option<String>> = Mutex::new(None);
+
+/// Abort flag of the current recording, from key down until its text is
+/// about to be pasted. Escape sets it while recording or transcribing;
+/// whisper.cpp then stops within one encoder run or decoder step.
+static SESSION_ABORT: Mutex<Option<AbortFlag>> = Mutex::new(None);
+
+fn lock_session_abort() -> MutexGuard<'static, Option<AbortFlag>> {
+    match SESSION_ABORT.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::warn!("Session abort mutex poisoned, recovering");
+            poisoned.into_inner()
+        }
+    }
+}
+
+/// Abort the current recording's transcriptions, if it still can be.
+/// Returns whether there was one to abort.
+fn abort_session() -> bool {
+    let mut slot = lock_session_abort();
+    // Set under the lock, so `claim_for_paste` can't miss it.
+    match slot.take() {
+        Some(abort) => {
+            abort.abort();
+            true
+        }
+        None => false,
+    }
+}
+
+/// Close the cancel window of the recording behind `abort` just before its
+/// text is pasted. False when Escape aborted it first.
+fn claim_for_paste(abort: &AbortFlag) -> bool {
+    let mut slot = lock_session_abort();
+    if slot.as_ref().is_some_and(|current| current.same(abort)) {
+        *slot = None;
+    }
+    !abort.is_aborted()
+}
+
+/// Whether Escape can still cancel the transcription in progress (its text
+/// is not being pasted yet).
+pub(crate) fn is_transcription_cancellable() -> bool {
+    crate::state::get_state() == crate::state::AppState::Processing
+        && lock_session_abort().is_some()
+}
+
+/// Abort any transcription still running (Escape, app exit), including a
+/// recording's pre-transcription chunk.
+pub fn abort_transcriptions() {
+    abort_session();
+    crate::pretranscribe::cancel();
+}
 
 /// Initialize the audio thread (call once at startup or before first recording)
 fn ensure_audio_thread() {
@@ -139,16 +175,17 @@ fn ensure_audio_thread() {
                     let _ = reply_tx.send(Ok((capture.tap(), opened)));
                 }
                 Ok(AudioCommand::StopRecording { reply_tx }) => {
-                    let buffer = capture.end_recording();
-                    let resampled = capture.resample_to_16k(buffer);
+                    // Resampled by the transcription: with pre-transcribed
+                    // chunks, only the tail needs it.
+                    let recording = capture.end_recording();
                     capture.close_capture();
 
                     tracing::info!(
                         "Audio recording stopped, buffer size: {} samples",
-                        resampled.len()
+                        recording.samples.len()
                     );
 
-                    let _ = reply_tx.send(Ok(resampled));
+                    let _ = reply_tx.send(Ok(recording));
                 }
                 Ok(AudioCommand::Discard) => {
                     drop(capture.end_recording());
@@ -247,7 +284,7 @@ fn send_start_recording_command(
         .map_err(|_| "Audio thread dropped StartRecording response".to_string())?
 }
 
-fn send_stop_recording_command(cmd_tx: &Sender<AudioCommand>) -> Result<Vec<f32>, String> {
+fn send_stop_recording_command(cmd_tx: &Sender<AudioCommand>) -> Result<Recording, String> {
     let (reply_tx, reply_rx) = mpsc::channel();
     cmd_tx
         .send(AudioCommand::StopRecording { reply_tx })
@@ -262,24 +299,7 @@ fn mark_lazy_activity() -> u64 {
     LAZY_ACTIVITY_TOKEN.fetch_add(1, Ordering::SeqCst) + 1
 }
 
-async fn init_transcriber_async(model_path: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || init_transcriber(&model_path))
-        .await
-        .map_err(|e| format!("Transcriber initialization task failed: {e}"))?
-        .map_err(|e| e.to_string())
-}
-
-async fn init_transcriber_for_variant_async(variant: ModelVariant) -> Result<(), String> {
-    let model_path_str = tauri::async_runtime::spawn_blocking(move || {
-        ensure_variant_available(variant).map(|path| path.to_string_lossy().to_string())
-    })
-    .await
-    .map_err(|e| format!("Model inspection task failed: {e}"))??;
-
-    init_transcriber_async(model_path_str).await
-}
-
-fn spawn_lazy_preload_if_needed(variant: ModelVariant) {
+fn spawn_lazy_preload_if_needed() {
     if is_transcriber_loaded() {
         return;
     }
@@ -291,7 +311,9 @@ fn spawn_lazy_preload_if_needed(variant: ModelVariant) {
     }
 
     tauri::async_runtime::spawn(async move {
-        match init_transcriber_for_variant_async(variant).await {
+        // Loads go through model_loader so they serialize with model
+        // switches, the startup preload and the idle unload.
+        match crate::model_loader::ensure_loaded().await {
             Ok(_) => tracing::info!("Lazy preload completed"),
             Err(err) => tracing::warn!("Lazy preload failed: {}", err),
         }
@@ -306,22 +328,21 @@ fn schedule_lazy_unload_if_idle() {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_secs(LAZY_MODEL_IDLE_UNLOAD_SECS)).await;
 
-        if LAZY_ACTIVITY_TOKEN.load(Ordering::SeqCst) != token {
-            return;
-        }
-        if RECORDING_ACTIVE.load(Ordering::SeqCst) {
-            return;
-        }
-        if crate::state::get_state() != crate::state::AppState::Ready {
-            return;
-        }
-
-        let settings = load_settings().await;
-        if !settings.lazy_model_loading {
+        let still_idle = move || {
+            LAZY_ACTIVITY_TOKEN.load(Ordering::SeqCst) == token
+                && !RECORDING_ACTIVE.load(Ordering::SeqCst)
+                && crate::state::get_state() == crate::state::AppState::Ready
+        };
+        if !still_idle() {
             return;
         }
 
-        unload_transcriber();
+        // Re-checked under the model lock (with the lazy-loading setting), so
+        // a load in flight (e.g. a model switch) completes first and is not
+        // unloaded mid-load.
+        if !crate::model_loader::unload_if_idle(still_idle).await {
+            return;
+        }
         tracing::info!(
             "Unloaded transcriber after {} seconds of idle time",
             LAZY_MODEL_IDLE_UNLOAD_SECS
@@ -340,10 +361,28 @@ pub fn on_key_down(app: &AppHandle) {
 
     let settings_snapshot = load_settings_sync();
 
+    // Onboarding and model repair make sure the active model is on disk, but
+    // the file can still go missing while the app runs. Don't record audio
+    // that can't be transcribed; Settings > Models offers the download. Only
+    // an existence check here: the load inspects the file fully.
+    let active = settings_snapshot.active_model_variant;
+    if !is_test_mode
+        && loaded_variant() != Some(active)
+        && !crate::model::model_path_for_variant(active).exists()
+    {
+        tracing::warn!("Active {:?} model is not downloaded; not recording", active);
+        notify(
+            app,
+            NoticeKind::Error,
+            &crate::i18n::current().indicator.model_missing,
+        );
+        return;
+    }
+
     if !is_test_mode && settings_snapshot.lazy_model_loading {
         // Invalidate any pending lazy unload timer from older activity.
         mark_lazy_activity();
-        spawn_lazy_preload_if_needed(settings_snapshot.active_model_variant);
+        spawn_lazy_preload_if_needed();
     }
 
     // Capture frontmost app on a background thread to avoid delaying the UI.
@@ -393,6 +432,8 @@ pub fn on_key_down(app: &AppHandle) {
     // Increment session ID and start auto-stop timer
     let session_id = RECORDING_SESSION_ID.fetch_add(1, Ordering::SeqCst) + 1;
     set_recording_start_status(RecordingStartStatus::Idle);
+    let abort = AbortFlag::default();
+    *lock_session_abort() = Some(abort.clone());
     let app_for_timer = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(MAX_RECORDING_DURATION).await;
@@ -431,6 +472,13 @@ pub fn on_key_down(app: &AppHandle) {
     match start_result {
         Ok((tap, opened)) => {
             set_recording_start_status(RecordingStartStatus::Started { session_id });
+            crate::pretranscribe::start(
+                tap.clone(),
+                session_id,
+                settings_snapshot.languages.clone(),
+                crate::dictionary::build_prompt(&settings_snapshot.dictionary_terms),
+                abort,
+            );
             crate::level_meter::start(app, tap);
             if let Some(cue) = start_cue {
                 cue.play();
@@ -477,6 +525,7 @@ pub fn on_key_up(app: &AppHandle) {
     if !RECORDING_ACTIVE.swap(false, Ordering::SeqCst) {
         return;
     }
+    let released = Instant::now();
 
     // Calculate recording duration
     let duration_ms = {
@@ -507,7 +556,6 @@ pub fn on_key_up(app: &AppHandle) {
 
         let app_handle = app.clone();
         let test_mode = is_test_mode;
-        let duration_ms = duration_ms as i64;
         tauri::async_runtime::spawn(async move {
             tracing::warn!("Recording did not start: {}", message);
             notify(
@@ -515,7 +563,7 @@ pub fn on_key_up(app: &AppHandle) {
                 NoticeKind::Error,
                 &crate::i18n::current().indicator.microphone_unavailable,
             );
-            finish_transcription(&app_handle, None, duration_ms, test_mode).await;
+            finish_transcription(&app_handle, None, test_mode).await;
         });
         return;
     }
@@ -542,74 +590,102 @@ pub fn on_key_up(app: &AppHandle) {
 
     let duration_ms = duration_ms as i64;
 
+    // Stop pre-transcription first, so it starts no new chunk.
+    let pretranscription = crate::pretranscribe::stop(session_id);
+    // Escape sets it while this transcribes (see `on_transcription_cancel`).
+    let abort = lock_session_abort().clone().unwrap_or_default();
     let cmd_tx = audio_cmd_tx("stop");
 
     // Spawn async task for transcription
     let app_handle = app.clone();
     let test_mode = is_test_mode;
     tauri::async_runtime::spawn(async move {
-        let stop_result = if let Some(cmd_tx) = cmd_tx {
-            match tokio::task::spawn_blocking(move || send_stop_recording_command(&cmd_tx)).await {
+        // Stop the recording while a chunk still in flight finishes (the
+        // engine runs one call at a time): spawned now, awaited after the wait.
+        let stop = cmd_tx.map(|cmd_tx| {
+            tokio::task::spawn_blocking(move || send_stop_recording_command(&cmd_tx))
+        });
+        let pretranscribed = match pretranscription {
+            Some(stopped) => tokio::task::spawn_blocking(move || stopped.wait())
+                .await
+                .ok()
+                .flatten(),
+            None => None,
+        };
+        let stop_result = match stop {
+            Some(task) => match task.await {
                 Ok(result) => result,
                 Err(e) => Err(format!("StopRecording task failed: {e}")),
-            }
-        } else {
-            Err("Audio thread unavailable".to_string())
+            },
+            None => Err("Audio thread unavailable".to_string()),
         };
 
-        // Get the audio buffer
-        let audio_buffer = match stop_result {
-            Ok(buf) => buf,
+        if abort.is_aborted() {
+            finish_cancelled(&app_handle, test_mode).await;
+            return;
+        }
+
+        let recording = match stop_result {
+            Ok(recording) => recording,
             Err(e) => {
                 tracing::error!("No audio buffer received: {}", e);
-                finish_transcription(&app_handle, None, duration_ms, test_mode).await;
+                finish_transcription(&app_handle, None, test_mode).await;
                 return;
             }
         };
 
-        if audio_buffer.is_empty() {
+        if recording.samples.is_empty() {
             tracing::warn!("Empty audio buffer");
-            finish_transcription(&app_handle, None, duration_ms, test_mode).await;
+            finish_transcription(&app_handle, None, test_mode).await;
+            return;
+        }
+
+        if is_digital_silence(&recording.samples) {
+            tracing::info!("Recording is digital silence, skipping transcription");
+            finish_transcription(&app_handle, None, test_mode).await;
             return;
         }
 
         tracing::info!(
             "Processing {} samples ({:.1}s of audio)",
-            audio_buffer.len(),
-            audio_buffer.len() as f32 / 16000.0
+            recording.samples.len(),
+            recording.secs()
         );
 
         // Load settings for model variant and language
         let settings = load_settings().await;
 
-        // Initialize transcriber if needed
-        if !is_transcriber_loaded() {
-            let model_path = model_path_for_variant(settings.active_model_variant);
-
-            if let Err(e) = init_transcriber_for_variant_async(settings.active_model_variant).await
-            {
-                tracing::error!("Failed to initialize transcriber: {}", e);
-                notify(
-                    &app_handle,
-                    NoticeKind::Error,
-                    &crate::i18n::current().indicator.model_load_failed,
-                );
-                finish_transcription(&app_handle, None, duration_ms, test_mode).await;
-                return;
-            }
-            tracing::info!("Transcriber initialized from {:?}", model_path);
+        // Make sure the active model is the one loaded. This returns at once
+        // when it already is; otherwise it loads it, replacing any other
+        // engine (e.g. a model picked again during onboarding after a test).
+        if let Err(e) = crate::model_loader::ensure_loaded().await {
+            tracing::error!("Failed to initialize transcriber: {}", e);
+            notify(
+                &app_handle,
+                NoticeKind::Error,
+                &crate::i18n::current().indicator.model_load_failed,
+            );
+            finish_transcription(&app_handle, None, test_mode).await;
+            return;
         }
 
         let dictionary_terms = crate::dictionary::sanitize_terms(&settings.dictionary_terms);
         let dictionary_prompt = crate::dictionary::build_prompt(&dictionary_terms);
 
-        // Transcribe
-        let text = match transcribe_audio(
-            &audio_buffer,
+        // Transcribe (only the tail when chunks were pre-transcribed)
+        let text = match crate::pretranscribe::transcribe_recording(
+            pretranscribed,
+            recording,
             &settings.languages,
             dictionary_prompt.as_deref(),
+            released,
+            &abort,
         ) {
             Ok(t) => t,
+            Err(TranscribeError::Aborted) => {
+                finish_cancelled(&app_handle, test_mode).await;
+                return;
+            }
             Err(e) => {
                 tracing::error!("Transcription failed: {}", e);
                 notify(
@@ -617,7 +693,7 @@ pub fn on_key_up(app: &AppHandle) {
                     NoticeKind::Error,
                     &crate::i18n::current().indicator.transcription_failed,
                 );
-                finish_transcription(&app_handle, None, duration_ms, test_mode).await;
+                finish_transcription(&app_handle, None, test_mode).await;
                 return;
             }
         };
@@ -628,9 +704,15 @@ pub fn on_key_up(app: &AppHandle) {
             .to_string();
 
         // Filter out whisper special tokens indicating no speech
-        if text.is_empty() || is_blank_audio(&text) {
+        if is_blank_audio(&text) {
             tracing::info!("No speech detected, skipping paste/save");
-            finish_transcription(&app_handle, None, duration_ms, test_mode).await;
+            finish_transcription(&app_handle, None, test_mode).await;
+            return;
+        }
+
+        // Past this point Escape no longer cancels.
+        if !claim_for_paste(&abort) {
+            finish_cancelled(&app_handle, test_mode).await;
             return;
         }
 
@@ -683,7 +765,7 @@ pub fn on_key_up(app: &AppHandle) {
             }
         }
 
-        finish_transcription(&app_handle, persisted_transcript, duration_ms, test_mode).await;
+        finish_transcription(&app_handle, persisted_transcript, test_mode).await;
     });
 }
 
@@ -698,6 +780,7 @@ pub fn on_key_cancel(app: &AppHandle) {
     }
 
     tracing::info!("Recording cancelled by Escape");
+    abort_transcriptions();
 
     let session_id = RECORDING_SESSION_ID.load(Ordering::SeqCst);
     let recording_started = matches!(
@@ -717,6 +800,34 @@ pub fn on_key_cancel(app: &AppHandle) {
         }
     }
 
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        finish_cancelled(&app_handle, is_test_mode).await;
+    });
+}
+
+/// Called when Escape is pressed while a recording is being transcribed:
+/// abort the transcription so nothing is pasted or saved. The task started
+/// by `on_key_up` sees the abort and returns to Ready.
+pub fn on_transcription_cancel(app: &AppHandle) {
+    if crate::state::get_state() != crate::state::AppState::Processing || !abort_session() {
+        return;
+    }
+    tracing::info!("Transcription cancelled by Escape");
+    // Hide now: the task may still be loading the model or finishing an
+    // encoder run.
+    crate::indicator::hide(app).ok();
+}
+
+/// End a recording or transcription that Escape cancelled: nothing is pasted
+/// or saved.
+async fn finish_cancelled(app: &AppHandle, is_test_mode: bool) {
+    tracing::info!("Transcription aborted; nothing pasted");
+    clear_frontmost_app();
+    finish_transcription(app, None, is_test_mode).await;
+}
+
+fn clear_frontmost_app() {
     #[cfg(target_os = "macos")]
     {
         match FRONTMOST_APP.lock() {
@@ -725,11 +836,6 @@ pub fn on_key_cancel(app: &AppHandle) {
         }
         .take();
     }
-
-    let app_handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        finish_transcription(&app_handle, None, 0, is_test_mode).await;
-    });
 }
 
 /// Show a notice in the indicator; error details stay in the logs.
@@ -739,12 +845,10 @@ fn notify(app: &AppHandle, kind: NoticeKind, message: &str) {
     }
 }
 
-async fn finish_transcription(
-    app: &AppHandle,
-    text: Option<String>,
-    _duration_ms: i64,
-    is_test_mode: bool,
-) {
+async fn finish_transcription(app: &AppHandle, text: Option<String>, is_test_mode: bool) {
+    // The recording is over; Escape has nothing left to cancel.
+    lock_session_abort().take();
+
     // Hide indicator
     crate::indicator::hide(app).ok();
 
@@ -869,7 +973,10 @@ mod tests {
 
             match cmd_rx.recv().expect("third command should arrive") {
                 AudioCommand::StopRecording { reply_tx } => {
-                    let _ = reply_tx.send(Ok(vec![0.25, 0.5]));
+                    let _ = reply_tx.send(Ok(Recording {
+                        samples: vec![0.25, 0.5],
+                        sample_rate: 16_000,
+                    }));
                 }
                 AudioCommand::StartRecording { .. } | AudioCommand::Discard => {
                     panic!("third command should be StopRecording");
@@ -882,7 +989,10 @@ mod tests {
             Some("mic init failed".to_string())
         );
         assert!(send_start_recording_command(&cmd_tx, MicChoice::default()).is_ok());
-        assert_eq!(send_stop_recording_command(&cmd_tx), Ok(vec![0.25, 0.5]));
+        assert_eq!(
+            send_stop_recording_command(&cmd_tx).map(|recording| recording.samples),
+            Ok(vec![0.25, 0.5])
+        );
 
         worker.join().expect("worker thread should complete");
     }

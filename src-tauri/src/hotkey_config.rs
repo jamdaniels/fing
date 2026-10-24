@@ -53,6 +53,11 @@ fn is_valid_hotkey_token(token: &str) -> bool {
     {
         return true;
     }
+    // Only macOS reports the Fn key; elsewhere it is handled in keyboard
+    // firmware and never reaches the OS.
+    if token == "Function" {
+        return cfg!(target_os = "macos");
+    }
 
     matches!(
         token,
@@ -75,7 +80,6 @@ fn is_valid_hotkey_token(token: &str) -> bool {
             | "Equal"
             | "Execute"
             | "Final"
-            | "Function"
             | "Hangul"
             | "Hanja"
             | "Hanji"
@@ -233,6 +237,17 @@ mod tests {
             assert!(
                 parse_hotkey_string(raw).is_err(),
                 "{raw:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_function_key_only_on_macos() {
+        for raw in ["Function", "Function+Space"] {
+            assert_eq!(
+                parse_hotkey_string(raw).is_ok(),
+                cfg!(target_os = "macos"),
+                "{raw:?}"
             );
         }
     }

@@ -96,6 +96,12 @@ export function formatNumber(value: number): string {
   return new Intl.NumberFormat(currentLanguage).format(value);
 }
 
+export function formatList(items: readonly string[]): string {
+  return new Intl.ListFormat(currentLanguage, { type: "conjunction" }).format(
+    items
+  );
+}
+
 export function formatDateTime(
   value: Date,
   options: Intl.DateTimeFormatOptions

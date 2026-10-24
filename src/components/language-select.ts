@@ -1,11 +1,50 @@
 import { Check, Plus, Search, X } from "lucide";
-import { t } from "../lib/i18n";
+import { formatList, t } from "../lib/i18n";
 import { createIcon, escapeHtml } from "../lib/icons";
 import {
   languageName,
+  languagesOutsideParakeet,
+  PARAKEET_LANGUAGE_CODES,
   WHISPER_LANGUAGES,
   type WhisperLanguage,
 } from "../lib/languages";
+import type { ModelEngine } from "../lib/types";
+
+/** Tooltip on the note's language count. Each name is in its own language,
+ * so one list serves every UI language. */
+const PARAKEET_LANGUAGE_LIST = [...PARAKEET_LANGUAGE_CODES]
+  .map(languageName)
+  .sort((a, b) => a.localeCompare(b))
+  .join(", ");
+
+/**
+ * Note under a language picker for the chosen model's engine: Parakeet
+ * ignores the selection and can't transcribe languages outside its 25.
+ */
+export function renderEngineLanguageHint(
+  engine: ModelEngine | undefined,
+  selected: readonly string[]
+): string {
+  if (engine !== "parakeet") {
+    return "";
+  }
+  const unsupported = languagesOutsideParakeet(selected);
+  let text: string;
+  if (unsupported.length > 0) {
+    text = escapeHtml(
+      t("languageSelect.parakeetUnsupported", {
+        languages: formatList(unsupported.map(languageName)),
+      })
+    );
+  } else {
+    const supported = `<span class="lang-engine-supported" title="${escapeHtml(PARAKEET_LANGUAGE_LIST)}">${t(
+      "languageSelect.parakeetSupported",
+      { count: PARAKEET_LANGUAGE_CODES.size }
+    )}</span>`;
+    text = t("languageSelect.parakeetIgnored", { supported });
+  }
+  return `<div class="engine-note lang-engine-hint warn">${text}</div>`;
+}
 
 export interface LanguageSelectOptions {
   selected: string[];

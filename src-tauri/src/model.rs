@@ -18,52 +18,72 @@ pub enum ModelVariant {
     #[default]
     Small,
     LargeTurboQ5,
+    ParakeetTdtV3Q4k,
+}
+
+/// Inference engine a model file runs on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelEngine {
+    Whisper,
+    Parakeet,
 }
 
 /// Definition of a model variant with all metadata
 pub struct ModelDefinition {
     pub variant: ModelVariant,
+    pub engine: ModelEngine,
     pub filename: &'static str,
     pub url: &'static str,
     pub sha256: &'static str,
     pub size_bytes: u64,
     pub display_name: &'static str,
-    pub description: &'static str,
     pub memory_estimate_mb: u32,
 }
 
-/// Registry of all available models
+/// Registry of all available models. Download URLs are pinned to a Hugging
+/// Face revision so a moved or replaced file can't break downloads.
 pub const MODEL_REGISTRY: &[ModelDefinition] = &[
     ModelDefinition {
         variant: ModelVariant::SmallQ5,
+        engine: ModelEngine::Whisper,
         filename: "ggml-small-q5_1.bin",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small-q5_1.bin",
         sha256: "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
         size_bytes: 190_000_000, // ~190 MB
-        display_name: "Small Q5",
-        description: "Good",
+        display_name: "Whisper Small Q5",
         memory_estimate_mb: 300,
     },
     ModelDefinition {
         variant: ModelVariant::Small,
+        engine: ModelEngine::Whisper,
         filename: "ggml-small.bin",
-        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin",
         sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
         size_bytes: 488_000_000, // ~488 MB
-        display_name: "Small",
-        description: "Better",
+        display_name: "Whisper Small",
         memory_estimate_mb: 600,
     },
     ModelDefinition {
         variant: ModelVariant::LargeTurboQ5,
+        engine: ModelEngine::Whisper,
         filename: "ggml-large-v3-turbo-q5_0.bin",
-        url:
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin",
         sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
         size_bytes: 574_000_000, // ~574 MB
-        display_name: "Large Turbo Q5",
-        description: "Best",
+        display_name: "Whisper Large",
         memory_estimate_mb: 750,
+    },
+    ModelDefinition {
+        variant: ModelVariant::ParakeetTdtV3Q4k,
+        engine: ModelEngine::Parakeet,
+        filename: "ggml-parakeet-tdt-0.6b-v3-q4_k.bin",
+        url: "https://huggingface.co/ggml-org/parakeet-GGUF/resolve/35156454d1a39de06863303dd209fd2bed6ee079/ggml-parakeet-tdt-0.6b-v3-q4_k.bin",
+        sha256: "8b205b8b39c6535e153de6fb11c51db46125d45c4f16ba496fe41a0fe71b885e",
+        size_bytes: 415_611_879,
+        display_name: "Parakeet",
+        // Measured: ~530 MB process RSS after load on Metal (docs/whisper-cpp.md).
+        memory_estimate_mb: 550,
     },
 ];
 
@@ -73,6 +93,13 @@ pub fn get_definition(variant: ModelVariant) -> &'static ModelDefinition {
         .iter()
         .find(|m| m.variant == variant)
         .expect("All variants should have definitions")
+}
+
+/// Registry entry whose file name matches `path`, if any.
+#[cfg(test)]
+pub fn definition_for_path(path: &Path) -> Option<&'static ModelDefinition> {
+    let filename = path.file_name()?.to_str()?;
+    MODEL_REGISTRY.iter().find(|m| m.filename == filename)
 }
 
 /// Get the file path for a model variant
@@ -110,9 +137,9 @@ pub struct ModelVerification {
 #[serde(rename_all = "camelCase")]
 pub struct ModelInfo {
     pub variant: ModelVariant,
+    pub engine: ModelEngine,
     pub filename: String,
     pub display_name: String,
-    pub description: String,
     pub size_bytes: u64,
     pub memory_estimate_mb: u32,
     pub is_downloaded: bool,
@@ -125,9 +152,9 @@ pub fn get_all_models(active_variant: ModelVariant) -> Vec<ModelInfo> {
         .iter()
         .map(|def| ModelInfo {
             variant: def.variant,
+            engine: def.engine,
             filename: def.filename.to_string(),
             display_name: def.display_name.to_string(),
-            description: def.description.to_string(),
             size_bytes: def.size_bytes,
             memory_estimate_mb: def.memory_estimate_mb,
             is_downloaded: is_variant_downloaded(def.variant),
@@ -484,7 +511,7 @@ pub async fn download_variant(variant: ModelVariant) -> Result<PathBuf, String> 
     let def = get_definition(variant);
     let path = model_path_for_variant(variant);
     let part_path = path.with_extension("part");
-    tracing::info!("Starting {} model download to {:?}", def.display_name, path);
+    tracing::info!("Starting {} model download", def.display_name);
 
     // Create directory if needed
     if let Some(parent) = path.parent() {
@@ -642,11 +669,7 @@ pub fn delete_model(variant: ModelVariant) -> Result<(), String> {
         if let Ok(mut cache) = HASH_CACHE.lock() {
             cache.remove(&path);
         }
-        tracing::info!(
-            "Deleted {} model at {:?}",
-            get_definition(variant).display_name,
-            path
-        );
+        tracing::info!("Deleted {} model", get_definition(variant).display_name);
     }
     Ok(())
 }
@@ -687,6 +710,17 @@ mod tests {
         }
 
         file.sync_all().expect("test model file should sync");
+    }
+
+    #[test]
+    fn parakeet_variant_round_trips_and_resolves_by_file_name() {
+        let json = serde_json::to_string(&ModelVariant::ParakeetTdtV3Q4k).expect("serialize");
+        assert_eq!(json, "\"parakeet_tdt_v3_q4k\"");
+
+        let path = model_path_for_variant(ModelVariant::ParakeetTdtV3Q4k);
+        let def = definition_for_path(&path).expect("registry entry by file name");
+        assert_eq!(def.engine, ModelEngine::Parakeet);
+        assert!(definition_for_path(Path::new("unknown.bin")).is_none());
     }
 
     #[test]

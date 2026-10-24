@@ -20,12 +20,9 @@ if (process.platform === "darwin") {
     env.PATH = [...rustPathEntries, ...pathEntries].join(":");
   }
 
-  env.WHISPER_CCACHE ??= "OFF";
-  env.CCACHE_DISABLE ??= "1";
-
+  // whisper-sys's build.rs sets the whisper.cpp CMake options per target
+  // architecture itself (no ccache, no native CPU tuning, Metal on arm64).
   if (target === "universal-apple-darwin") {
-    env.WHISPER_NATIVE ??= "OFF";
-    env.CMAKE_CROSSCOMPILING ??= "ON";
     env.CARGO_BUILD_JOBS ??= "1";
     env.NUM_JOBS ??= "1";
     env.CMAKE_BUILD_PARALLEL_LEVEL ??= "1";
@@ -34,7 +31,6 @@ if (process.platform === "darwin") {
 
 if (process.platform === "win32") {
   env.CARGO_TARGET_DIR ??= "C:\\t";
-  env.GGML_CCACHE ??= "OFF";
 }
 
 if (!env.TAURI_SIGNING_PRIVATE_KEY) {

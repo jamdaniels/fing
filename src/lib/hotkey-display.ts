@@ -14,8 +14,14 @@ import {
   Option,
   Space,
 } from "lucide";
-import { formatHotkeyForDisplay, parseHotkeyString } from "./hotkey";
+import {
+  formatHotkeyForDisplay,
+  hotkeyUsesFn,
+  parseHotkeyString,
+} from "./hotkey";
+import { t } from "./i18n";
 import { createIcon } from "./icons";
+import { fnKeyHasSystemAction, openKeyboardSettings } from "./ipc";
 
 const TOKEN_ICONS: Record<string, IconNode> = {
   ControlLeft: ChevronUp,
@@ -123,4 +129,53 @@ export function renderHotkeyChips(
       ? chips.join('<span class="hotkey-chip-sep">+</span>')
       : chips.join("");
   return `<span class="hotkey-chips">${joined}</span>`;
+}
+
+/** Shown under an Fn hotkey when macOS also runs its own Fn action, which
+ * the listener can't suppress. Call `bindFnSystemActionNote` after rendering. */
+export function renderFnSystemActionNote(
+  hotkey: string,
+  hasSystemAction: boolean
+): string {
+  if (!(hasSystemAction && hotkeyUsesFn(hotkey))) {
+    return "";
+  }
+  return `
+    <div class="hotkey-fn-note">
+      <span>${t("dialogs.fnSystemAction")}</span>
+      <button class="btn btn-outline btn-sm fn-settings-btn" type="button">${t("dialogs.openKeyboardSettings")}</button>
+    </div>
+  `;
+}
+
+export function bindFnSystemActionNote(root: ParentNode): void {
+  root.querySelector(".fn-settings-btn")?.addEventListener("click", () => {
+    openKeyboardSettings().catch(console.error);
+  });
+}
+
+/**
+ * Reads whether macOS runs its own Fn action now and again on every window
+ * focus (the user may come back from changing it in System Settings), and
+ * reports each change from the initial `false`. Returns the cleanup.
+ */
+export function watchFnSystemAction(
+  onChange: (hasSystemAction: boolean) => void
+): () => void {
+  let current = false;
+  const refresh = () => {
+    fnKeyHasSystemAction()
+      .then((hasSystemAction) => {
+        if (hasSystemAction !== current) {
+          current = hasSystemAction;
+          onChange(hasSystemAction);
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("Failed to read the Fn key action:", err);
+      });
+  };
+  window.addEventListener("focus", refresh);
+  refresh();
+  return () => window.removeEventListener("focus", refresh);
 }

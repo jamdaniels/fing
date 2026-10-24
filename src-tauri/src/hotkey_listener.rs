@@ -18,7 +18,8 @@
 //!
 //! Escape is never part of a hotkey; while recording (hotkey held or
 //! hands-free) it cancels the recording instead of stopping it, so nothing is
-//! transcribed or pasted.
+//! transcribed or pasted. While a recording is transcribed, it aborts the
+//! transcription.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -72,7 +73,8 @@ const SLEEP_DETECTION_THRESHOLD_NS: u64 = 2_000_000_000;
 /// Pass-through still occurs so the modal can capture the keys; the listener
 /// just stops dispatching press/release events and clears any in-flight state.
 /// Any recording is cancelled too, since its stop press could no longer reach
-/// it, and the hands-free gesture starts over.
+/// it, and the hands-free gesture starts over. Meanwhile macOS forwards Fn
+/// transitions to the capture UI, since WebKit never delivers Fn key events.
 pub fn set_suppressed(suppressed: bool) {
     SUPPRESSED.store(suppressed, Ordering::SeqCst);
     if suppressed {
@@ -95,6 +97,8 @@ enum HotkeyEvent {
     Press,
     Release,
     Cancel,
+    /// Escape while transcribing; bypasses the gesture, which is idle then.
+    CancelTranscription,
     SystemWake,
 }
 
@@ -261,6 +265,10 @@ fn run_hotkey_worker(rx: mpsc::Receiver<TimedHotkeyEvent>) {
                     HotkeyEvent::Press => gesture.press(at, crate::hotkey::recording_session),
                     HotkeyEvent::Release => gesture.release(at),
                     HotkeyEvent::Cancel => Some(gesture.cancel()),
+                    HotkeyEvent::CancelTranscription => {
+                        cancel_transcription();
+                        None
+                    }
                     HotkeyEvent::SystemWake => gesture.system_woke(),
                 }
             }
@@ -288,6 +296,13 @@ fn run_action(action: Action) {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
+fn cancel_transcription() {
+    if let Some(app) = APP_HANDLE.get() {
+        crate::hotkey::on_transcription_cancel(app);
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn dispatch_hotkey_event(event: HotkeyEvent) {
     let timed = TimedHotkeyEvent {
         event,
@@ -301,6 +316,7 @@ fn dispatch_hotkey_event(event: HotkeyEvent) {
             HotkeyEvent::Press => Action::Start,
             HotkeyEvent::Release => Action::Stop,
             HotkeyEvent::Cancel => Action::Cancel,
+            HotkeyEvent::CancelTranscription => return cancel_transcription(),
             HotkeyEvent::SystemWake => return,
         };
         run_action(action);
@@ -326,6 +342,7 @@ fn onboarding_test_mode() -> bool {
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) fn handle_key_event(event: KeyEvent) -> bool {
     if SUPPRESSED.load(Ordering::SeqCst) {
+        forward_capture_key(event);
         return false;
     }
 
@@ -339,6 +356,8 @@ pub(crate) fn handle_key_event(event: KeyEvent) -> bool {
             Availability::Recording
         } else if test_mode || crate::state::get_state().can_record() {
             Availability::Ready
+        } else if crate::hotkey::is_transcription_cancellable() {
+            Availability::Transcribing
         } else {
             Availability::Unavailable
         }
@@ -350,6 +369,24 @@ pub(crate) fn handle_key_event(event: KeyEvent) -> bool {
 
     outcome.swallow && !test_mode
 }
+
+/// Send an Fn press or release to the hotkey capture UI.
+#[cfg(target_os = "macos")]
+fn forward_capture_key(event: KeyEvent) {
+    use tauri::Emitter;
+
+    if event.token != "Function" {
+        return;
+    }
+    if let Some(app) = APP_HANDLE.get() {
+        if let Err(error) = app.emit("hotkey-capture-fn", event.is_press) {
+            tracing::warn!("Failed to forward Fn key to hotkey capture: {}", error);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn forward_capture_key(_event: KeyEvent) {}
 
 /// Called by a backend when it detects that the system woke from sleep.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -408,6 +445,9 @@ enum Availability {
     /// Recording: a hotkey press goes to the gesture (e.g. to stop
     /// hands-free) and Escape cancels, even when the hotkey isn't held.
     Recording,
+    /// Transcribing, text not pasted yet: presses pass through; Escape
+    /// aborts the transcription.
+    Transcribing,
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -471,7 +511,10 @@ impl HotkeyState {
             }
 
             if hotkey_matches(&self.pressed_keys, config)
-                && availability() != Availability::Unavailable
+                && matches!(
+                    availability(),
+                    Availability::Ready | Availability::Recording
+                )
             {
                 self.hotkey_active = true;
                 return EventOutcome::swallowed(Some(HotkeyEvent::Press));
@@ -499,6 +542,7 @@ impl HotkeyState {
     /// Escape is never tracked as a held key. Pressed while recording, it
     /// cancels so the recording is discarded; if the hotkey is held, it ends
     /// without a release and the remaining hotkey key-ups dispatch nothing.
+    /// Pressed while transcribing, it aborts the transcription.
     fn on_escape(
         &mut self,
         event: KeyEvent,
@@ -511,10 +555,19 @@ impl HotkeyState {
             };
         }
 
-        if self.hotkey_active || availability() == Availability::Recording {
+        let cancel = if self.hotkey_active {
+            Some(HotkeyEvent::Cancel)
+        } else {
+            match availability() {
+                Availability::Recording => Some(HotkeyEvent::Cancel),
+                Availability::Transcribing => Some(HotkeyEvent::CancelTranscription),
+                Availability::Ready | Availability::Unavailable => None,
+            }
+        };
+        if let Some(cancel) = cancel {
             self.hotkey_active = false;
             self.swallowed_escape = Some(event.code);
-            return EventOutcome::swallowed(Some(HotkeyEvent::Cancel));
+            return EventOutcome::swallowed(Some(cancel));
         }
 
         // Auto-repeat of an Escape that already cancelled.
@@ -686,6 +739,10 @@ mod tests {
 
     fn unavailable() -> Availability {
         Availability::Unavailable
+    }
+
+    fn transcribing() -> Availability {
+        Availability::Transcribing
     }
 
     #[test]
@@ -894,6 +951,36 @@ mod tests {
         // Afterwards Escape belongs to the focused app again.
         let outcome = state.on_event(press(ESCAPE_TOKEN), &config, os_holding(&[]), ready);
         assert_eq!(outcome, EventOutcome::default());
+    }
+
+    #[test]
+    fn escape_aborts_transcription_and_is_swallowed() {
+        let config = config(&["F9"]);
+        let mut state = HotkeyState::default();
+
+        let outcome = state.on_event(press(ESCAPE_TOKEN), &config, os_holding(&[]), transcribing);
+        assert_eq!(outcome.dispatch, Some(HotkeyEvent::CancelTranscription));
+        assert!(outcome.swallow);
+
+        // Auto-repeat and key-up are swallowed while Escape is held.
+        let outcome = state.on_event(press(ESCAPE_TOKEN), &config, os_holding(&[]), unavailable);
+        assert_eq!(outcome, EventOutcome::swallowed(None));
+        let outcome = state.on_event(release(ESCAPE_TOKEN), &config, os_holding(&[]), ready);
+        assert_eq!(outcome, EventOutcome::swallowed(None));
+
+        // Once the text is being pasted, Escape belongs to the focused app.
+        let outcome = state.on_event(press(ESCAPE_TOKEN), &config, os_holding(&[]), unavailable);
+        assert_eq!(outcome, EventOutcome::default());
+    }
+
+    #[test]
+    fn hotkey_press_passes_through_while_transcribing() {
+        let config = config(&["F9"]);
+        let mut state = HotkeyState::default();
+
+        let outcome = state.on_event(press("F9"), &config, os_holding(&[]), transcribing);
+        assert_eq!(outcome, EventOutcome::default());
+        assert!(!state.hotkey_active);
     }
 
     #[test]

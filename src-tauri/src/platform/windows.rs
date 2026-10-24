@@ -28,6 +28,13 @@ pub fn request_accessibility_permission() -> bool {
     true
 }
 
+/// Windows never sees the Fn key, so it can't be a hotkey.
+pub fn fn_key_has_system_action() -> bool {
+    false
+}
+
+pub fn open_keyboard_settings() {}
+
 /// Microphone consent. Packaged (Store) builds run under Windows' per-app
 /// privacy consent, which otherwise pops the OS dialog lazily on the first
 /// capture activation (i.e. mid hotkey press). Unpackaged builds have no

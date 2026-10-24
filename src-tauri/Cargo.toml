@@ -21,7 +21,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
-whisper-rs = "=0.16.0"
+whisper-sys = { path = "crates/whisper-sys" }
 cpal = "0.17"
 rubato = "1.0"
 realfft = "3"
@@ -42,14 +42,10 @@ rodio = "0.22"
 sha2 = "0.10"
 sys-locale = "0.3"
 
-# macOS: Metal for Apple GPUs
 [target.'cfg(target_os = "macos")'.dependencies]
-whisper-rs = { version = "=0.16.0", features = ["metal"] }
 enigo = "0.6"
 
-# Windows: Vulkan for cross-vendor GPU support
 [target.'cfg(target_os = "windows")'.dependencies]
-whisper-rs = { version = "=0.16.0", features = ["vulkan", "raw-api"] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
@@ -79,9 +75,7 @@ lto = true
 codegen-units = 1
 panic = "abort"
 
-# whisper-rs-sys builds whisper.cpp with `--config Release` but, when its build
-# script has debug assertions, sets CMAKE_BUILD_TYPE=RelWithDebInfo. On MSVC
-# the static CRT flag (.cargo/config.toml) then misses the Release config and
-# debug builds fail to link (/MD vs /MT). Keep its build type Release.
-[profile.dev.package.whisper-rs-sys]
-debug-assertions = false
+# Model activation hashes the whole model file (SHA-256, ~0.5 GB); unoptimized
+# sha2 makes that take seconds in dev builds.
+[profile.dev.package.sha2]
+opt-level = 3

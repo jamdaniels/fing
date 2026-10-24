@@ -930,9 +930,23 @@ body[data-platform="windows"] .titlebar {
 }
 
 .dictionary-hint {
+  display: flex;
+  gap: 8px;
+  align-items: center;
   margin-top: 10px;
   font-size: 11px;
   color: var(--text-secondary);
+}
+
+.dictionary-engine-badge {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-weight: 600;
+  color: var(--warning-text);
+  white-space: nowrap;
+  user-select: none;
+  background-color: var(--warning-10);
+  border-radius: 5px;
 }
 
 .dictionary-error {
@@ -2099,18 +2113,6 @@ body[data-platform="windows"] .titlebar {
   justify-content: flex-end;
 }
 
-.hotkey-fn-pick {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-right: auto;
-}
-
-.hotkey-fn-chip:hover {
-  background-color: var(--accent-10);
-  border-color: var(--accent);
-}
-
 /* Mic Test Dialog */
 .mic-test-dialog {
   min-width: 380px;
@@ -2253,41 +2255,22 @@ body[data-platform="windows"] .titlebar {
   border-color: var(--accent);
 }
 
-.hotkey-modal-actions {
-  margin-bottom: 16px;
-}
-
-/* Fn key option button */
-.hotkey-fn-option {
+/* macOS runs its own Fn action alongside an Fn hotkey */
+.hotkey-fn-note {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
   align-items: center;
-  padding: 10px 16px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  background-color: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  max-width: 320px;
+  margin: 0 auto;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--warning-text);
+  text-align: center;
 }
 
-.hotkey-fn-option:hover {
-  color: var(--text-primary);
-  background-color: var(--bg-secondary);
-}
-
-.hotkey-fn-key {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  padding: 4px 8px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
-  font-size: 11px;
-  font-weight: 600;
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  box-shadow: 0 1px 0 var(--border);
+.hotkey-modal-preview + .hotkey-fn-note {
+  margin-top: 16px;
 }
 
 /* Step Indicator */
@@ -2337,6 +2320,24 @@ body[data-platform="windows"] .titlebar {
 }
 
 /* Language Selection */
+/* The engine note sits under the chips in onboarding, and in settings it
+   reads as part of the row's description, so it takes that spacing. */
+.onb-section .lang-engine-hint {
+  margin-top: 6px;
+}
+
+.lang-row .lang-engine-hint {
+  margin-top: 3px;
+}
+
+/* Hover target for the tooltip listing Parakeet's languages; dashed like
+   the app's other quiet, secondary outlines. */
+.lang-engine-supported {
+  text-decoration: underline dashed;
+  text-decoration-color: color-mix(in srgb, currentColor 50%, transparent);
+  text-underline-offset: 2px;
+}
+
 .lang-row {
   flex-direction: column;
   gap: 12px;
@@ -2622,8 +2623,7 @@ body[data-platform="windows"] .titlebar {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  margin-top: 16px;
-  padding: 14px 16px;
+  padding: 10px 14px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--bg-secondary);
@@ -2705,22 +2705,6 @@ body[data-platform="windows"] .titlebar {
   background-color: color-mix(in srgb, var(--bg-primary) 70%, transparent);
   border: 1px solid color-mix(in srgb, var(--text-primary) 5%, transparent);
   border-radius: 10px;
-}
-
-.hotkey-fn-inline {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  margin-top: auto;
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.hotkey-fn-inline .hotkey-fn-chip {
-  height: 22px;
-  min-width: 22px;
-  padding: 0 8px;
-  font-size: 11px;
 }
 
 .hotkey-preview {
@@ -2947,12 +2931,20 @@ body[data-platform="windows"] .titlebar {
 }
 
 /* Model variant selection - Onboarding */
+/* Scrolls instead of overlapping the header if a long device name wraps;
+   the top padding keeps the card badge clear of the scroll edge. */
+.onboarding-models .onboarding-body {
+  justify-content: safe center;
+  padding-top: 20px;
+  overflow-y: auto;
+}
+
 .model-variant-grid {
-  display: flex;
-  flex-direction: row;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+  gap: 14px 12px;
   width: 100%;
-  max-width: 480px;
 }
 
 .model-variant-card {
@@ -2964,7 +2956,7 @@ body[data-platform="windows"] .titlebar {
   align-items: flex-start;
   justify-content: flex-start;
   min-width: 0;
-  padding: 14px 12px 12px;
+  padding: 12px 12px 10px;
   font: inherit;
   color: var(--text-primary);
   text-align: left;
@@ -2989,21 +2981,34 @@ body[data-platform="windows"] .titlebar {
     0 4px 12px -4px var(--accent-20);
 }
 
+/* Sits on the card's top edge like a tab. z-index -1 paints it under the
+   card (which sets no z-index, so it isn't a stacking context of its own),
+   letting the selection ring cover its base. It doesn't overlap the card
+   itself: the unselected card is translucent and would show it through. */
 .variant-badge {
   position: absolute;
-  top: -9px;
+  bottom: 100%;
   left: 50%;
-  padding: 3px 8px;
+  z-index: -1;
+  padding: 3px 8px 4px;
   font-size: 9.5px;
   font-weight: 600;
   color: var(--bg-primary);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   white-space: nowrap;
-  background-color: var(--text-primary);
+  background-color: var(--text-secondary);
   border: none;
-  border-radius: 999px;
+  border-radius: 6px 6px 0 0;
   transform: translateX(-50%);
+}
+
+.variant-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  width: 100%;
 }
 
 .variant-name {
@@ -3013,17 +3018,9 @@ body[data-platform="windows"] .titlebar {
 }
 
 .variant-desc {
+  flex-shrink: 0;
   font-size: 12px;
   line-height: 1.3;
-  color: var(--text-secondary);
-}
-
-.variant-stats {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: 6px;
-  font-size: 11px;
   color: var(--text-secondary);
 }
 
@@ -3070,9 +3067,10 @@ body[data-platform="windows"] .titlebar {
   background-color: color-mix(in srgb, var(--border) 50%, transparent);
 }
 
+/* The name column takes the free width so a note can sit under the name */
 .model-col-name {
-  flex-shrink: 0;
-  width: 110px;
+  flex: 1;
+  min-width: 0;
 }
 
 .model-row .model-col-name {
@@ -3104,15 +3102,36 @@ body[data-platform="windows"] .titlebar {
   min-width: 0;
 }
 
+/* One-line notes about a model's engine (model list, cards, language hint) */
+.engine-note {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.engine-note.warn {
+  color: var(--warning-text);
+}
+
+/* Quieter on the onboarding cards; the card's gap already spaces it */
+.model-variant-card .engine-note {
+  margin-top: 0;
+  line-height: 1.3;
+  color: var(--text-tertiary);
+}
+
 .model-col-desc {
   flex-shrink: 0;
-  width: 100px;
+  width: 72px;
   font-size: 11px;
   color: var(--text-secondary);
 }
 
 .model-col-size {
-  flex: 1;
+  flex-shrink: 0;
+  width: 112px;
   font-size: 11px;
   color: var(--text-secondary);
 }
@@ -3145,6 +3164,14 @@ body[data-platform="windows"] .titlebar {
   font-size: 12px;
   color: var(--text-secondary);
   text-align: center;
+}
+
+.model-error {
+  padding: 0 16px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--danger);
 }
 
 .model-download-progress {
