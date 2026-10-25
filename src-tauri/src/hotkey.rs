@@ -891,24 +891,6 @@ pub fn register_hotkey(app: &AppHandle) -> Result<(), String> {
 
 // Tauri commands for testing
 #[tauri::command]
-pub fn test_transcription(app: AppHandle) -> Result<(), String> {
-    // Simulate a complete recording cycle for testing
-    tracing::info!("Test transcription triggered");
-
-    // Simulate key down
-    on_key_down(&app);
-
-    // Short delay then key up (simulate short recording)
-    let app_clone = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(2000)); // 2 seconds of recording
-        on_key_up(&app_clone);
-    });
-
-    Ok(())
-}
-
-#[tauri::command]
 pub fn enable_onboarding_test_mode(app: AppHandle) -> Result<(), String> {
     tracing::info!("Enabling onboarding test mode");
     ONBOARDING_TEST_MODE.store(true, Ordering::SeqCst);

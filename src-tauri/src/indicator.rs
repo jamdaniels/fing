@@ -239,19 +239,3 @@ pub fn position_indicator(window: &WebviewWindow) -> Result<(), String> {
     tracing::debug!("Indicator positioned at ({}, {})", x, y);
     Ok(())
 }
-
-// Tauri commands for testing/manual control
-#[tauri::command]
-pub fn indicator_show_recording(app: AppHandle) -> Result<(), String> {
-    show_recording(&app)
-}
-
-#[tauri::command]
-pub fn indicator_show_processing(app: AppHandle) -> Result<(), String> {
-    show_processing(&app)
-}
-
-#[tauri::command]
-pub fn indicator_hide(app: AppHandle) -> Result<(), String> {
-    hide(&app)
-}

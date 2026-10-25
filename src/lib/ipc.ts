@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppInfo,
-  AppState,
   AudioDevice,
   BootstrapStatus,
   DownloadProgress,
@@ -19,10 +18,6 @@ import type {
   UpdateCheckResult,
   UpdateStatus,
 } from "./types";
-
-export async function getAppState(): Promise<AppState> {
-  return (await invoke<string>("get_app_state")) as AppState;
-}
 
 export async function getBootstrapStatus(): Promise<BootstrapStatus> {
   return await invoke<BootstrapStatus>("get_bootstrap_status");

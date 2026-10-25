@@ -84,11 +84,6 @@ pub struct MicTestStartResult {
     pub device_matched: bool,
 }
 
-#[tauri::command]
-fn get_app_state() -> String {
-    state::get_state().as_str().to_string()
-}
-
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct BootstrapStatus {
@@ -1094,7 +1089,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_app_state,
             get_bootstrap_status,
             // App info
             app_info::get_app_info,
@@ -1108,7 +1102,6 @@ pub fn run() {
             // Stats
             stats::get_stats,
             // Database operations
-            db::db_save_transcript,
             db::db_get_recent,
             db::db_search,
             db::db_delete,
@@ -1122,13 +1115,8 @@ pub fn run() {
             get_mic_test_level,
             stop_mic_test,
             // Hotkey testing
-            hotkey::test_transcription,
             hotkey::enable_onboarding_test_mode,
             hotkey::disable_onboarding_test_mode,
-            // Indicator controls
-            indicator::indicator_show_recording,
-            indicator::indicator_show_processing,
-            indicator::indicator_hide,
             // Window management
             quit_app,
             present_main_window,

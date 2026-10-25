@@ -576,11 +576,6 @@ fn get_top_words(
 
 // Tauri commands
 #[tauri::command]
-pub fn db_save_transcript(transcript: NewTranscript) -> Result<Transcript, String> {
-    save_transcript(&transcript)
-}
-
-#[tauri::command]
 pub fn db_get_recent(limit: i64, offset: i64) -> Result<Vec<Transcript>, String> {
     get_recent_transcripts(limit, offset)
 }
