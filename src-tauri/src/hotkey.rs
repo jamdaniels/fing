@@ -389,6 +389,9 @@ pub fn on_key_down(app: &AppHandle) {
         spawn_lazy_preload_if_needed();
     }
 
+    // A recording that ended without a paste may have left its app behind.
+    clear_frontmost_app();
+
     // Capture frontmost app on a background thread to avoid delaying the UI.
     #[cfg(target_os = "macos")]
     {
