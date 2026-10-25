@@ -362,7 +362,7 @@ fn is_word_char(ch: char) -> bool {
     ch == '\'' || (ch.is_alphanumeric() && !is_unspaced_script(ch))
 }
 
-fn is_unspaced_script(ch: char) -> bool {
+pub(crate) fn is_unspaced_script(ch: char) -> bool {
     matches!(
         ch as u32,
         0x0E00..=0x0EFF // Thai, Lao

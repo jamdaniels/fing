@@ -189,6 +189,30 @@ fn plan_cut(samples: &[f32], sample_rate: u32) -> Option<usize> {
     Some(cut_at(range))
 }
 
+/// Join chunk texts as the language writes them: a space between words,
+/// none next to Chinese, Japanese, Thai and similar scripts or their
+/// punctuation, which are written without spaces.
+fn join_chunk_texts(texts: &[String]) -> String {
+    let mut joined = String::new();
+    for text in texts {
+        let needs_space = match (joined.chars().next_back(), text.chars().next()) {
+            (Some(last), Some(first)) => !(is_unspaced_char(last) || is_unspaced_char(first)),
+            _ => false,
+        };
+        if needs_space {
+            joined.push(' ');
+        }
+        joined.push_str(text);
+    }
+    joined
+}
+
+fn is_unspaced_char(ch: char) -> bool {
+    crate::dictionary::is_unspaced_script(ch)
+        // CJK symbols and punctuation, fullwidth forms
+        || matches!(ch as u32, 0x3000..=0x303F | 0xFF00..=0xFFEF)
+}
+
 /// What a recording's worker committed: the audio before `cut` is
 /// transcribed into `texts`.
 #[derive(Debug, Default)]
@@ -506,7 +530,7 @@ pub fn transcribe_recording(
         release_ms = released.elapsed().as_millis() as u64,
         "Pre-transcription"
     );
-    Ok(committed.texts.join(" "))
+    Ok(join_chunk_texts(&committed.texts))
 }
 
 #[cfg(test)]
@@ -714,6 +738,30 @@ mod tests {
             language: language.map(String::from),
             engine: 1,
         }
+    }
+
+    #[test]
+    fn chunk_texts_join_with_spaces_between_words() {
+        let texts = vec!["Hello there.".to_string(), "Again.".to_string()];
+        assert_eq!(join_chunk_texts(&texts), "Hello there. Again.");
+    }
+
+    #[test]
+    fn chunk_texts_join_without_spaces_in_unspaced_scripts() {
+        let zh = vec!["我们今天开会。".to_string(), "然后吃饭。".to_string()];
+        assert_eq!(join_chunk_texts(&zh), "我们今天开会。然后吃饭。");
+        let ja = vec!["今日は".to_string(), "晴れです".to_string()];
+        assert_eq!(join_chunk_texts(&ja), "今日は晴れです");
+        let th = vec!["สวัสดี".to_string(), "ครับ".to_string()];
+        assert_eq!(join_chunk_texts(&th), "สวัสดีครับ");
+        let mixed = vec!["用iPhone".to_string(), "拍照".to_string()];
+        assert_eq!(join_chunk_texts(&mixed), "用iPhone拍照");
+    }
+
+    #[test]
+    fn chunk_texts_join_handles_empty_and_single() {
+        assert_eq!(join_chunk_texts(&[]), "");
+        assert_eq!(join_chunk_texts(&["Only.".to_string()]), "Only.");
     }
 
     #[test]
