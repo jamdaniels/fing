@@ -30,6 +30,10 @@ static LAZY_PRELOAD_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 // Onboarding test mode - when enabled, hotkey works even during NeedsSetup state
 static ONBOARDING_TEST_MODE: AtomicBool = AtomicBool::new(false);
 
+// Test mode of the current (or last) recording, fixed at key down: leaving
+// the onboarding test step mid-recording must not turn it into a real one.
+static RECORDING_TEST_MODE: AtomicBool = AtomicBool::new(false);
+
 /// Whether onboarding test mode is currently active
 #[cfg(target_os = "macos")]
 pub(crate) fn is_onboarding_test_mode() -> bool {
@@ -412,6 +416,7 @@ pub fn on_key_down(app: &AppHandle) {
         }
         app.emit("app-state-changed", "recording").ok();
     }
+    RECORDING_TEST_MODE.store(is_test_mode, Ordering::SeqCst);
     RECORDING_ACTIVE.store(true, Ordering::SeqCst);
 
     // Show recording indicator
@@ -520,7 +525,7 @@ fn after_microphone_opened(app: &AppHandle, choice: MicChoice, opened: OpenedMic
 /// Stop recording and transcribe (hotkey released, or tapped in hands-free)
 pub fn on_key_up(app: &AppHandle) {
     let _lifecycle_guard = lock_recording_lifecycle();
-    let is_test_mode = ONBOARDING_TEST_MODE.load(Ordering::SeqCst);
+    let is_test_mode = RECORDING_TEST_MODE.load(Ordering::SeqCst);
 
     if !RECORDING_ACTIVE.swap(false, Ordering::SeqCst) {
         return;
@@ -773,7 +778,7 @@ pub fn on_key_up(app: &AppHandle) {
 /// the audio, so nothing is transcribed, pasted or saved.
 pub fn on_key_cancel(app: &AppHandle) {
     let _lifecycle_guard = lock_recording_lifecycle();
-    let is_test_mode = ONBOARDING_TEST_MODE.load(Ordering::SeqCst);
+    let is_test_mode = RECORDING_TEST_MODE.load(Ordering::SeqCst);
 
     if !RECORDING_ACTIVE.swap(false, Ordering::SeqCst) {
         return;
@@ -912,9 +917,17 @@ pub fn enable_onboarding_test_mode(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn disable_onboarding_test_mode() -> Result<(), String> {
+pub fn disable_onboarding_test_mode(app: AppHandle) -> Result<(), String> {
     tracing::info!("Disabling onboarding test mode");
     ONBOARDING_TEST_MODE.store(false, Ordering::SeqCst);
+
+    // A test recording or its transcription must not outlive the test step.
+    if RECORDING_TEST_MODE.load(Ordering::SeqCst) {
+        // Stops a live test recording (no-op when none is active)...
+        on_key_cancel(&app);
+        // ...and aborts a test transcription that is still running.
+        abort_session();
+    }
     Ok(())
 }
 
