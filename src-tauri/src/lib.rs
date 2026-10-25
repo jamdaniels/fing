@@ -54,6 +54,16 @@ struct MicTestState {
     level: u32,      // Fixed-point (level * 10000)
     receiving: bool,
     device_id: Option<String>,
+    last_poll: Option<std::time::Instant>, // Last get_mic_test_level call; None before a test starts
+}
+
+/// The frontend polls about every 150 ms; a test nobody polls (window gone,
+/// webview reloaded) must not keep the mic open. Generous, because macOS
+/// throttles timers in background windows.
+const MIC_TEST_POLL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+fn mic_test_poll_expired(last_poll: Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    last_poll.is_some_and(|polled| now.saturating_duration_since(polled) > MIC_TEST_POLL_TIMEOUT)
 }
 
 lazy_static::lazy_static! {
@@ -326,6 +336,7 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
             .map_err(|e| format!("Mic test state lock poisoned: {e}"))?;
         state.generation += 1;
         state.running = true;
+        state.last_poll = Some(std::time::Instant::now());
         state.generation
     };
 
@@ -360,7 +371,16 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
             // Check if we should stop (either stopped or a new test started)
             let should_run = MIC_TEST_STATE
                 .lock()
-                .map(|s| s.running && s.generation == my_generation)
+                .map(|mut s| {
+                    if s.running
+                        && s.generation == my_generation
+                        && mic_test_poll_expired(s.last_poll, std::time::Instant::now())
+                    {
+                        s.running = false;
+                        tracing::info!("Mic test not polled; stopping it");
+                    }
+                    s.running && s.generation == my_generation
+                })
                 .unwrap_or(false);
             if !should_run {
                 break;
@@ -394,7 +414,10 @@ async fn start_mic_test(device_id: Option<String>) -> Result<MicTestStartResult,
 fn get_mic_test_level() -> MicrophoneTest {
     let (level_fixed, is_receiving) = MIC_TEST_STATE
         .lock()
-        .map(|s| (s.level, s.receiving))
+        .map(|mut s| {
+            s.last_poll = Some(std::time::Instant::now());
+            (s.level, s.receiving)
+        })
         .unwrap_or((0, false));
 
     MicrophoneTest {
@@ -411,6 +434,7 @@ fn stop_mic_test() {
         state.running = false;
         state.level = 0;
         state.receiving = false;
+        state.last_poll = None;
     }
 }
 
@@ -1049,6 +1073,8 @@ pub fn run() {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
                         let _ = window_clone.hide();
+                        // The mic test dialog lives in this window; never leave the mic open behind it.
+                        stop_mic_test();
                         let _ = window_clone.emit("main-window-hidden", ());
                     }
                 });
@@ -1202,5 +1228,29 @@ mod bootstrap_tests {
         assert_eq!(decision.app_state, AppState::NeedsSetup);
         assert!(decision.should_show_onboarding);
         assert_eq!(decision.reason, "model_invalid");
+    }
+}
+
+#[cfg(test)]
+mod mic_test_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn mic_test_without_polls_is_not_expired() {
+        assert!(!mic_test_poll_expired(None, Instant::now()));
+    }
+
+    #[test]
+    fn mic_test_expires_only_after_the_timeout() {
+        let polled = Instant::now();
+        assert!(!mic_test_poll_expired(
+            Some(polled),
+            polled + Duration::from_secs(9)
+        ));
+        assert!(mic_test_poll_expired(
+            Some(polled),
+            polled + MIC_TEST_POLL_TIMEOUT + Duration::from_millis(1)
+        ));
     }
 }

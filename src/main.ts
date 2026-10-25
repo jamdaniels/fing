@@ -1389,7 +1389,10 @@ function closeHotkeyModal(): void {
 }
 
 async function showMicTestModal(): Promise<void> {
-  await closeMicTestModal();
+  // Already open or opening (e.g. a double-click on "Test mic").
+  if (micTestModalCleanup) {
+    return;
+  }
 
   let micTestInterval: number | null = null;
   let currentMicTest: MicrophoneTest | null = null;
@@ -1535,27 +1538,6 @@ async function showMicTestModal(): Promise<void> {
   renderModalContent();
   document.body.appendChild(modal);
 
-  // Start mic test
-  try {
-    deviceMatchResult = await startMicTest(selectedDeviceId);
-    renderModalContent();
-  } catch (err) {
-    console.error("Failed to start mic test:", err);
-  }
-
-  // Poll for audio levels
-  micTestInterval = window.setInterval(async () => {
-    try {
-      currentMicTest = await getMicTestLevel();
-      if (currentMicTest.isReceivingAudio && currentMicTest.peakLevel > 0.1) {
-        audioDetected = true;
-      }
-      updateAudioLevel();
-    } catch (err) {
-      console.error("Mic test error:", err);
-    }
-  }, 150);
-
   const clickHandler = (e: MouseEvent) => {
     if ((e.target as HTMLElement).classList.contains("dialog-overlay")) {
       closeMicTestModal();
@@ -1571,7 +1553,9 @@ async function showMicTestModal(): Promise<void> {
   modal.addEventListener("click", clickHandler);
   document.addEventListener("keydown", keyHandler);
 
+  let closed = false;
   micTestModalCleanup = async () => {
+    closed = true;
     if (micTestInterval) {
       clearInterval(micTestInterval);
       micTestInterval = null;
@@ -1586,6 +1570,36 @@ async function showMicTestModal(): Promise<void> {
     modal.remove();
     micTestModalCleanup = null;
   };
+
+  // Start mic test
+  try {
+    const result = await startMicTest(selectedDeviceId);
+    if (closed) {
+      // The backend may have set running after the cleanup's stop arrived.
+      await stopMicTest();
+      return;
+    }
+    deviceMatchResult = result;
+    renderModalContent();
+  } catch (err) {
+    console.error("Failed to start mic test:", err);
+  }
+  if (closed) {
+    return;
+  }
+
+  // Poll for audio levels
+  micTestInterval = window.setInterval(async () => {
+    try {
+      currentMicTest = await getMicTestLevel();
+      if (currentMicTest.isReceivingAudio && currentMicTest.peakLevel > 0.1) {
+        audioDetected = true;
+      }
+      updateAudioLevel();
+    } catch (err) {
+      console.error("Mic test error:", err);
+    }
+  }, 150);
 }
 
 async function closeMicTestModal(): Promise<void> {
@@ -3376,6 +3390,9 @@ async function init(): Promise<void> {
   );
 
   listen("main-window-hidden", () => {
+    // Dialogs hold the hotkey (suppressed) and the mic (test) until closed.
+    closeHotkeyModal();
+    void closeMicTestModal();
     if (currentAppState !== "needs-setup") {
       document.documentElement.classList.add("window-route-preparing");
     }
