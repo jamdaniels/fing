@@ -1,13 +1,13 @@
 # Privacy Policy
 
-Effective date: October 2, 2026
+Effective date: October 25, 2026
 
 The canonical version of this policy is published at [https://getfing.com/privacy](https://getfing.com/privacy).
 
 Fing is private by default.
 
 - No account, app telemetry, or app analytics.
-- Speech is transcribed locally with Whisper. Your audio and transcripts never leave your device.
+- Speech is transcribed locally with Whisper or Parakeet. Your audio and transcripts never leave your device.
 - Your microphone is on only while you record (holding the hotkey, or hands-free after a double-tap) or run the mic test.
 - Transcript history stays on your device, is deleted after 30 days, and can be turned off.
 - The website uses basic, cookie-free analytics.
@@ -20,7 +20,7 @@ Fing is an open-source app developed and maintained by jamdaniels. The source co
 
 ### Audio
 
-For dictation, your microphone is on only while you record: while you hold the hotkey, or in hands-free mode from a double-tap until you tap the hotkey again or press Escape. Fing also uses it when you run the microphone test. Audio is transcribed locally with Whisper and is never uploaded: not to us, not to a cloud transcription service, and not to any third-party API. Raw audio is not saved.
+For dictation, your microphone is on only while you record: while you hold the hotkey, or in hands-free mode from a double-tap until you tap the hotkey again or press Escape. Fing also uses it when you run the microphone test. Audio is transcribed locally with Whisper or Parakeet and is never uploaded: not to us, not to a cloud transcription service, and not to any third-party API. Raw audio is not saved.
 
 ### Transcripts
 
