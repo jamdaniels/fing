@@ -1,7 +1,7 @@
 {
   "name": "fing",
   "private": true,
-  "version": "1.4.0-rc3",
+  "version": "1.4.0",
   "type": "module",
   "scripts": {
     "dev": "bun run scripts/tauri-dev.ts",
