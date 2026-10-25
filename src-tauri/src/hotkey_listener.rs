@@ -540,9 +540,10 @@ impl HotkeyState {
     }
 
     /// Escape is never tracked as a held key. Pressed while recording, it
-    /// cancels so the recording is discarded; if the hotkey is held, it ends
-    /// without a release and the remaining hotkey key-ups dispatch nothing.
-    /// Pressed while transcribing, it aborts the transcription.
+    /// cancels so the recording is discarded; pressed while transcribing
+    /// (even with the hotkey still held, e.g. after a hands-free stop tap),
+    /// it aborts the transcription. If the hotkey is held, it ends without a
+    /// release and the remaining hotkey key-ups dispatch nothing.
     fn on_escape(
         &mut self,
         event: KeyEvent,
@@ -555,14 +556,14 @@ impl HotkeyState {
             };
         }
 
-        let cancel = if self.hotkey_active {
-            Some(HotkeyEvent::Cancel)
-        } else {
-            match availability() {
-                Availability::Recording => Some(HotkeyEvent::Cancel),
-                Availability::Transcribing => Some(HotkeyEvent::CancelTranscription),
-                Availability::Ready | Availability::Unavailable => None,
+        let cancel = match availability() {
+            Availability::Recording => Some(HotkeyEvent::Cancel),
+            Availability::Transcribing => Some(HotkeyEvent::CancelTranscription),
+            // A held hotkey whose recording never started: end it without a release.
+            Availability::Ready | Availability::Unavailable if self.hotkey_active => {
+                Some(HotkeyEvent::Cancel)
             }
+            Availability::Ready | Availability::Unavailable => None,
         };
         if let Some(cancel) = cancel {
             self.hotkey_active = false;
@@ -971,6 +972,28 @@ mod tests {
         // Once the text is being pasted, Escape belongs to the focused app.
         let outcome = state.on_event(press(ESCAPE_TOKEN), &config, os_holding(&[]), unavailable);
         assert_eq!(outcome, EventOutcome::default());
+    }
+
+    #[test]
+    fn escape_with_stop_key_held_aborts_transcription() {
+        let config = config(&["F9"]);
+        let mut state = HotkeyState::default();
+        // The tap that stops a hands-free recording; the key is still held.
+        let outcome = state.on_event(press("F9"), &config, os_holding(&[]), recording);
+        assert_eq!(outcome.dispatch, Some(HotkeyEvent::Press));
+
+        let outcome = state.on_event(
+            press(ESCAPE_TOKEN),
+            &config,
+            os_holding(&["F9"]),
+            transcribing,
+        );
+        assert_eq!(outcome.dispatch, Some(HotkeyEvent::CancelTranscription));
+        assert!(outcome.swallow);
+
+        // Releasing the stop key afterwards dispatches nothing.
+        let outcome = state.on_event(release("F9"), &config, os_holding(&[]), ready);
+        assert_eq!(outcome.dispatch, None);
     }
 
     #[test]
