@@ -2,10 +2,15 @@
 
 All notable changes to Fing will be documented in this file.
 
-## 1.3.1 - 2026-10-22
+## 1.4.0 - 2026-10-25
 
-- Added hands-free mode (double-tap hotkey) and increased recording limit to 5 minutes
-- Bugfixes and security updates
+- Added Parakeet, a very fast model with auto-detection for 25 European languages
+- Even faster transcription: Recordings are continuously processed in the background while you speak
+- Added hands-free mode: Double-tap the hotkey to start recording and press it again to stop
+- Increased recording limit to 5 minutes
+- Updated speech engine to the latest whisper.cpp
+- Onboarding and settings polish
+- Bug fixes, security updates and performance improvements
 
 ## 1.3.0 - 2026-10-10
 
