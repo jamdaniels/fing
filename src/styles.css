@@ -2981,15 +2981,12 @@ body[data-platform="windows"] .titlebar {
     0 4px 12px -4px var(--accent-20);
 }
 
-/* Sits on the card's top edge like a tab. z-index -1 paints it under the
-   card (which sets no z-index, so it isn't a stacking context of its own),
-   letting the selection ring cover its base. It doesn't overlap the card
-   itself: the unselected card is translucent and would show it through. */
+/* Sits just above the card's top border like a tab. No z-index: it doesn't
+   overlap the card, so normal paint order is enough. */
 .variant-badge {
   position: absolute;
-  bottom: 100%;
+  bottom: calc(100% + 1px);
   left: 50%;
-  z-index: -1;
   padding: 3px 8px 4px;
   font-size: 9.5px;
   font-weight: 600;
