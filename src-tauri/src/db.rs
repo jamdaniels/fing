@@ -12,6 +12,8 @@ const MAX_FTS_QUERY_LENGTH: usize = 500;
 const DEFAULT_PAGE_LIMIT: i64 = 25;
 const MAX_PAGE_LIMIT: i64 = 200;
 const MAX_PAGE_OFFSET: i64 = 10_000;
+/// `PRAGMA user_version` value once the one-time privacy scrub has run.
+const PRIVACY_CLEANUP_VERSION: i64 = 1;
 
 const STOP_WORDS: &[&str] = &[
     "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by",
@@ -58,15 +60,8 @@ fn sanitize_fts5_query(query: &str) -> String {
         }
     }
 
-    // Remove FTS5 keywords (AND, OR, NOT, NEAR) at word boundaries
-    let result = result
-        .split_whitespace()
-        .filter(|word| {
-            let upper = word.to_uppercase();
-            !matches!(upper.as_str(), "AND" | "OR" | "NOT" | "NEAR")
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
+    // Inside the quoted phrase below, FTS5 keywords are plain text, so keep them.
+    let result = result.split_whitespace().collect::<Vec<_>>().join(" ");
 
     // Wrap in quotes for phrase search (safer)
     if result.trim().is_empty() {
@@ -160,6 +155,12 @@ fn initialize_connection(conn: &Connection) -> Result<(), String> {
         tracing::warn!("Could not enable foreign key enforcement: {}", e);
     }
 
+    // Deleted transcripts must not stay readable on disk: overwrite freed
+    // content with zeros. Returns the new value, so use a query API.
+    if let Err(e) = conn.query_row("PRAGMA secure_delete=ON", [], |row| row.get::<_, i64>(0)) {
+        tracing::warn!("Could not enable secure delete: {}", e);
+    }
+
     // journal_mode returns the selected mode, so use a query API rather than execute.
     match conn.query_row("PRAGMA journal_mode=WAL", [], |row| row.get::<_, String>(0)) {
         Ok(mode) => tracing::info!("SQLite journal mode: {}", mode),
@@ -190,6 +191,15 @@ fn initialize_connection(conn: &Connection) -> Result<(), String> {
         [],
     )
     .map_err(|e| format!("Failed to create FTS table: {e}"))?;
+
+    // Persistent and idempotent: FTS5 removes a deleted row's words from the
+    // index right away instead of leaving them in old segments.
+    if let Err(e) = conn.execute(
+        "INSERT INTO transcripts_fts(transcripts_fts, rank) VALUES('secure-delete', 1)",
+        [],
+    ) {
+        tracing::warn!("Could not enable FTS secure delete: {}", e);
+    }
 
     // Create triggers to keep FTS in sync
     conn.execute_batch(
@@ -249,6 +259,28 @@ fn initialize_connection(conn: &Connection) -> Result<(), String> {
         Err(e) => tracing::warn!("Failed to backfill term index: {e}"),
     }
 
+    // Earlier versions deleted without secure_delete; scrub leftovers once.
+    match conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)) {
+        Ok(version) if version < PRIVACY_CLEANUP_VERSION => {
+            let cleanup = conn
+                .execute(
+                    "INSERT INTO transcripts_fts(transcripts_fts) VALUES('optimize')",
+                    [],
+                )
+                .and_then(|_| conn.execute_batch("VACUUM"))
+                .and_then(|_| checkpoint_after_delete(conn))
+                .and_then(|_| {
+                    conn.execute_batch(&format!("PRAGMA user_version = {PRIVACY_CLEANUP_VERSION}"))
+                });
+            match cleanup {
+                Ok(()) => tracing::info!("Scrubbed deleted history from the database"),
+                Err(e) => tracing::warn!("Database privacy cleanup failed: {e}"),
+            }
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!("Could not read database version: {e}"),
+    }
+
     Ok(())
 }
 
@@ -274,6 +306,16 @@ pub fn init_db() -> Result<(), String> {
     Ok(())
 }
 
+/// Drop old page versions that still hold deleted text: checkpoint the WAL
+/// into the database (where secure_delete already zeroed it) and truncate it.
+fn checkpoint_after_delete(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let busy: i64 = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))?;
+    if busy != 0 {
+        tracing::warn!("WAL checkpoint after delete could not complete");
+    }
+    Ok(())
+}
+
 /// Delete transcripts older than 30 days.
 pub fn prune_old_transcripts() -> Result<u64, String> {
     with_db(|conn| {
@@ -281,6 +323,9 @@ pub fn prune_old_transcripts() -> Result<u64, String> {
             "DELETE FROM transcripts WHERE created_at < datetime('now', '-30 days')",
             [],
         )?;
+        if deleted > 0 {
+            checkpoint_after_delete(conn)?;
+        }
         Ok(deleted as u64)
     })
 }
@@ -426,6 +471,7 @@ pub fn search_transcripts(query: &str, limit: i64, offset: i64) -> Result<Vec<Tr
 pub fn delete_transcript(id: i64) -> Result<(), String> {
     with_db(|conn| {
         conn.execute("DELETE FROM transcripts WHERE id = ?1", [id])?;
+        checkpoint_after_delete(conn)?;
         Ok(())
     })
 }
@@ -434,6 +480,8 @@ pub fn delete_transcript(id: i64) -> Result<(), String> {
 pub fn delete_all_transcripts() -> Result<(), String> {
     with_db(|conn| {
         conn.execute("DELETE FROM transcripts", [])?;
+        conn.execute_batch("VACUUM")?;
+        checkpoint_after_delete(conn)?;
         Ok(())
     })
 }
@@ -555,7 +603,9 @@ pub fn db_delete_all() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
     use std::sync::Mutex;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     static DB_TEST_MUTEX: Mutex<()> = Mutex::new(());
 
@@ -581,6 +631,111 @@ mod tests {
         drop(db);
 
         reset
+    }
+
+    /// Removes a test database and its WAL/SHM files on drop.
+    struct TempDbFiles(PathBuf);
+
+    impl Drop for TempDbFiles {
+        fn drop(&mut self) {
+            for suffix in ["", "-wal", "-shm"] {
+                let _ = std::fs::remove_file(format!("{}{suffix}", self.0.display()));
+            }
+        }
+    }
+
+    fn unique_db_path(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+
+        std::env::temp_dir().join(format!("fing-{name}-{nanos}.db"))
+    }
+
+    /// File-backed variant of `setup_test_db`. Bind as `(_files, _reset)` so the
+    /// connection closes before the files are removed.
+    fn setup_file_test_db(name: &str) -> (TempDbFiles, DbReset) {
+        let path = unique_db_path(name);
+        let files = TempDbFiles(path.clone());
+        let reset = DbReset;
+        let conn = Connection::open(&path).expect("file database should open");
+        initialize_connection(&conn).expect("test database schema should initialize");
+
+        let mut db = DB.lock().expect("database mutex should lock");
+        *db = Some(conn);
+        drop(db);
+
+        (files, reset)
+    }
+
+    fn db_files_contain(path: &Path, needle: &str) -> bool {
+        let wal = PathBuf::from(format!("{}-wal", path.display()));
+        [path.to_path_buf(), wal].iter().any(|file| {
+            std::fs::read(file)
+                .map(|bytes| {
+                    bytes
+                        .windows(needle.len())
+                        .any(|window| window == needle.as_bytes())
+                })
+                .unwrap_or(false)
+        })
+    }
+
+    const PRIVACY_MARKER: &str = "qzxprivacymarker";
+
+    #[test]
+    fn delete_all_erases_transcript_text_from_disk() {
+        let _guard = DB_TEST_MUTEX
+            .lock()
+            .expect("database test mutex should lock");
+        let (files, _reset) = setup_file_test_db("delete-all");
+
+        save_transcript(&new_transcript("qzxprivacymarker secret note"))
+            .expect("transcript should save");
+        assert!(db_files_contain(&files.0, PRIVACY_MARKER));
+
+        delete_all_transcripts().expect("delete all should succeed");
+
+        assert!(!db_files_contain(&files.0, PRIVACY_MARKER));
+    }
+
+    #[test]
+    fn delete_one_erases_transcript_text_from_disk() {
+        let _guard = DB_TEST_MUTEX
+            .lock()
+            .expect("database test mutex should lock");
+        let (files, _reset) = setup_file_test_db("delete-one");
+
+        let retained = save_transcript(&new_transcript("currentzephyr retained"))
+            .expect("retained transcript should save");
+        let saved = save_transcript(&new_transcript("qzxprivacymarker secret note"))
+            .expect("transcript should save");
+        assert!(db_files_contain(&files.0, PRIVACY_MARKER));
+
+        delete_transcript(saved.id).expect("delete should succeed");
+
+        assert!(!db_files_contain(&files.0, PRIVACY_MARKER));
+        let remaining = get_recent_transcripts(25, 0).expect("transcripts should load");
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, retained.id);
+    }
+
+    #[test]
+    fn prune_erases_expired_transcript_text_from_disk() {
+        let _guard = DB_TEST_MUTEX
+            .lock()
+            .expect("database test mutex should lock");
+        let (files, _reset) = setup_file_test_db("prune");
+
+        let saved = save_transcript(&new_transcript("qzxprivacymarker secret note"))
+            .expect("transcript should save");
+        assert!(db_files_contain(&files.0, PRIVACY_MARKER));
+        backdate_transcript(saved.id);
+
+        assert_eq!(prune_old_transcripts(), Ok(1));
+
+        assert!(!db_files_contain(&files.0, PRIVACY_MARKER));
     }
 
     fn new_transcript(text: &str) -> NewTranscript {
@@ -661,6 +816,41 @@ mod tests {
         })
         .expect("term count should load");
         assert_eq!(expired_term_count, 0);
+    }
+
+    #[test]
+    fn initialize_marks_privacy_cleanup_done() {
+        let _guard = DB_TEST_MUTEX
+            .lock()
+            .expect("database test mutex should lock");
+        let _reset = setup_test_db();
+
+        let version =
+            with_db(|conn| conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)));
+        assert_eq!(version, Ok(1));
+    }
+
+    #[test]
+    fn sanitize_keeps_keywords_inside_the_phrase() {
+        assert_eq!(sanitize_fts5_query("not working"), "\"not working\"");
+        assert_eq!(sanitize_fts5_query("this OR that"), "\"this OR that\"");
+    }
+
+    #[test]
+    fn search_matches_phrases_with_keywords() {
+        let _guard = DB_TEST_MUTEX
+            .lock()
+            .expect("database test mutex should lock");
+        let _reset = setup_test_db();
+
+        let wanted = save_transcript(&new_transcript("it is not working again"))
+            .expect("transcript should save");
+        save_transcript(&new_transcript("working fine today")).expect("transcript should save");
+
+        let found = search_transcripts("not working", 25, 0).expect("search should run");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, wanted.id);
+        assert_eq!(found[0].text, "it is not working again");
     }
 
     #[test]
