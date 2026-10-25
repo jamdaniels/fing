@@ -119,7 +119,6 @@ fn replace_exact_occurrences(text: &str, canonical: &str) -> String {
         return text.to_string();
     }
 
-    let bytes = haystack.as_bytes();
     // `copied` tracks how much of `text` is already in `out`; `search` tracks
     // where to look for the next occurrence. They must stay separate: skipping
     // a mid-word occurrence may not drop the text we skipped over.
@@ -135,7 +134,7 @@ fn replace_exact_occurrences(text: &str, canonical: &str) -> String {
         let start = search + found;
         let end = start + needle.len();
 
-        if !has_word_boundaries(bytes, start, end) {
+        if !has_word_boundaries(&haystack, start, end) {
             // Advance a full character so the index stays on a char boundary.
             search = start + text[start..].chars().next().map_or(1, char::len_utf8);
             continue;
@@ -247,25 +246,28 @@ fn apply_fuzzy_single_word_replacements(text: &str, terms: &[String]) -> String 
 
 fn collect_word_spans(text: &str) -> Vec<WordSpan> {
     let mut spans = Vec::new();
-    let bytes = text.as_bytes();
-    let mut cursor = 0usize;
+    let mut start: Option<usize> = None;
 
-    while cursor < bytes.len() {
-        if !is_word_byte(bytes[cursor]) {
-            cursor += 1;
-            continue;
+    for (index, ch) in text.char_indices() {
+        match (is_word_char(ch), start) {
+            (true, None) => start = Some(index),
+            (false, Some(span_start)) => {
+                spans.push(WordSpan {
+                    start: span_start,
+                    end: index,
+                    word: text[span_start..index].to_string(),
+                });
+                start = None;
+            }
+            _ => {}
         }
+    }
 
-        let start = cursor;
-        cursor += 1;
-        while cursor < bytes.len() && is_word_byte(bytes[cursor]) {
-            cursor += 1;
-        }
-
+    if let Some(span_start) = start {
         spans.push(WordSpan {
-            start,
-            end: cursor,
-            word: text[start..cursor].to_string(),
+            start: span_start,
+            end: text.len(),
+            word: text[span_start..].to_string(),
         });
     }
 
@@ -341,22 +343,39 @@ fn title_case_token(token: &str) -> String {
     out
 }
 
-fn has_word_boundaries(bytes: &[u8], start: usize, end: usize) -> bool {
-    let before_ok = if start == 0 {
-        true
-    } else {
-        !is_word_byte(bytes[start - 1])
-    };
-    let after_ok = if end >= bytes.len() {
-        true
-    } else {
-        !is_word_byte(bytes[end])
-    };
+fn has_word_boundaries(text: &str, start: usize, end: usize) -> bool {
+    let before_ok = text[..start]
+        .chars()
+        .next_back()
+        .is_none_or(|ch| !is_word_char(ch));
+    let after_ok = text[end..]
+        .chars()
+        .next()
+        .is_none_or(|ch| !is_word_char(ch));
     before_ok && after_ok
 }
 
-fn is_word_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'\''
+/// Letters and digits are part of a word, as is `'` ("don't"). Scripts written
+/// without spaces (CJK, kana, Thai, Lao, Khmer, Myanmar) separate words like
+/// punctuation does, so a Latin term inside Chinese text still matches.
+fn is_word_char(ch: char) -> bool {
+    ch == '\'' || (ch.is_alphanumeric() && !is_unspaced_script(ch))
+}
+
+fn is_unspaced_script(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x0E00..=0x0EFF // Thai, Lao
+            | 0x1000..=0x109F // Myanmar
+            | 0x1780..=0x17FF // Khmer
+            | 0x3040..=0x30FF // Hiragana, Katakana
+            | 0x31F0..=0x31FF // Katakana phonetic extensions
+            | 0x3400..=0x4DBF // CJK extension A
+            | 0x4E00..=0x9FFF // CJK unified ideographs
+            | 0xF900..=0xFAFF // CJK compatibility ideographs
+            | 0xFF66..=0xFF9F // Halfwidth katakana
+            | 0x20000..=0x3FFFF // CJK extensions B and later
+    )
 }
 
 fn word_count(value: &str) -> usize {
@@ -545,5 +564,45 @@ mod tests {
         let corrected =
             apply_dictionary_corrections("cart", &["cast".to_string(), "card".to_string()]);
         assert_eq!(corrected, "cart");
+    }
+
+    #[test]
+    fn accented_words_are_not_split_by_fuzzy_matching() {
+        assert_eq!(
+            apply_dictionary_corrections("über das Wetter", &["Ben".to_string()]),
+            "über das Wetter"
+        );
+        assert_eq!(
+            apply_dictionary_corrections("un café crème", &["Cafe".to_string()]),
+            "un café crème"
+        );
+    }
+
+    #[test]
+    fn accented_words_are_not_split_by_exact_matching() {
+        assert_eq!(
+            apply_dictionary_corrections("über", &["Ber".to_string()]),
+            "über"
+        );
+        assert_eq!(
+            apply_dictionary_corrections("Frau Müller kommt", &["Ller".to_string()]),
+            "Frau Müller kommt"
+        );
+    }
+
+    #[test]
+    fn latin_term_inside_unspaced_script_still_matches() {
+        assert_eq!(
+            apply_dictionary_corrections("用iphone拍照", &["iPhone".to_string()]),
+            "用iPhone拍照"
+        );
+    }
+
+    #[test]
+    fn accented_term_still_matches_as_a_whole_word() {
+        assert_eq!(
+            apply_dictionary_corrections("ich heiße müller", &["Müller".to_string()]),
+            "ich heiße Müller"
+        );
     }
 }
