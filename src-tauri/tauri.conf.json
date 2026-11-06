@@ -69,6 +69,11 @@
       "locales/macos/en.lproj/InfoPlist.strings": "en.lproj/InfoPlist.strings",
       "locales/macos/de.lproj/InfoPlist.strings": "de.lproj/InfoPlist.strings"
     },
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/hooks.nsh"
+      }
+    },
     "macOS": {
       "entitlements": "entitlements.plist",
       "hardenedRuntime": true,
