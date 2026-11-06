@@ -2,6 +2,11 @@
 
 All notable changes to Fing will be documented in this file.
 
+## 1.4.1 - 2026-11-06
+
+- Windows: Improved winget compatibility
+- Security updates
+
 ## 1.4.0 - 2026-10-25
 
 - Added Parakeet, a very fast model with auto-detection for 25 European languages
