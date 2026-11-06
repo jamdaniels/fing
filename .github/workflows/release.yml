@@ -313,6 +313,10 @@ jobs:
   publish:
     needs: release
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release_tag.outputs.tag }}
+      version: ${{ steps.release_tag.outputs.version }}
+      prerelease: ${{ steps.release_tag.outputs.prerelease }}
 
     steps:
       - name: Resolve release tag
@@ -434,3 +438,43 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ steps.release_tag.outputs.tag }}
         run: gh release edit "$TAG" --draft=false
+
+  # Opens a winget-pkgs PR that bumps jamdaniels.Fing to this release. Stable
+  # releases only. `wingetcreate update` needs an existing package, so this
+  # stays off until the first manifest is merged upstream and the repository
+  # variable WINGET_ENABLED is set to "true". WINGET_TOKEN is a classic PAT
+  # with public_repo for the account that owns the winget-pkgs fork.
+  winget:
+    needs: publish
+    if: needs.publish.outputs.prerelease == 'false' && vars.WINGET_ENABLED == 'true'
+    runs-on: windows-2022
+
+    steps:
+      - name: Submit winget update
+        shell: pwsh
+        env:
+          WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.publish.outputs.tag }}
+          VERSION: ${{ needs.publish.outputs.version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          $wingetcreate = "$env:RUNNER_TEMP\wingetcreate.exe"
+          Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe" -OutFile $wingetcreate
+          $hash = (Get-FileHash $wingetcreate -Algorithm SHA256).Hash
+          if ($hash -ne "24042BD37915805615E6CF969AC57C6439124C3FE85823327F5F3FB24BD9FFEA") {
+            throw "Unexpected wingetcreate.exe hash: $hash"
+          }
+
+          # The versioned asset, not the Fing-Windows-setup.exe alias.
+          $url = "https://github.com/$env:REPO/releases/download/$env:TAG/Fing_$($env:VERSION)_x64-setup.exe"
+          & $wingetcreate update jamdaniels.Fing `
+            --version $env:VERSION `
+            --urls $url `
+            --release-notes-url "https://github.com/$env:REPO/releases/tag/$env:TAG" `
+            --release-date (Get-Date -AsUTC -Format "yyyy-MM-dd") `
+            --prtitle "New version: jamdaniels.Fing version $env:VERSION" `
+            --no-open `
+            --submit
